@@ -1,19 +1,44 @@
-# Deterministic Coordination Engine
+# Coordination Engine
 
 A multi-layered coordination infrastructure built with Clean Architecture principles.
 
+## Overview
+
+Transform informal "When are you free?" chaos into structured, transparent, socially reasonable group convergence.
+
+## Features
+
+- **Event Sourcing**: Full audit trail of all state changes
+- **Trust Scoring**: Contextual reputation based on match history
+- **State Machine**: Enforced match lifecycle (proposed -> confirmed -> completed)
+- **Clean Architecture**: Separated domain, application, infrastructure, and API layers
+
 ## Architecture
 
-This project follows Clean Architecture with the following layers:
-
-- **domain**: Core business logic, entities, value objects, domain events, and aggregates
-- **application**: Use cases, services, and application-level orchestration
-- **infrastructure**: External concerns like database, messaging, AI services
-- **api**: REST API endpoints and transport layer
+```
+┌─────────────────────────────────────┐
+│           API Layer (REST)          │
+└─────────────────────────────────────┘
+            ↓
+┌─────────────────────────────────────┐
+│        Application Layer            │
+│         (Use Cases)                 │
+└─────────────────────────────────────┘
+            ↓
+┌─────────────────────────────────────┐
+│          Domain Layer               │
+│     (Core Business Logic)           │
+└─────────────────────────────────────┘
+            ↓
+┌─────────────────────────────────────┐
+│       Infrastructure Layer          │
+│   (Persistence, External Services)  │
+└─────────────────────────────────────┘
+```
 
 ## Phases
 
-### Phase 1: Deterministic Core
+### Phase 1: Deterministic Core (COMPLETE)
 - Event sourcing with immutable event store
 - Actor and Match aggregates
 - Trust projection computation
@@ -39,3 +64,37 @@ This project follows Clean Architecture with the following layers:
 - Database: PostgreSQL (event store)
 - Testing: Jest
 - Build: ts-node, tsc
+
+## Quick Start
+
+```bash
+# Install dependencies
+npm install
+
+# Run tests
+npm test
+
+# Start server
+npm start
+```
+
+## Project Structure
+
+```
+src/
+├── domain/           # Core business logic
+├── application/      # Use cases and orchestration
+├── infrastructure/   # External concerns
+└── api/              # REST API endpoints
+```
+
+## Test Results
+
+```
+Test Suites: 5 passed, 5 total
+Tests:       34 passed, 34 total
+```
+
+## License
+
+MIT

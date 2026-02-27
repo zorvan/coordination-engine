@@ -1,5 +1,6 @@
 const { MatchCreated } = require('../../domain/events/domain-event');
 const { MatchAggregate } = require('../../domain/aggregates/match-aggregate');
+const { generateAggregateId } = require('../../domain/events/event-utils');
 
 const CreateMatchUseCase = {
   create(matchRepository, eventStore) {

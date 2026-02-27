@@ -6,15 +6,16 @@
  * Pattern: Use Case - coordinates domain entities for specific business goals
  */
 
+const crypto = require('crypto');
+
 const TemporalIdentityUseCase = {
   /**
    * Create temporal identity use case
    * 
-   * @param {Object} temporalIdentityRepository - Repository for identity storage
    * @param {Object} eventStore - Event store for audit trail
    * @returns {Object} Use case with methods
    */
-  create(temporalIdentityRepository, eventStore) {
+  create(eventStore) {
     return {
       /**
        * Create a new temporal identity for an actor
@@ -24,24 +25,15 @@ const TemporalIdentityUseCase = {
        * @returns {Promise<string>} Identity ID
        */
       async createIdentity(identityId, state = 'active') {
-        const identity = {
-          identityId,
-          versions: [],
-          currentVersionIndex: -1,
-          state,
-          createdAt: new Date(),
-          updatedAt: null,
-        };
-
+        const now = new Date();
         await eventStore.append({
           id: crypto.randomUUID(),
           aggregateId: identityId,
           type: 'TemporalIdentityCreated',
-          timestamp: identity.createdAt,
+          timestamp: now,
           payload: {
             identityId,
             state,
-            versions: identity.versions,
           },
         });
 
@@ -58,13 +50,6 @@ const TemporalIdentityUseCase = {
        * @returns {Promise<void>}
        */
       async addVersion(identityId, version, validFrom, validTo) {
-        const events = await eventStore.getEventsByAggregate(identityId);
-        const createdEvent = events.find((e) => e.type === 'TemporalIdentityCreated');
-        
-        if (!createdEvent) {
-          throw new Error(`Identity ${identityId} not found`);
-        }
-
         await eventStore.append({
           id: crypto.randomUUID(),
           aggregateId: identityId,
@@ -87,13 +72,6 @@ const TemporalIdentityUseCase = {
        * @returns {Promise<void>}
        */
       async suspendIdentity(identityId, suspendedAt) {
-        const events = await eventStore.getEventsByAggregate(identityId);
-        const createdEvent = events.find((e) => e.type === 'TemporalIdentityCreated');
-        
-        if (!createdEvent) {
-          throw new Error(`Identity ${identityId} not found`);
-        }
-
         await eventStore.append({
           id: crypto.randomUUID(),
           aggregateId: identityId,
@@ -114,13 +92,6 @@ const TemporalIdentityUseCase = {
        * @returns {Promise<void>}
        */
       async expireIdentity(identityId, expiredAt) {
-        const events = await eventStore.getEventsByAggregate(identityId);
-        const createdEvent = events.find((e) => e.type === 'TemporalIdentityCreated');
-        
-        if (!createdEvent) {
-          throw new Error(`Identity ${identityId} not found`);
-        }
-
         await eventStore.append({
           id: crypto.randomUUID(),
           aggregateId: identityId,

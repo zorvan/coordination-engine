@@ -13,6 +13,8 @@ const { CancelMatchUseCase } = require('./match/cancel-match');
 const { UpdateTrustUseCase } = require('./trust/update-trust');
 const { RelationalGraphUseCase } = require('./relational-graph');
 const { AgentNegotiationUseCase } = require('./agent-negotiation');
+const { TemporalIdentityUseCase } = require('./temporal-identity');
+const { GovernanceUseCase } = require('./governance');
 
 module.exports = {
   CreateMatchUseCase,
@@ -22,4 +24,6 @@ module.exports = {
   UpdateTrustUseCase,
   RelationalGraphUseCase,
   AgentNegotiationUseCase,
+  TemporalIdentityUseCase,
+  GovernanceUseCase,
 };

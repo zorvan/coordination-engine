@@ -1,9 +1,14 @@
-const PostgresTrustProjection = require('./trust-projection');
-const PostgresRelationalGraph = require('./relational-graph');
-const PostgresFairnessLedger = require('./fairness-ledger');
+/**
+ * Projections exports
+ * 
+ * This module provides read model projections built from event streams
+ * 
+ * Pattern: Read Model - derived state optimized for querying
+ * Pattern: Projection - transform event stream into useful aggregates
+ */
+
+const { computeTrustProjection } = require('./trust-projection');
 
 module.exports = {
-  PostgresTrustProjection,
-  PostgresRelationalGraph,
-  PostgresFairnessLedger
+  computeTrustProjection,
 };

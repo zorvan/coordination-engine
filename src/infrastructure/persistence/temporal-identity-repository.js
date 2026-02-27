@@ -6,6 +6,7 @@ const crypto = require('crypto');
  * Uses event store as backing storage and builds read model from events
  * 
  * Pattern: Read Model / Projection - derived state from event stream
+ * Pattern: Event Sourcing - state is derived from event history
  * 
  * @param {Object} eventStore - The event store instance
  * @returns {Object} Temporal identity repository implementation

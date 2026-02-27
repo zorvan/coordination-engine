@@ -1,3 +1,5 @@
+const crypto = require('crypto');
+
 /**
  * In-memory match repository implementation
  * 

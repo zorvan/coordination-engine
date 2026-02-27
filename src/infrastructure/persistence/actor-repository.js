@@ -1,16 +1,15 @@
 const crypto = require('crypto');
 
 /**
- * In-memory repositories implementation for development
+ * In-memory actor repository for development
  * 
- * These repositories use the event store as their backing store
- * and replay events to build current state
+ * Uses event store as backing storage and builds read model from events
  * 
  * Pattern: Read Model / Projection - derived state from event stream
  * Pattern: Repository - encapsulates data access logic
  * 
- * This is a simple implementation for development/testing
- * Production should use PostgreSQL with proper projections
+ * @param {Object} eventStore - The event store instance
+ * @returns {Object} Actor repository implementation
  */
 
 function createInMemoryActorRepository(eventStore) {

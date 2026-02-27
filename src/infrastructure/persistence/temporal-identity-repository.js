@@ -1,33 +1,54 @@
-const crypto = require('crypto');
-
 /**
- * In-memory temporal identity repository for development
+ * In-memory temporal identity repository for Phase 4
  * 
  * Uses event store as backing storage and builds read model from events
  * 
  * Pattern: Read Model / Projection - derived state from event stream
- * Pattern: Event Sourcing - state is derived from event history
+ * Pattern: Event Sourcing - identity versions as events
  * 
  * @param {Object} eventStore - The event store instance
  * @returns {Object} Temporal identity repository implementation
  */
 
-function createInMemoryTemporalIdentityRepository(eventStore) {
+function createTemporalIdentityRepository(eventStore) {
   return {
     /**
-     * Save a temporal identity by persisting version events
+     * Save a temporal identity
      * 
-     * @param {Object} identity - Temporal identity aggregate
+     * @param {Object} identity - Identity aggregate
      * @returns {Promise<void>}
      */
     async save(identity) {
-      await eventStore.append({
-        id: crypto.randomUUID(),
-        aggregateId: identity.identityId,
-        type: 'TemporalIdentityVersioned',
-        timestamp: new Date(),
-        payload: identity,
-      });
+      const events = await eventStore.getEventsByAggregate(identity.identityId);
+      const createdEvent = events.find((e) => e.type === 'TemporalIdentityCreated');
+      
+      if (!createdEvent) {
+        await eventStore.append({
+          id: crypto.randomUUID(),
+          aggregateId: identity.identityId,
+          type: 'TemporalIdentityCreated',
+          timestamp: identity.createdAt,
+          payload: {
+            identityId: identity.identityId,
+            state: identity.state,
+            versions: identity.versions,
+          },
+        });
+      }
+
+      for (const version of identity.versions) {
+        await eventStore.append({
+          id: crypto.randomUUID(),
+          aggregateId: identity.identityId,
+          type: 'TemporalIdentityVersioned',
+          timestamp: version.createdAt,
+          payload: {
+            identityId: identity.identityId,
+            version,
+            state: identity.state,
+          },
+        });
+      }
     },
 
     /**
@@ -38,16 +59,51 @@ function createInMemoryTemporalIdentityRepository(eventStore) {
      */
     async findById(identityId) {
       const events = await eventStore.getEventsByAggregate(identityId);
-      const identityEvents = events.filter((e) => e.type === 'TemporalIdentityVersioned');
+      const identityEvents = events.filter((e) => e.type === 'TemporalIdentityCreated');
       
       if (identityEvents.length === 0) {
         return null;
       }
 
-      // Return the latest version
-      return identityEvents[identityEvents.length - 1].payload;
+      const identity = {
+        identityId,
+        versions: [],
+        currentVersionIndex: -1,
+        state: identityEvents[0].payload.state || 'active',
+        createdAt: new Date(identityEvents[0].timestamp),
+        updatedAt: null,
+      };
+
+      for (const event of events) {
+        if (event.type === 'TemporalIdentityVersioned') {
+          identity.versions.push(event.payload.version);
+          identity.currentVersionIndex = identity.versions.length - 1;
+          identity.updatedAt = new Date(event.timestamp);
+        }
+      }
+
+      return identity;
+    },
+
+    /**
+     * Find temporal identity by actor ID
+     * 
+     * @param {string} actorId - Actor identifier
+     * @returns {Promise<Object|null>} Temporal identity object or null
+     */
+    async findByActorId(actorId) {
+      const events = await eventStore.getAllEvents();
+      const identityEvent = events.find(
+        (e) => e.type === 'TemporalIdentityCreated' && e.payload.identityId === actorId
+      );
+      
+      if (!identityEvent) {
+        return null;
+      }
+
+      return this.findById(identityEvent.payload.identityId);
     },
   };
 }
 
-module.exports = { createInMemoryTemporalIdentityRepository };
+module.exports = { createTemporalIdentityRepository };

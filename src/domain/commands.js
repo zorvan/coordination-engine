@@ -1,16 +1,38 @@
-const MatchState = {
-  proposed: 'proposed',
-  confirmed: 'confirmed',
-  completed: 'completed',
-  cancelled: 'cancelled'
+/**
+ * Domain commands represent intention-to-action
+ * They are the "what" without the "how"
+ * 
+ * Commands should:
+ * - Be named as imperative verbs
+ * - Contain all data needed for execution
+ * - Be serializable for event sourcing
+ * - Not contain business logic
+ */
+
+const MatchCommands = {
+  Create: 'CreateMatch',
+  Confirm: 'ConfirmMatch',
+  Complete: 'CompleteMatch',
+  Cancel: 'CancelMatch',
 };
 
-const MatchCommands = {};
+const TrustCommands = {
+  Update: 'UpdateTrust',
+};
 
-const TrustCommands = {};
+const GovernanceCommands = {
+  CreateRule: 'CreateGovernanceRule',
+  UpdateRule: 'UpdateGovernanceRule',
+};
 
-const GovernanceCommands = {};
+const ActorCommands = {
+  Create: 'CreateActor',
+  Update: 'UpdateActor',
+};
 
-const ActorCommands = {};
-
-module.exports = { MatchState, MatchCommands, TrustCommands, GovernanceCommands, ActorCommands };
+module.exports = {
+  MatchCommands,
+  TrustCommands,
+  GovernanceCommands,
+  ActorCommands,
+};

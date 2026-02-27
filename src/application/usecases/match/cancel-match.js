@@ -1,31 +1,48 @@
+const { MatchCancelled } = require('../../domain/events/domain-event');
+
 const CancelMatchUseCase = {
-  create: function(matchRepository, eventStore) {
+  create(matchRepository, eventStore) {
     return {
-      async execute(matchId, actorId, reason) {
-        reason = reason || undefined;
-        const events = await eventStore.getEventsByAggregate(matchId);
-        const confirmedEvent = events.find(function(e) { return e.type === 'MatchConfirmed'; });
+      /**
+       * Cancel a match (proposed or confirmed state)
+       * 
+       * Business logic:
+       * - Only organizer or participants can cancel
+       * - Once cancelled, match cannot be recovered
+       * 
+       * @param {string} matchId - The match to cancel
+       * @param {string} cancelledBy - The actor cancelling the match
+       * @param {string} reason - Cancellation reason
+       * @throws {Error} If match not found or actor not authorized
+       */
+      async execute(matchId, cancelledBy, reason) {
+        const match = await matchRepository.findById(matchId);
         
-        if (!confirmedEvent) {
-          throw new Error('Match ' + matchId + ' is not confirmed');
+        if (!match) {
+          throw new Error(`Match ${matchId} not found`);
         }
 
-        const event = {
-          id: generateEventId(),
-          aggregateId: matchId,
-          type: 'MatchCancelled',
-          timestamp: new Date(),
-          payload: {
-            cancelledBy: actorId,
-            cancelledAt: new Date(),
-            reason: reason
-          }
-        };
+        const participantIds = match.participantIds || [];
+        const organizerId = match.organizerId;
+        
+        if (organizerId !== cancelledBy && !participantIds.includes(cancelledBy)) {
+          throw new Error('Actor not authorized to cancel this match');
+        }
+
+        match.cancel(reason);
+
+        const event = new MatchCancelled(
+          matchId,
+          cancelledBy,
+          reason,
+          match.updatedAt
+        );
 
         await eventStore.append(event);
+        await matchRepository.save(match);
       }
     };
-  }
+  },
 };
 
 module.exports = { CancelMatchUseCase };

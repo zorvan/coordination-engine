@@ -1,39 +1,47 @@
-const generateEventId = require('../../domain/events/event-utils').generateEventId;
-const { getTrustFormulaVersion } = require('../../domain/services/trust-computation');
-const { MatchConfirmedEvent } = require('../../domain/events/match-events');
+const { MatchAggregate } = require('../../domain/aggregates/match-aggregate');
+const { DomainEventType } = require('../../domain/events/event-utils');
+const { MatchCreated, MatchConfirmed } = require('../../domain/events/domain-event');
 
 const ConfirmMatchUseCase = {
-  create: function(matchRepository, eventStore) {
+  create(matchRepository, eventStore) {
     return {
+      /**
+       * Confirm a match that is in proposed state
+       * 
+       * Business rule: Only organizer or participants can confirm a match
+       * This transitions the match from 'proposed' -> 'confirmed' state
+       * 
+       * @param {string} matchId - The match to confirm
+       * @param {string} actorId - The actor confirming the match
+       * @throws {Error} If match not found or actor not authorized
+       */
       async execute(matchId, actorId) {
-        const events = await eventStore.getEventsByAggregate(matchId);
-        const matchEvent = events.find(function(e) { return e.type === 'MatchCreated'; });
+        const match = await matchRepository.findById(matchId);
         
-        if (!matchEvent) {
-          throw new Error('Match ' + matchId + ' not found');
+        if (!match) {
+          throw new Error(`Match ${matchId} not found`);
         }
 
-        const participantIds = matchEvent.payload.participants || [];
-        const organizerId = matchEvent.payload.organizerId;
+        const participantIds = match.participantIds || [];
+        const organizerId = match.organizerId;
         
         if (organizerId !== actorId && !participantIds.includes(actorId)) {
           throw new Error('Actor not authorized to confirm this match');
         }
 
-        const event = MatchConfirmedEvent(
-          generateEventId(),
+        match.confirm();
+
+        const event = new MatchConfirmed(
           matchId,
-          new Date(),
-          {
-            confirmedBy: actorId,
-            confirmedAt: new Date()
-          }
+          actorId,
+          match.updatedAt
         );
 
         await eventStore.append(event);
+        await matchRepository.save(match);
       }
     };
-  }
+  },
 };
 
 module.exports = { ConfirmMatchUseCase };

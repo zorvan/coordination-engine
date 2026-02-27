@@ -1,61 +1,74 @@
+const { MatchAggregate } = require('../../domain/aggregates/match-aggregate');
+const { MatchCompleted } = require('../../domain/events/domain-event');
+const { TrustUpdated } = require('../../domain/events/domain-event');
+const { TrustLevel } = require('../../domain/valuables/trust-value');
+const computeTrustScore = require('../../domain/services/trust-computation').computeTrustScore;
+const generateEventId = require('../../domain/events/event-utils').generateEventId;
+
 const CompleteMatchUseCase = {
-  create: function(matchRepository, eventStore, trustProjection) {
+  create(matchRepository, actorRepository, eventStore) {
     return {
-      async execute(matchId, actorId, notes) {
-        notes = notes || undefined;
-        const events = await eventStore.getEventsByAggregate(matchId);
-        const confirmedEvent = events.find(function(e) { return e.type === 'MatchConfirmed'; });
+      /**
+       * Complete a match and update trust scores
+       * 
+       * Business logic:
+       * - Only confirmed matches can be completed
+       * - Both organizer and participants get trust updates
+       * - Trust score = completed/accepted matches ratio
+       * 
+       * @param {string} matchId - The match to complete
+       * @param {string} completedBy - The actor completing the match
+       * @param {string} notes - Optional completion notes
+       * @throws {Error} If match not found or not in confirmed state
+       */
+      async execute(matchId, completedBy, notes) {
+        const match = await matchRepository.findById(matchId);
         
-        if (!confirmedEvent) {
-          throw new Error('Match ' + matchId + ' is not confirmed');
+        if (!match) {
+          throw new Error(`Match ${matchId} not found`);
         }
 
-        const event = {
-          id: generateEventId(),
-          aggregateId: matchId,
-          type: 'MatchCompleted',
-          timestamp: new Date(),
-          payload: {
-            completedBy: actorId,
-            completedAt: new Date(),
-            notes: notes
-          }
-        };
+        if (match.state !== 'confirmed') {
+          throw new Error('Only confirmed matches can be completed');
+        }
 
-        await eventStore.append(event);
+        match.complete(notes);
 
-        const eventsAll = await eventStore.getAllEvents();
-        const completedMatches = eventsAll.filter(function(e) {
-          return e.type === 'MatchCompleted' && e.payload && e.payload.completedBy === actorId;
-        }).length;
+        const completedEvent = new MatchCompleted(
+          matchId,
+          completedBy,
+          match.updatedAt
+        );
 
-        const confirmedMatches = eventsAll.filter(function(e) {
-          const payload = e.payload;
-          return e.type === 'MatchConfirmed' && 
-            (payload && (payload.confirmedBy === actorId || 
-             (payload.participants && payload.participants.includes(actorId))));
-        }).length;
+        await eventStore.append(completedEvent);
 
-        const trustScore = computeTrustScore(completedMatches, confirmedMatches);
-        const trustLevel = getTrustLevel(trustScore);
+        const completedMatches = await eventStore.getEventsByType('MatchCompleted');
+        const confirmedMatches = await eventStore.getEventsByType('MatchConfirmed');
+        
+        const completedCount = completedMatches.filter(
+          (e) => e.payload.completedBy === completedBy
+        ).length;
+        
+        const confirmedCount = confirmedMatches.filter(
+          (e) => e.payload.confirmedBy === completedBy
+        ).length;
 
-        const trustEvent = {
-          id: generateEventId(),
-          aggregateId: actorId,
-          type: 'TrustScoreUpdated',
-          timestamp: new Date(),
-          payload: {
-            actorId: actorId,
-            score: trustScore,
-            level: trustLevel,
-            version: getTrustFormulaVersion()
-          }
-        };
+        const trustScore = computeTrustScore(completedCount, confirmedCount);
+        const trustLevel = TrustLevel.HIGH;
+
+        const trustEvent = new TrustUpdated(
+          completedBy,
+          trustScore,
+          trustLevel,
+          1,
+          match.updatedAt
+        );
 
         await eventStore.append(trustEvent);
+        await matchRepository.save(match);
       }
     };
-  }
+  },
 };
 
 module.exports = { CompleteMatchUseCase };

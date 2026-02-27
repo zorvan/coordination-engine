@@ -15,6 +15,8 @@ const { createInMemoryMatchRepository } = require('./persistence/match-repositor
 const { createInMemoryActorRepository } = require('./persistence/actor-repository');
 const { createInMemoryTemporalIdentityRepository } = require('./persistence/temporal-identity-repository');
 const { createInMemoryGovernanceRepository } = require('./persistence/governance-repository');
+const { createRelationalGraphRepository } = require('./persistence/relational-graph-repository');
+const { createFairnessLedger } = require('./persistence/fairness-ledger');
 const { computeTrustProjection } = require('./projections/trust-projection');
 
 module.exports = {
@@ -23,5 +25,7 @@ module.exports = {
   createInMemoryActorRepository,
   createInMemoryTemporalIdentityRepository,
   createInMemoryGovernanceRepository,
+  createRelationalGraphRepository,
+  createFairnessLedger,
   computeTrustProjection,
 };

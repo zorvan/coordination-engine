@@ -145,10 +145,107 @@ const GovernanceRepositoryInterface = {
   getAllVersions: async function(ruleId) {},
 };
 
+/**
+ * Relational Graph interface for tracking actor relationships
+ * 
+ * This enables soft social logic:
+ * - "If X attends, I attend" (positive constraint)
+ * - "If X attends, I prefer not" (negative constraint)
+ * - Confidence weighting for each constraint
+ * 
+ * Pattern: Graph Database interface - edges represent relationships
+ */
+const RelationalGraphInterface = {
+  /**
+   * Add a relational edge between actors
+   * 
+   * @param {string} sourceId - Source actor ID (the one making the constraint)
+   * @param {string} targetId - Target actor ID (the one being referenced)
+   * @param {string} constraintType - 'positive' or 'negative' constraint
+   * @param {number} confidence - Confidence level (0-100)
+   * @returns {Promise<void>}
+   */
+  addEdge: async function(sourceId, targetId, constraintType, confidence) {},
+
+  /**
+   * Get all edges for an actor
+   * 
+   * @param {string} actorId - Actor identifier
+   * @returns {Promise<Object[]>} Array of edges with source, target, type, confidence
+   */
+  getEdgesForActor: async function(actorId) {},
+
+  /**
+   * Get reciprocal edges (where actor is the target)
+   * 
+   * @param {string} actorId - Actor identifier
+   * @returns {Promise<Object[]>} Array of edges where actor is target
+   */
+  getReciprocalEdges: async function(actorId) {},
+
+  /**
+   * Check if a relationship exists
+   * 
+   * @param {string} sourceId - Source actor ID
+   * @param {string} targetId - Target actor ID
+   * @returns {Promise<boolean>} True if relationship exists
+   */
+  hasEdge: async function(sourceId, targetId) {},
+
+  /**
+   * Remove an edge
+   * 
+   * @param {string} sourceId - Source actor ID
+   * @param {string} targetId - Target actor ID
+   * @returns {Promise<void>}
+   */
+  removeEdge: async function(sourceId, targetId) {},
+};
+
+/**
+ * Fairness Ledger interface for tracking match fairness metrics
+ * 
+ * This ensures the system biases toward social stability:
+ * - Prevents one enthusiastic minority dominating
+ * - Ensures majority mild dissatisfaction isn't ignored
+ * - Provides metrics for transparency in ranking
+ */
+const FairnessLedgerInterface = {
+  /**
+   * Compute fairness metrics for a match
+   * 
+   * @param {string} matchId - Match identifier
+   * @returns {Promise<Object>} Fairness metrics including:
+   *   - totalRegret: Sum of all regret points
+   *   - enthusiastCount: Count of Strong Yes votes
+   *   - participationRate: Percentage of members who voted
+   *   - fairnessScore: 0-1 fairness rating
+   */
+  computeFairnessMetrics: async function(matchId) {},
+
+  /**
+   * Get all fairness metrics for a set of matches
+   * 
+   * @param {string[]} matchIds - Match identifiers
+   * @returns {Promise<Object[]>} Array of fairness metrics objects
+   */
+  getAllFairnessMetrics: async function(matchIds) {},
+
+  /**
+   * Rebuild fairness ledger from event history
+   * 
+   * @param {Object} eventStore - The event store instance
+   * @returns {Promise<void>}
+   */
+  rebuildFromEvents: async function(eventStore) {},
+};
+
 module.exports = {
   MatchRepositoryInterface,
   EventStoreInterface,
   ActorRepositoryInterface,
   TemporalIdentityRepositoryInterface,
   GovernanceRepositoryInterface,
+  RelationalGraphInterface,
+  FairnessLedgerInterface,
 };

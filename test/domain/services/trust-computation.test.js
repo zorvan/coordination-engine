@@ -1,10 +1,11 @@
 const {
+  TRUST_FORMULA_VERSION,
   computeTrustScore,
   computeTrustLevel,
-  TRUST_FORMULA_VERSION,
+  getTrustLevel,
   getTrustFormulaVersion,
-} = require('../../src/domain/services/trust-computation');
-const { TrustValue } = require('../../src/domain/valuables/trust-value');
+} = require('../../../src/domain/services/trust-computation');
+const { TrustValue } = require('../../../src/domain/valuables/trust-value');
 
 describe('TrustComputation', () => {
   test('computeTrustScore returns 0 when acceptedMatches is 0', () => {
@@ -44,6 +45,11 @@ describe('TrustComputation', () => {
     expect(computeTrustLevel(0.0)).toBe(TrustValue.VERY_LOW);
     expect(computeTrustLevel(0.2)).toBe(TrustValue.VERY_LOW);
     expect(computeTrustLevel(0.29)).toBe(TrustValue.VERY_LOW);
+  });
+
+  test('getTrustLevel returns same as computeTrustLevel', () => {
+    expect(getTrustLevel(0.5)).toBe(TrustValue.MEDIUM);
+    expect(getTrustLevel(0.8)).toBe(TrustValue.HIGH);
   });
 
   test('TRUST_FORMULA_VERSION is defined', () => {

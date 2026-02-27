@@ -1,4 +1,11 @@
-const { MatchStateMachine, isValidTransition, canTransitionTo, getValidTransitions } = require('../../src/domain/valuables/match-state');
+const { MatchState, MatchStateMachine, isValidTransition, canTransitionTo, getValidTransitions } = require('../../../src/domain/valuables/match-state');
+
+test('MatchState constants are defined', () => {
+  expect(MatchState.PROPOSED).toBe('proposed');
+  expect(MatchState.CONFIRMED).toBe('confirmed');
+  expect(MatchState.COMPLETED).toBe('completed');
+  expect(MatchState.CANCELLED).toBe('cancelled');
+});
 
 test('MatchStateMachine defines valid transitions', () => {
   expect(MatchStateMachine.proposed).toContain('confirmed');

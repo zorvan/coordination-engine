@@ -1,6 +1,19 @@
-const MatchState = require('../valuables/match-state').MatchState;
+const { MatchState, isValidTransition } = require('../valuables/match-state');
 
 const MatchAggregate = {
+  /**
+   * Create a new match aggregate
+   * 
+   * @param {string} id - Unique match identifier
+   * @param {string} organizerId - Organizing actor ID
+   * @param {string} title - Match title
+   * @param {string} description - Optional description
+   * @param {Date} scheduledTime - When the match is scheduled
+   * @param {number} durationMinutes - Duration in minutes
+   * @param {string} location - Physical or virtual location
+   * @param {string[]} participantIds - Array of participant actor IDs
+   * @returns {Object} Match aggregate with state machine
+   */
   create(id, organizerId, title, description, scheduledTime, durationMinutes, location, participantIds) {
     return {
       matchId: id,
@@ -20,7 +33,7 @@ const MatchAggregate = {
       version: 0,
 
       transitionTo(newState) {
-        if (!this.isValidTransition(newState)) {
+        if (!isValidTransition(this.state, newState)) {
           throw new Error(`Invalid transition from ${this.state} to ${newState}`);
         }
         this.state = newState;
@@ -49,7 +62,7 @@ const MatchAggregate = {
       },
 
       isValidTransition(targetState) {
-        return MatchState.isValidTransition(this.state, targetState);
+        return isValidTransition(this.state, targetState);
       },
     };
   },

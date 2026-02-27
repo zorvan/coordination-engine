@@ -1,12 +1,12 @@
-const { MATCH_STATE_MACHINE, isValidTransition, canTransitionTo, getValidTransitions } = require('../../src/domain/valuables/match-state');
+const { MatchStateMachine, isValidTransition, canTransitionTo, getValidTransitions } = require('../../src/domain/valuables/match-state');
 
-test('MATCH_STATE_MACHINE defines valid transitions', () => {
-  expect(MATCH_STATE_MACHINE.proposed).toContain('confirmed');
-  expect(MATCH_STATE_MACHINE.proposed).toContain('cancelled');
-  expect(MATCH_STATE_MACHINE.confirmed).toContain('completed');
-  expect(MATCH_STATE_MACHINE.confirmed).toContain('cancelled');
-  expect(MATCH_STATE_MACHINE.completed).toEqual([]);
-  expect(MATCH_STATE_MACHINE.cancelled).toEqual([]);
+test('MatchStateMachine defines valid transitions', () => {
+  expect(MatchStateMachine.proposed).toContain('confirmed');
+  expect(MatchStateMachine.proposed).toContain('cancelled');
+  expect(MatchStateMachine.confirmed).toContain('completed');
+  expect(MatchStateMachine.confirmed).toContain('cancelled');
+  expect(MatchStateMachine.completed).toEqual([]);
+  expect(MatchStateMachine.cancelled).toEqual([]);
 });
 
 test('isValidTransition returns true for valid transitions', () => {

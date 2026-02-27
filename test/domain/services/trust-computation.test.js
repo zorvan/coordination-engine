@@ -1,31 +1,56 @@
-const { computeTrustScore, getTrustLevel, getTrustFormulaVersion, TRUST_FORMULA_VERSION } = require('../../src/domain/services/trust-computation');
+const {
+  computeTrustScore,
+  computeTrustLevel,
+  TRUST_FORMULA_VERSION,
+  getTrustFormulaVersion,
+} = require('../../src/domain/services/trust-computation');
+const { TrustValue } = require('../../src/domain/valuables/trust-value');
 
-test('computeTrustScore returns 0 when acceptedMatches is 0', () => {
-  expect(computeTrustScore(0, 0)).toBe(0);
-  expect(computeTrustScore(5, 0)).toBe(0);
-});
+describe('TrustComputation', () => {
+  test('computeTrustScore returns 0 when acceptedMatches is 0', () => {
+    expect(computeTrustScore(0, 0)).toBe(0);
+    expect(computeTrustScore(10, 0)).toBe(0);
+  });
 
-test('computeTrustScore correctly calculates trust score', () => {
-  expect(computeTrustScore(5, 5)).toBe(1);
-  expect(computeTrustScore(3, 6)).toBe(0.5);
-  expect(computeTrustScore(2, 4)).toBe(0.5);
-  expect(computeTrustScore(1, 2)).toBe(0.5);
-});
+  test('computeTrustScore returns correct ratio', () => {
+    expect(computeTrustScore(0, 10)).toBe(0);
+    expect(computeTrustScore(5, 10)).toBe(0.5);
+    expect(computeTrustScore(10, 10)).toBe(1);
+    expect(computeTrustScore(8, 10)).toBe(0.8);
+  });
 
-test('getTrustLevel categorizes scores correctly', () => {
-  expect(getTrustLevel(0.9)).toBe('highly-trusted');
-  expect(getTrustLevel(0.8)).toBe('highly-trusted');
-  expect(getTrustLevel(0.7)).toBe('highly-trusted');
-  expect(getTrustLevel(0.6)).toBe('trusted');
-  expect(getTrustLevel(0.5)).toBe('trusted');
-  expect(getTrustLevel(0.4)).toBe('untrusted');
-  expect(getTrustLevel(0)).toBe('untrusted');
-});
+  test('computeTrustLevel returns correct levels', () => {
+    // Very High: >= 0.9
+    expect(computeTrustLevel(0.9)).toBe(TrustValue.VERY_HIGH);
+    expect(computeTrustLevel(0.95)).toBe(TrustValue.VERY_HIGH);
+    expect(computeTrustLevel(1.0)).toBe(TrustValue.VERY_HIGH);
 
-test('getTrustFormulaVersion returns the version', () => {
-  expect(getTrustFormulaVersion()).toBe('1.0');
-});
+    // High: >= 0.7 and < 0.9
+    expect(computeTrustLevel(0.7)).toBe(TrustValue.HIGH);
+    expect(computeTrustLevel(0.8)).toBe(TrustValue.HIGH);
+    expect(computeTrustLevel(0.89)).toBe(TrustValue.HIGH);
 
-test('TRUST_FORMULA_VERSION is exported correctly', () => {
-  expect(TRUST_FORMULA_VERSION).toBe('1.0');
+    // Medium: >= 0.5 and < 0.7
+    expect(computeTrustLevel(0.5)).toBe(TrustValue.MEDIUM);
+    expect(computeTrustLevel(0.6)).toBe(TrustValue.MEDIUM);
+    expect(computeTrustLevel(0.69)).toBe(TrustValue.MEDIUM);
+
+    // Low: >= 0.3 and < 0.5
+    expect(computeTrustLevel(0.3)).toBe(TrustValue.LOW);
+    expect(computeTrustLevel(0.4)).toBe(TrustValue.LOW);
+    expect(computeTrustLevel(0.49)).toBe(TrustValue.LOW);
+
+    // Very Low: < 0.3
+    expect(computeTrustLevel(0.0)).toBe(TrustValue.VERY_LOW);
+    expect(computeTrustLevel(0.2)).toBe(TrustValue.VERY_LOW);
+    expect(computeTrustLevel(0.29)).toBe(TrustValue.VERY_LOW);
+  });
+
+  test('TRUST_FORMULA_VERSION is defined', () => {
+    expect(TRUST_FORMULA_VERSION).toBe('1.0');
+  });
+
+  test('getTrustFormulaVersion returns correct version', () => {
+    expect(getTrustFormulaVersion()).toBe('1.0');
+  });
 });

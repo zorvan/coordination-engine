@@ -10,6 +10,10 @@ function computeTrustLevel(score) {
   return trustValueModule.computeTrustLevel(score);
 }
 
+function getTrustLevel(score) {
+  return trustValueModule.computeTrustLevel(score);
+}
+
 function getTrustFormulaVersion() {
   return TRUST_FORMULA_VERSION;
 }
@@ -18,5 +22,6 @@ module.exports = {
   TRUST_FORMULA_VERSION,
   computeTrustScore,
   computeTrustLevel,
+  getTrustLevel,
   getTrustFormulaVersion,
 };

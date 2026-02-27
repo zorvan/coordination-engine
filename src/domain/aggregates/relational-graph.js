@@ -1,4 +1,5 @@
-const RelationalEdge = require('./relational-edge');
+const { RelationalEdge } = require('../entities/relational-edge');
+const crypto = require('crypto');
 
 /**
  * Relational graph aggregate

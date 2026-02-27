@@ -1,4 +1,4 @@
-const fairnessLedgerService = require('../domain/services/fairness-ledger');
+const fairnessLedgerService = require('../../domain/services/fairness-ledger');
 
 /**
  * Fairness ledger infrastructure implementation

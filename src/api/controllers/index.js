@@ -1,0 +1,1 @@
+module.exports = { MatchController: require('./match-controller').MatchController };

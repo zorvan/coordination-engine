@@ -240,6 +240,57 @@ const FairnessLedgerInterface = {
   rebuildFromEvents: async function(eventStore) {},
 };
 
+const AgentRepositoryInterface = {
+  /**
+   * Find an agent by ID
+   * @param {string} id - Agent identifier
+   * @returns {Promise<Object|null>} Agent object or null
+   */
+  findById: async function(id) {},
+
+  /**
+   * Save an agent to storage
+   * @param {Object} agent - Agent to persist
+   * @returns {Promise<void>}
+   */
+  save: async function(agent) {},
+
+  /**
+   * Find all agents
+   * @returns {Promise<Object[]>} Array of all agent objects
+   */
+  findAll: async function() {},
+};
+
+const AgentNegotiationRepositoryInterface = {
+  /**
+   * Find agent negotiation by ID
+   * @param {string} negotiationId - Negotiation identifier
+   * @returns {Promise<Object|null>} Agent negotiation object or null
+   */
+  findById: async function(negotiationId) {},
+
+  /**
+   * Save an agent negotiation
+   * @param {Object} negotiation - Agent negotiation aggregate
+   * @returns {Promise<void>}
+   */
+  save: async function(negotiation) {},
+
+  /**
+   * Find negotiations by match ID
+   * @param {string} matchId - Match identifier
+   * @returns {Promise<Object[]>} Array of negotiation objects
+   */
+  findByMatchId: async function(matchId) {},
+
+  /**
+   * Find all negotiations
+   * @returns {Promise<Object[]>} Array of all negotiation objects
+   */
+  findAll: async function() {},
+};
+
 module.exports = {
   MatchRepositoryInterface,
   EventStoreInterface,
@@ -248,4 +299,6 @@ module.exports = {
   GovernanceRepositoryInterface,
   RelationalGraphInterface,
   FairnessLedgerInterface,
+  AgentRepositoryInterface,
+  AgentNegotiationRepositoryInterface,
 };

@@ -1,9 +1,6 @@
-const { MatchAggregate } = require('../../domain/aggregates/match-aggregate');
-const { MatchCompleted } = require('../../domain/events/domain-event');
-const { TrustUpdated } = require('../../domain/events/domain-event');
-const { TrustLevel } = require('../../domain/valuables/trust-value');
-const computeTrustScore = require('../../domain/services/trust-computation').computeTrustScore;
-const generateEventId = require('../../domain/events/event-utils').generateEventId;
+const { MatchCompleted } = require('../../../domain/events/domain-event');
+const { TrustUpdated } = require('../../../domain/events/domain-event');
+const { computeTrustScore, getTrustLevel } = require('../../../domain/services/trust-computation');
 
 const CompleteMatchUseCase = {
   create(matchRepository, actorRepository, eventStore) {
@@ -32,12 +29,15 @@ const CompleteMatchUseCase = {
           throw new Error('Only confirmed matches can be completed');
         }
 
-        match.complete(notes);
+        match.state = 'completed';
+        match.notes = notes;
+        match.completedAt = new Date();
+        match.updatedAt = match.completedAt;
 
         const completedEvent = new MatchCompleted(
           matchId,
           completedBy,
-          match.updatedAt
+          match.completedAt
         );
 
         await eventStore.append(completedEvent);
@@ -54,14 +54,14 @@ const CompleteMatchUseCase = {
         ).length;
 
         const trustScore = computeTrustScore(completedCount, confirmedCount);
-        const trustLevel = TrustLevel.HIGH;
+        const trustLevel = getTrustLevel(trustScore);
 
         const trustEvent = new TrustUpdated(
           completedBy,
           trustScore,
           trustLevel,
           1,
-          match.updatedAt
+          match.completedAt
         );
 
         await eventStore.append(trustEvent);

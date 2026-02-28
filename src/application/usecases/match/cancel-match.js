@@ -1,4 +1,4 @@
-const { MatchCancelled } = require('../../domain/events/domain-event');
+const { MatchCancelled } = require('../../../domain/events/domain-event');
 
 const CancelMatchUseCase = {
   create(matchRepository, eventStore) {
@@ -29,13 +29,19 @@ const CancelMatchUseCase = {
           throw new Error('Actor not authorized to cancel this match');
         }
 
-        match.cancel(reason);
+        if (match.state !== 'proposed' && match.state !== 'confirmed') {
+          throw new Error('Only proposed or confirmed matches can be cancelled');
+        }
+        match.state = 'cancelled';
+        match.notes = reason;
+        match.cancelledAt = new Date();
+        match.updatedAt = match.cancelledAt;
 
         const event = new MatchCancelled(
           matchId,
           cancelledBy,
           reason,
-          match.updatedAt
+          match.cancelledAt
         );
 
         await eventStore.append(event);

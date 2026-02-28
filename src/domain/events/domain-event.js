@@ -6,6 +6,14 @@ class DomainEvent {
     this.payload = payload;
     this.timestamp = timestamp;
     this.id = payload.id || generateEventId();
+    this.aggregateId =
+      payload.aggregateId ||
+      payload.matchId ||
+      payload.actorId ||
+      payload.identityId ||
+      payload.ruleId ||
+      payload.id ||
+      null;
   }
 }
 

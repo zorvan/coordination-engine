@@ -1,6 +1,4 @@
-const { MatchAggregate } = require('../../domain/aggregates/match-aggregate');
-const { DomainEventType } = require('../../domain/events/event-utils');
-const { MatchCreated, MatchConfirmed } = require('../../domain/events/domain-event');
+const { MatchConfirmed } = require('../../../domain/events/domain-event');
 
 const ConfirmMatchUseCase = {
   create(matchRepository, eventStore) {
@@ -29,7 +27,11 @@ const ConfirmMatchUseCase = {
           throw new Error('Actor not authorized to confirm this match');
         }
 
-        match.confirm();
+        if (match.state !== 'proposed') {
+          throw new Error('Only proposed matches can be confirmed');
+        }
+        match.state = 'confirmed';
+        match.updatedAt = new Date();
 
         const event = new MatchConfirmed(
           matchId,

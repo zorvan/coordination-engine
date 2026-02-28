@@ -4,7 +4,7 @@ const crypto = require('crypto');
  * In-memory event store implementation
  * 
  * This is a simple implementation suitable for development and testing
- * Production should use PostgreSQL event store (see event-store-postgres.js)
+ * Production should use PostgreSQL event store (see PostgresEventStore below)
  * 
  * Design decisions:
  * - Events stored in memory (append-only)
@@ -167,4 +167,87 @@ class EventStore {
   }
 }
 
-module.exports = { EventStore };
+// PostgreSQL-backed implementation -------------------------------------------
+
+class PostgresEventStore {
+  /**
+   * Create a PostgreSQL-based event store.
+   * Guarantees the events table exists.
+   *
+   * @param {import('pg').Pool} pool
+   * @returns {PostgresEventStore}
+   */
+  static create(pool) {
+    if (!pool) throw new Error('Postgres pool must be provided');
+    const store = new PostgresEventStore(pool);
+    // create table asynchronously
+    store._ensureTable();
+    return store;
+  }
+
+  constructor(pool) {
+    this.pool = pool;
+  }
+
+  async _ensureTable() {
+    const sql = `
+      CREATE TABLE IF NOT EXISTS events (
+        id TEXT PRIMARY KEY,
+        aggregate_id TEXT,
+        type TEXT NOT NULL,
+        payload JSONB,
+        timestamp TIMESTAMP NOT NULL
+      );
+    `;
+    await this.pool.query(sql);
+  }
+
+  async append(event) {
+    const eventId = event.id || crypto.randomUUID();
+    const sql = `
+      INSERT INTO events(id, aggregate_id, type, payload, timestamp)
+      VALUES($1,$2,$3,$4,$5)
+    `;
+    await this.pool.query(sql, [
+      eventId,
+      event.aggregateId || null,
+      event.type,
+      event.payload == null ? null : JSON.stringify(event.payload),
+      event.timestamp instanceof Date ? event.timestamp : new Date(event.timestamp)
+    ]);
+  }
+
+  _rowToEvent(row) {
+    return {
+      id: row.id,
+      aggregateId: row.aggregate_id,
+      type: row.type,
+      payload: row.payload,
+      timestamp: row.timestamp,
+    };
+  }
+
+  async getEventsByAggregate(aggregateId) {
+    const res = await this.pool.query(
+      `SELECT * FROM events WHERE aggregate_id = $1 ORDER BY timestamp ASC`,
+      [aggregateId]
+    );
+    return res.rows.map((r) => this._rowToEvent(r));
+  }
+
+  async getAllEvents() {
+    const res = await this.pool.query(`SELECT * FROM events ORDER BY timestamp ASC`);
+    return res.rows.map((r) => this._rowToEvent(r));
+  }
+
+  async getEventsSince(since) {
+    const ts = since instanceof Date ? since : new Date(since);
+    const res = await this.pool.query(
+      `SELECT * FROM events WHERE timestamp >= $1 ORDER BY timestamp ASC`,
+      [ts]
+    );
+    return res.rows.map((r) => this._rowToEvent(r));
+  }
+}
+
+module.exports = { EventStore, PostgresEventStore };

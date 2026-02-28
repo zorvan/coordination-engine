@@ -1,7 +1,7 @@
-const { CreateMatchUseCase } = require('./match/create-match');
-const { ConfirmMatchUseCase } = require('./match/confirm-match');
-const { CompleteMatchUseCase } = require('./match/complete-match');
-const { CancelMatchUseCase } = require('./match/cancel-match');
+const { CreateMatchUseCase } = require('../../application/usecases/match/create-match');
+const { ConfirmMatchUseCase } = require('../../application/usecases/match/confirm-match');
+const { CompleteMatchUseCase } = require('../../application/usecases/match/complete-match');
+const { CancelMatchUseCase } = require('../../application/usecases/match/cancel-match');
 
 const MatchController = {
   create: function(createMatchUseCase, confirmMatchUseCase, completeMatchUseCase, cancelMatchUseCase) {

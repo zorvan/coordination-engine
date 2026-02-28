@@ -1,8 +1,8 @@
-const { TrustUpdated } = require('../../domain/events/domain-event');
-const { computeTrustScore, getTrustLevel } = require('../../domain/services/trust-computation');
-const { TrustLevel } = require('../../domain/valuables/trust-value');
-const generateEventId = require('../../domain/events/event-utils').generateEventId;
-const generateAggregateId = require('../../domain/events/event-utils').generateAggregateId;
+const { TrustUpdated } = require('../../../domain/events/domain-event');
+const { computeTrustScore, getTrustLevel } = require('../../../domain/services/trust-computation');
+const { TrustLevel } = require('../../../domain/valuables/trust-value');
+const generateEventId = require('../../../domain/events/event-utils').generateEventId;
+const generateAggregateId = require('../../../domain/events/event-utils').generateAggregateId;
 
 const UpdateTrustUseCase = {
   create(actorRepository, eventStore) {

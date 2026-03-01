@@ -22,9 +22,8 @@ export const Modal: React.FC<ModalProps> = ({
   if (!open) return null
 
   return (
-    <>
-      <div className="modal-overlay" onClick={onClose} />
-      <div className="modal">
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal" onClick={(event) => event.stopPropagation()}>
         {title && (
           <div className="modal-header">
             <h2>{title}</h2>
@@ -34,6 +33,6 @@ export const Modal: React.FC<ModalProps> = ({
         <div className="modal-body">{children}</div>
         {footer && <div className="modal-footer">{footer}</div>}
       </div>
-    </>
+    </div>
   )
 }

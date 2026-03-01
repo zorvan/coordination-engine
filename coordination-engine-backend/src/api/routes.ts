@@ -39,6 +39,51 @@ type AuthSessionPayload = {
   };
 };
 
+type CalendarCommitmentDegree = 'soft' | 'moderate' | 'firm' | 'locked';
+type CalendarSlotStatus = 'free' | 'busy';
+
+type CommunityCalendarSlot = {
+  day: string;
+  period: string;
+  status: CalendarSlotStatus;
+  probability: number;
+  commitment: CalendarCommitmentDegree;
+  eventTitle?: string;
+};
+
+type CommunityFriend = {
+  id: string;
+  email: string;
+  name: string;
+  relationship: string;
+  trustScore: number;
+  reliability: number;
+  lastInteraction: string;
+  groupIds: string[];
+};
+
+type CommunityGroupMember = {
+  friendId: string;
+  role: string;
+  historyReliability: number;
+  commitmentConsistency: number;
+  responsePace: number;
+};
+
+type CommunityGroup = {
+  id: string;
+  name: string;
+  purpose: string;
+  members: CommunityGroupMember[];
+};
+
+type CommunitySnapshot = {
+  calendarSlots: CommunityCalendarSlot[];
+  friends: CommunityFriend[];
+  groups: CommunityGroup[];
+  updatedAt: string;
+};
+
 const FRONTEND_BASE_URL = process.env.FRONTEND_BASE_URL || 'http://localhost:5173';
 const BACKEND_BASE_URL = process.env.BACKEND_BASE_URL || 'http://localhost:3000';
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '';
@@ -156,6 +201,18 @@ const createRoutes = function(
   eventStore: EventStoreLike,
   actorRepository: any
 ): RouterDef {
+  const readCommunitySnapshot = async function(actorId: string): Promise<CommunitySnapshot | null> {
+    const events = await eventStore.getEventsByAggregate(actorId);
+    const snapshots = events
+      .filter((event) => event.type === 'ActorCommunitySnapshotSet')
+      .sort((a, b) => +new Date(a.timestamp) - +new Date(b.timestamp));
+    const latest = snapshots[snapshots.length - 1];
+    if (!latest) {
+      return null;
+    }
+    return latest.payload as CommunitySnapshot;
+  };
+
   const errorStatus = function(error: unknown): number {
     const message = error instanceof Error ? error.message.toLowerCase() : '';
     if (message.includes('not authorized')) {
@@ -832,6 +889,105 @@ const createRoutes = function(
         error: err instanceof Error ? err.message : 'Unknown error'
       });
       res.status(500).json({ error: 'failed_to_update_actor', message: err instanceof Error ? err.message : 'Unknown error' });
+    }
+  });
+
+  router.get('/actors/:id/community', async function(req: Request, res: Response) {
+    const id = typeof req.params.id === 'string' ? req.params.id : '';
+    if (!id) {
+      res.status(400).json({ error: 'invalid_actor_id', message: 'Actor id is required' });
+      return;
+    }
+
+    try {
+      const actor = actorRepository && typeof actorRepository.findById === 'function'
+        ? await actorRepository.findById(id)
+        : null;
+
+      if (!actor) {
+        res.status(404).json({ error: 'actor_not_found', message: 'Actor not found' });
+        return;
+      }
+
+      const snapshot = await readCommunitySnapshot(id);
+      if (!snapshot) {
+        res.status(200).json({
+          community: {
+            calendarSlots: [],
+            friends: [],
+            groups: [],
+            updatedAt: new Date(0).toISOString(),
+          }
+        });
+        return;
+      }
+
+      res.status(200).json({ community: snapshot });
+    } catch (err) {
+      res.status(500).json({
+        error: 'failed_to_fetch_community',
+        message: err instanceof Error ? err.message : 'Unknown error'
+      });
+    }
+  });
+
+  router.put('/actors/:id/community', async function(req: Request, res: Response) {
+    const id = typeof req.params.id === 'string' ? req.params.id : '';
+    const body = req.body || {};
+
+    if (!id) {
+      res.status(400).json({ error: 'invalid_actor_id', message: 'Actor id is required' });
+      return;
+    }
+
+    const calendarSlots = Array.isArray(body.calendarSlots) ? body.calendarSlots : undefined;
+    const friends = Array.isArray(body.friends) ? body.friends : undefined;
+    const groups = Array.isArray(body.groups) ? body.groups : undefined;
+
+    if (!calendarSlots && !friends && !groups) {
+      res.status(400).json({
+        error: 'invalid_community_payload',
+        message: 'At least one of calendarSlots, friends or groups must be provided'
+      });
+      return;
+    }
+
+    try {
+      const actor = actorRepository && typeof actorRepository.findById === 'function'
+        ? await actorRepository.findById(id)
+        : null;
+
+      if (!actor) {
+        res.status(404).json({ error: 'actor_not_found', message: 'Actor not found' });
+        return;
+      }
+
+      const current = await readCommunitySnapshot(id);
+      const next: CommunitySnapshot = {
+        calendarSlots: (calendarSlots as CommunityCalendarSlot[] | undefined) || current?.calendarSlots || [],
+        friends: (friends as CommunityFriend[] | undefined) || current?.friends || [],
+        groups: (groups as CommunityGroup[] | undefined) || current?.groups || [],
+        updatedAt: new Date().toISOString(),
+      };
+
+      await eventStore.append({
+        id: `evt-${randomUUID()}`,
+        aggregateId: id,
+        type: 'ActorCommunitySnapshotSet',
+        timestamp: new Date(),
+        payload: next,
+      });
+
+      res.status(200).json({
+        status: 'community_updated',
+        message: 'Community data updated successfully',
+        community: next,
+      });
+    } catch (err) {
+      res.status(500).json({
+        error: 'failed_to_update_community',
+        message: err instanceof Error ? err.message : 'Unknown error'
+      });
     }
   });
 

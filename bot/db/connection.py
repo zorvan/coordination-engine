@@ -2,8 +2,7 @@
 Database connection module for async operations.
 """
 from typing import AsyncGenerator
-from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine, async_sessionmaker
 from db.models import Base
 
 
@@ -17,8 +16,13 @@ def create_session(engine):
     return async_sessionmaker(engine, expire_on_commit=False)
 
 
-async def get_session(engine) -> AsyncGenerator:
-    """Dependency for getting database sessions."""
+async def get_session(engine_or_db_url: AsyncEngine | str) -> AsyncGenerator:
+    """Yield async DB sessions from an AsyncEngine or DB URL string."""
+    if isinstance(engine_or_db_url, str):
+        engine = create_engine(engine_or_db_url)
+    else:
+        engine = engine_or_db_url
+
     Session = create_session(engine)
     async with Session() as session:
         yield session

@@ -2,8 +2,10 @@
 """Feedback collection handler for post-event ratings."""
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
-from db.models import Event, Feedback, Log
+from sqlalchemy import select
+from db.models import Event, Feedback
 from db.connection import get_session
+from db.users import get_or_create_user_id
 from config.settings import settings
 from datetime import datetime
 import random
@@ -34,7 +36,7 @@ async def collect_feedback(
     db_url = settings.db_url or ""
     async for session in get_session(db_url):
         result = await session.execute(
-            Event.__table__.select().where(Event.event_id == event_id)
+            select(Event).where(Event.event_id == event_id)
         )
         event = result.scalar_one_or_none()
 
@@ -55,7 +57,13 @@ async def collect_feedback(
         if not user:
             return
 
-        user_id = user.id
+        telegram_user_id = user.id
+        display_name = user.full_name
+        user_id = await get_or_create_user_id(
+            session,
+            telegram_user_id=telegram_user_id,
+            display_name=display_name,
+        )
 
         existing = await _get_existing_feedback(session, event_id, user_id)
         if existing:
@@ -121,12 +129,13 @@ async def process_feedback(
     query, _context: ContextTypes.DEFAULT_TYPE, event_id: int, score: int
 ) -> None:
     """Process feedback submission."""
-    user_id = query.from_user.id
+    telegram_user_id = query.from_user.id
+    display_name = query.from_user.full_name
     
     db_url = settings.db_url or ""
     async for session in get_session(db_url):
         result = await session.execute(
-            Event.__table__.select().where(Event.event_id == event_id)
+            select(Event).where(Event.event_id == event_id)
         )
         event = result.scalar_one_or_none()
         
@@ -134,27 +143,22 @@ async def process_feedback(
             await query.edit_message_text("❌ Event not found.")
             await session.close()
             return
+
+        user_id = await get_or_create_user_id(
+            session,
+            telegram_user_id=telegram_user_id,
+            display_name=display_name,
+        )
         
         feedback = Feedback(
             event_id=event_id,
             user_id=user_id,
-            score_type="event_rating",
+            score_type="event_quality",
             value=float(score),
             timestamp=datetime.utcnow()
         )
         session.add(feedback)
-        
-        log = Log(
-            event_id=event_id,
-            user_id=user_id,
-            action="feedback_submitted",
-            metadata_dict={
-                "score": score,
-                "timestamp": datetime.utcnow().isoformat()
-            }
-        )
-        session.add(log)
-        
+
         await session.commit()
         
         await query.edit_message_text(
@@ -167,7 +171,7 @@ async def process_feedback(
 async def _get_existing_feedback(session, event_id: int, user_id: int):
     """Check if user already provided feedback."""
     result = await session.execute(
-        Feedback.__table__.select().where(
+        select(Feedback).where(
             Feedback.event_id == event_id,
             Feedback.user_id == user_id
         )

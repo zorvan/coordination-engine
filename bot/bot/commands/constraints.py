@@ -2,8 +2,10 @@
 """View/add/remove constraints command handler."""
 from telegram import Update
 from telegram.ext import ContextTypes
+from sqlalchemy import select
 from db.models import Event, Constraint
 from db.connection import get_session
+from db.users import get_or_create_user_id
 from config.settings import settings
 
 
@@ -52,7 +54,7 @@ async def view_constraints(update: Update, event_id: int) -> None:
 
     async for session in get_session(settings.db_url):
         result = await session.execute(
-            Constraint.__table__.select().where(
+            select(Constraint).where(
                 Constraint.event_id == event_id
             )
         )
@@ -97,7 +99,7 @@ async def add_constraint(
         return
 
     try:
-        target_user_id = int(args[2])
+        target_telegram_user_id = int(args[2])
         constraint_type = args[3]
     except ValueError:
         await update.message.reply_text("❌ User ID must be a number.")
@@ -109,7 +111,7 @@ async def add_constraint(
 
     async for session in get_session(settings.db_url):
         result = await session.execute(
-            Event.__table__.select().where(Event.event_id == event_id)
+            select(Event).where(Event.event_id == event_id)
         )
         event = result.scalar_one_or_none()
 
@@ -118,8 +120,19 @@ async def add_constraint(
             await session.close()
             return
 
+        source_user_id = await get_or_create_user_id(
+            session,
+            telegram_user_id=update.effective_user.id,
+            display_name=update.effective_user.full_name,
+        )
+        target_user_id = await get_or_create_user_id(
+            session,
+            telegram_user_id=target_telegram_user_id,
+            display_name=None,
+        )
+
         constraint = Constraint(
-            user_id=update.effective_user.id,
+            user_id=source_user_id,
             target_user_id=target_user_id,
             event_id=event_id,
             type=constraint_type,
@@ -131,7 +144,7 @@ async def add_constraint(
         await update.message.reply_text(
             f"✅ Constraint added to event {event_id}!\n\n"
             f"Type: {constraint_type}\n"
-            f"Target: User {target_user_id}"
+            f"Target Telegram User: {target_telegram_user_id}"
         )
         await session.close()
 

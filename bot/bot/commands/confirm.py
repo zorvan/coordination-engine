@@ -2,8 +2,10 @@
 """Confirm event command handler."""
 from telegram import Update
 from telegram.ext import ContextTypes
+from sqlalchemy import select
 from db.models import Event, Log
 from db.connection import get_session
+from db.users import get_or_create_user_id
 from config.settings import settings
 from datetime import datetime
 
@@ -17,7 +19,8 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not user:
         return
 
-    user_id = user.id
+    telegram_user_id = user.id
+    display_name = user.full_name
     event_id_str = context.args[0] if context.args else None
 
     if not event_id_str:
@@ -35,7 +38,7 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     async for session in get_session(settings.db_url):
         result = await session.execute(
-            Event.__table__.select().where(Event.event_id == event_id)
+            select(Event).where(Event.event_id == event_id)
         )
         event = result.scalar_one_or_none()
 
@@ -51,7 +54,7 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             await session.close()
             return
 
-        if user_id not in event.attendance_list:
+        if telegram_user_id not in event.attendance_list:
             await update.message.reply_text(
                 f"❌ You haven't joined event {event_id} yet. Use /join first."
             )
@@ -60,14 +63,19 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
         if "confirmed" not in event.attendance_list:
             event.attendance_list = [
-                e for e in event.attendance_list if e != user_id
+                e for e in event.attendance_list if e != telegram_user_id
             ]
-            event.attendance_list.append(f"{user_id}:confirmed")
+            event.attendance_list.append(f"{telegram_user_id}:confirmed")
+            user_id = await get_or_create_user_id(
+                session,
+                telegram_user_id=telegram_user_id,
+                display_name=display_name,
+            )
 
             log = Log(
                 event_id=event_id,
                 user_id=user_id,
-                action="confirmed",
+                action="confirm",
                 metadata_dict={"timestamp": datetime.utcnow().isoformat()}
             )
             session.add(log)

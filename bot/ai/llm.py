@@ -2,7 +2,6 @@
 OpenAI-compatible LLM client for Qwen3.
 """
 import os
-from typing import Optional
 import httpx
 import json
 
@@ -11,9 +10,9 @@ class LLMClient:
     """OpenAI SDK wrapper for Qwen3 (or any OpenAI-compatible API)."""
     
     def __init__(self):
-        self.base_url = os.getenv("AI_ENDPOINT", "http://127.0.0.1:8080/v1/chat/completions")
+        self.base_url = os.getenv("AI_ENDPOINT", "http://127.0.0.1:8080/v1/")
         self.api_key = os.getenv("AI_API_KEY", "dummy-key")
-        self.model = os.getenv("AI_MODEL", "qwen/qwen-2-7b-instruct")
+        self.model = os.getenv("AI_MODEL", "qwen/qwen-3-coder-next")
         self.client = httpx.AsyncClient(
             base_url=self.base_url,
             headers={"Authorization": f"Bearer {self.api_key}"},
@@ -60,6 +59,18 @@ class LLMClient:
         )
         response.raise_for_status()
         return response.json()["choices"][0]["message"]["content"]
+
+    async def check_availability(self) -> tuple[bool, str]:
+        """Check if the configured LLM endpoint is reachable."""
+        try:
+            response = await self.client.get("/models")
+            response.raise_for_status()
+            payload = response.json()
+            models = payload.get("data", [])
+            model_count = len(models) if isinstance(models, list) else 0
+            return True, f"LLM available (models={model_count})"
+        except Exception as e:
+            return False, f"LLM unavailable: {type(e).__name__}: {e}"
     
     def _build_conflict_prompt(self, event, availability: dict, reliability: dict) -> str:
         """Construct Qwen3 prompt for conflict resolution."""

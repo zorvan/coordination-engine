@@ -10,6 +10,7 @@ from telegram import (
     InlineKeyboardMarkup,
 )
 from telegram.ext import ContextTypes
+from sqlalchemy import select
 from db.models import Event
 from db.connection import get_session
 from config.settings import settings
@@ -81,7 +82,7 @@ async def _send_suggestion(
     db_url = settings.db_url or ""
     async for session in get_session(db_url):
         result = await session.execute(
-            Event.__table__.select().where(Event.event_id == event_id)
+            select(Event).where(Event.event_id == event_id)
         )
         event = result.scalar_one_or_none()
         if not event:

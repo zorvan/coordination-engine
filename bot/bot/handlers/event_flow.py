@@ -2,8 +2,10 @@
 """Event flow state machine handler."""
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
+from sqlalchemy import select
 from db.models import Event, Log
 from db.connection import get_session
+from db.users import get_or_create_user_id
 from config.settings import settings
 from datetime import datetime
 
@@ -59,12 +61,13 @@ async def handle_event_flow(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
 async def handle_join(query, context: ContextTypes.DEFAULT_TYPE, event_id: int) -> None:
     """Handle joining an event - transition to interested state."""
-    user_id = query.from_user.id
+    telegram_user_id = query.from_user.id
+    display_name = query.from_user.full_name
     
     db_url = settings.db_url or ""
     async for session in get_session(db_url):
         result = await session.execute(
-            Event.__table__.select().where(Event.event_id == event_id)
+            select(Event).where(Event.event_id == event_id)
         )
         event = result.scalar_one_or_none()
         
@@ -80,15 +83,21 @@ async def handle_join(query, context: ContextTypes.DEFAULT_TYPE, event_id: int) 
             await session.close()
             return
         
-        if user_id not in event.attendance_list:
-            event.attendance_list.append(user_id)
+        if telegram_user_id not in event.attendance_list:
+            event.attendance_list.append(telegram_user_id)
+
+        user_id = await get_or_create_user_id(
+            session,
+            telegram_user_id=telegram_user_id,
+            display_name=display_name,
+        )
         
         event.state = "interested"
         
         log = Log(
             event_id=event_id,
             user_id=user_id,
-            action="joined",
+            action="join",
             metadata_dict={"timestamp": datetime.utcnow().isoformat()}
         )
         session.add(log)
@@ -111,12 +120,13 @@ async def handle_join(query, context: ContextTypes.DEFAULT_TYPE, event_id: int) 
 
 async def handle_confirm(query, context: ContextTypes.DEFAULT_TYPE, event_id: int) -> None:
     """Handle confirming attendance - transition from interested to confirmed."""
-    user_id = query.from_user.id
+    telegram_user_id = query.from_user.id
+    display_name = query.from_user.full_name
     
     db_url = settings.db_url or ""
     async for session in get_session(db_url):
         result = await session.execute(
-            Event.__table__.select().where(Event.event_id == event_id)
+            select(Event).where(Event.event_id == event_id)
         )
         event = result.scalar_one_or_none()
         
@@ -132,14 +142,22 @@ async def handle_confirm(query, context: ContextTypes.DEFAULT_TYPE, event_id: in
             await session.close()
             return
         
-        event.attendance_list = [e for e in event.attendance_list if e != user_id]
-        event.attendance_list.append(f"{user_id}:confirmed")
+        event.attendance_list = [
+            e for e in event.attendance_list if e != telegram_user_id
+        ]
+        event.attendance_list.append(f"{telegram_user_id}:confirmed")
         event.state = "confirmed"
+
+        user_id = await get_or_create_user_id(
+            session,
+            telegram_user_id=telegram_user_id,
+            display_name=display_name,
+        )
         
         log = Log(
             event_id=event_id,
             user_id=user_id,
-            action="confirmed",
+            action="confirm",
             metadata_dict={"timestamp": datetime.utcnow().isoformat()}
         )
         session.add(log)
@@ -161,12 +179,13 @@ async def handle_confirm(query, context: ContextTypes.DEFAULT_TYPE, event_id: in
 
 async def handle_cancel(query, context: ContextTypes.DEFAULT_TYPE, event_id: int) -> None:
     """Handle cancelling attendance - transitions to cancelled state."""
-    user_id = query.from_user.id
+    telegram_user_id = query.from_user.id
+    display_name = query.from_user.full_name
     
     db_url = settings.db_url or ""
     async for session in get_session(db_url):
         result = await session.execute(
-            Event.__table__.select().where(Event.event_id == event_id)
+            select(Event).where(Event.event_id == event_id)
         )
         event = result.scalar_one_or_none()
         
@@ -177,14 +196,21 @@ async def handle_cancel(query, context: ContextTypes.DEFAULT_TYPE, event_id: int
         
         event.attendance_list = [
             e for e in event.attendance_list 
-            if str(e) != str(user_id) and not str(e).startswith(f"{user_id}:")
+            if str(e) != str(telegram_user_id)
+            and not str(e).startswith(f"{telegram_user_id}:")
         ]
         event.state = "cancelled"
+
+        user_id = await get_or_create_user_id(
+            session,
+            telegram_user_id=telegram_user_id,
+            display_name=display_name,
+        )
         
         log = Log(
             event_id=event_id,
             user_id=user_id,
-            action="cancelled",
+            action="cancel",
             metadata_dict={"timestamp": datetime.utcnow().isoformat()}
         )
         session.add(log)
@@ -204,7 +230,7 @@ async def handle_lock(query, context: ContextTypes.DEFAULT_TYPE, event_id: int) 
     db_url = settings.db_url or ""
     async for session in get_session(db_url):
         result = await session.execute(
-            Event.__table__.select().where(Event.event_id == event_id)
+            select(Event).where(Event.event_id == event_id)
         )
         event = result.scalar_one_or_none()
         
@@ -223,13 +249,6 @@ async def handle_lock(query, context: ContextTypes.DEFAULT_TYPE, event_id: int) 
         event.state = "locked"
         event.locked_at = datetime.utcnow()
         
-        log = Log(
-            event_id=event_id,
-            user_id=user_id,
-            action="locked",
-            metadata_dict={"timestamp": datetime.utcnow().isoformat()}
-        )
-        session.add(log)
         await session.commit()
         
         await query.edit_message_text(
@@ -245,7 +264,7 @@ async def show_event_details(query, context: ContextTypes.DEFAULT_TYPE, event_id
     db_url = settings.db_url or ""
     async for session in get_session(db_url):
         result = await session.execute(
-            Event.__table__.select().where(Event.event_id == event_id)
+            select(Event).where(Event.event_id == event_id)
         )
         event = result.scalar_one_or_none()
         

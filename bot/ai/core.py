@@ -5,6 +5,7 @@ Core AI coordination engine with hybrid approach:
 """
 import json
 from typing import Optional
+from sqlalchemy import select
 
 
 class AICoordinationEngine:
@@ -85,7 +86,7 @@ class AICoordinationEngine:
         """Get constraints for an event."""
         from db.models import Constraint
         result = await session.execute(
-            Constraint.__table__.select().where(Constraint.event_id == event_id)
+            select(Constraint).where(Constraint.event_id == event_id)
         )
         return result.scalars().all()
     
@@ -112,6 +113,6 @@ class AICoordinationEngine:
         """Get logs for an event."""
         from db.models import Log
         result = await session.execute(
-            Log.__table__.select().where(Log.event_id == event_id)
+            select(Log).where(Log.event_id == event_id)
         )
         return result.scalars().all()

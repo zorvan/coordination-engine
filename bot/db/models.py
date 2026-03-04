@@ -169,7 +169,7 @@ class Log(Base):
     )
     action = Column(String(100), nullable=False)
     timestamp = Column(DateTime, default=datetime.utcnow)
-    metadata_dict = Column(JSON, default=dict)
+    metadata_dict = Column("metadata", JSON, default=dict)
     
     event = relationship("Event", back_populates="logs")
     user = relationship("User", back_populates="logs")

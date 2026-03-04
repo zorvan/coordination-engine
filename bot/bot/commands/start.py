@@ -22,6 +22,7 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "AI-powered scheduling.\n\n"
         "Available commands:\n"
         "/organize_event - Create a new event\n"
+        "/events - List recent events with IDs\n"
         "/my_groups - List your groups\n"
         "/profile - View your profile\n"
         "/reputation - Check your reputation\n"

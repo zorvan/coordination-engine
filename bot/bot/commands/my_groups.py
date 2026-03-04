@@ -2,17 +2,46 @@
 """My Groups command handler."""
 from telegram import Update
 from telegram.ext import ContextTypes
+from sqlalchemy import select
+
+from config.settings import settings
+from db.connection import create_engine, create_session
+from db.models import Group
 
 
 async def handle(
     update: Update, _context: ContextTypes.DEFAULT_TYPE
 ) -> None:
     """Handle /my_groups command."""
-    if not update.message:
+    if not update.message or not update.effective_user:
         return
 
-    await update.message.reply_text(
-        "📋 *Your Groups*\n\n"
-        "• No groups yet.\n\n"
-        "Add me to a group to start coordinating events!"
-    )
+    telegram_user_id = update.effective_user.id
+
+    engine = create_engine(settings.db_url)
+    Session = create_session(engine)
+
+    async with Session() as session:
+        result = await session.execute(select(Group))
+        groups = result.scalars().all()
+
+    user_groups = []
+    for group in groups:
+        members = group.member_list or []
+        if telegram_user_id in members:
+            user_groups.append(group)
+
+    if not user_groups:
+        await update.message.reply_text(
+            "📋 *Your Groups*\n\n"
+            "• No groups yet.\n\n"
+            "Run /organize_event in a group once to register it."
+        )
+        return
+
+    lines = ["📋 *Your Groups*", ""]
+    for group in user_groups:
+        group_name = group.group_name or f"Group {group.telegram_group_id}"
+        lines.append(f"• {group_name} (`{group.telegram_group_id}`)")
+
+    await update.message.reply_text("\n".join(lines))

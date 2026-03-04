@@ -2,6 +2,7 @@
 """Status command handler to show event progress."""
 from telegram import Update
 from telegram.ext import ContextTypes
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from db.models import Event, Log, Constraint
 from db.connection import get_session
@@ -32,7 +33,7 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     db_url = settings.db_url or ""
     async for session in get_session(db_url):
         result = await session.execute(
-            Event.__table__.select().where(Event.event_id == event_id)
+            select(Event).where(Event.event_id == event_id)
         )
         event = result.scalar_one_or_none()
 

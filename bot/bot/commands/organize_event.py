@@ -9,6 +9,7 @@ from telegram import (
     InlineKeyboardMarkup,
 )
 from telegram.ext import ContextTypes
+from sqlalchemy import select
 
 from config.settings import settings
 from db.connection import create_session, create_engine
@@ -20,22 +21,52 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not update.message or not update.effective_chat:
         return
 
-    chat_id = update.effective_chat.id
+    chat = update.effective_chat
+    chat_type = chat.type
+    if chat_type not in {"group", "supergroup"}:
+        await update.message.reply_text(
+            "❌ This command can only be used in a Telegram group."
+        )
+        return
+
+    chat_id = chat.id
+    chat_title = chat.title or str(chat_id)
+    telegram_user_id = (
+        update.effective_user.id if update.effective_user else None
+    )
 
     engine = create_engine(settings.db_url)
     Session = create_session(engine)
 
     async with Session() as session:
         result = await session.execute(
-            Group.__table__.select().where(Group.telegram_group_id == chat_id)
+            select(Group).where(Group.telegram_group_id == chat_id)
         )
         group = result.scalar_one_or_none()
 
-    if not group:
-        await update.message.reply_text(
-            "❌ This command can only be used in a group context."
-        )
-        return
+        if not group:
+            group = Group(
+                telegram_group_id=chat_id,
+                group_name=chat_title,
+                member_list=[telegram_user_id] if telegram_user_id else [],
+            )
+            session.add(group)
+            await session.commit()
+            await session.refresh(group)
+        else:
+            changed = False
+            if chat_title and group.group_name != chat_title:
+                group.group_name = chat_title
+                changed = True
+
+            current_members = group.member_list or []
+            if telegram_user_id and telegram_user_id not in current_members:
+                group.member_list = [*current_members, telegram_user_id]
+                changed = True
+
+            if changed:
+                await session.commit()
+
 
     if context.user_data is None:
         await update.message.reply_text("❌ User session data is unavailable.")
@@ -278,16 +309,17 @@ async def finalize_event(
         )
         session.add(event)
         await session.commit()
+        await session.refresh(event)
 
     context.user_data.pop("event_flow", None)
 
     keyboard = [
         [
             InlineKeyboardButton(
-                "View Event", callback_data="event_details_1"
+                "View Event", callback_data=f"event_details_{event.event_id}"
             )
         ],
-        [InlineKeyboardButton("Join", callback_data="event_join_1")],
+        [InlineKeyboardButton("Join", callback_data=f"event_join_{event.event_id}")],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Main entry point for the Telegram bot."""
+import asyncio
 import logging
 from telegram import Update
 from telegram.ext import (
@@ -26,8 +27,10 @@ from bot.commands import (
     suggest_time,
     status,
     event_details,
+    events,
 )
 from bot.handlers import event_flow, feedback
+from ai.llm import LLMClient
 
 
 async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -59,12 +62,27 @@ async def log_telegram_command(update: Update, context: ContextTypes.DEFAULT_TYP
     )
 
 
+async def check_llm_availability(logger: logging.Logger) -> None:
+    """Check LLM availability on startup and log status."""
+    llm = LLMClient()
+    try:
+        is_available, message = await llm.check_availability()
+        if is_available:
+            logger.info("Startup LLM check: %s", message)
+        else:
+            logger.warning("Startup LLM check: %s", message)
+    finally:
+        await llm.close()
+
+
 def main():
     """Main entry point."""
     settings = Settings()
     logger = setup_logging(settings)
     if not settings.telegram_token:
         raise ValueError("TELEGRAM_TOKEN is not set. Define it in environment or .env.")
+
+    asyncio.run(check_llm_availability(logger))
     
     application = (
         ApplicationBuilder()
@@ -82,6 +100,7 @@ def main():
     application.add_handler(CommandHandler("start", start.handle))
     application.add_handler(CommandHandler("help", start.handle))
     application.add_handler(CommandHandler("my_groups", my_groups.handle))
+    application.add_handler(CommandHandler("mygroups", my_groups.handle))
     application.add_handler(CommandHandler("profile", profile.handle))
     application.add_handler(CommandHandler("reputation", reputation.handle))
     application.add_handler(CommandHandler("organize_event", organize_event.handle))
@@ -91,6 +110,7 @@ def main():
     application.add_handler(CommandHandler("constraints", constraints.handle))
     application.add_handler(CommandHandler("suggest_time", suggest_time.handle))
     application.add_handler(CommandHandler("status", status.handle))
+    application.add_handler(CommandHandler("events", events.handle))
     application.add_handler(CommandHandler("event_details", event_details.handle))
     application.add_handler(CommandHandler("feedback", feedback.collect_feedback))
 

@@ -16,8 +16,8 @@ class Settings:
     def __init__(self):
         self.telegram_token = self._get_env("TELEGRAM_TOKEN")
         self.db_url = self._get_env("DB_URL")
-        self.ai_endpoint = self._get_env("AI_ENDPOINT", "http://127.0.0.1:8080/v1/chat/completions")
-        self.ai_model = self._get_env("AI_MODEL", "qwen/qwen-2-7b-instruct")
+        self.ai_endpoint = self._get_env("AI_ENDPOINT", "http://127.0.0.1:8080/v1/")
+        self.ai_model = self._get_env("AI_MODEL", "qwen/qwen3-coder-next")
         self.ai_api_key = self._get_env("AI_API_KEY", "dummy-key")
         self.log_level = self._get_env("LOG_LEVEL", "INFO")
         self.log_level_telegram = self._get_env("LOG_LEVEL_TELEGRAM", "INFO")

@@ -2,6 +2,7 @@
 """Event details command handler."""
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
+from sqlalchemy import select
 from db.models import Event
 from db.connection import get_session
 from config.settings import settings
@@ -33,7 +34,7 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     async for session in get_session(settings.db_url):
         result = await session.execute(
-            Event.__table__.select().where(Event.event_id == event_id)
+            select(Event).where(Event.event_id == event_id)
         )
         event = result.scalar_one_or_none()
 
@@ -119,7 +120,7 @@ async def show_logs(query, event_id: int) -> None:
     from db.models import Log as LogModel
     async for session in get_session(settings.db_url):
         result = await session.execute(
-            LogModel.__table__.select()
+            select(LogModel)
             .where(LogModel.event_id == event_id)
             .order_by(LogModel.timestamp.desc())
         )
@@ -157,7 +158,7 @@ async def show_constraints(query, event_id: int) -> None:
     from db.models import Constraint as ConstraintModel
     async for session in get_session(settings.db_url):
         result = await session.execute(
-            ConstraintModel.__table__.select().where(
+            select(ConstraintModel).where(
                 ConstraintModel.event_id == event_id
             )
         )
@@ -198,7 +199,7 @@ async def _get_event_logs(session, event_id: int) -> list:
     """Get event logs."""
     from db.models import Log as LogModel
     result = await session.execute(
-        LogModel.__table__.select().where(LogModel.event_id == event_id)
+        select(LogModel).where(LogModel.event_id == event_id)
     )
     return result.scalars().all()
 
@@ -207,7 +208,7 @@ async def _get_event_constraints(session, event_id: int) -> list:
     """Get event constraints."""
     from db.models import Constraint as ConstraintModel
     result = await session.execute(
-        ConstraintModel.__table__.select().where(
+        select(ConstraintModel).where(
             ConstraintModel.event_id == event_id
         )
     )

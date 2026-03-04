@@ -9,19 +9,24 @@ from datetime import datetime
 import random
 
 
-async def collect_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def collect_feedback(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
     """Collect post-event feedback from attendees."""
-    event_id = context.args[0] if context.args else None
-    
-    if not event_id:
+    if not update.message:
+        return
+
+    event_id_str = context.args[0] if context.args else None
+
+    if not event_id_str:
         await update.message.reply_text(
             "Usage: /feedback <event_id>\n\n"
             "Example: /feedback 123"
         )
         return
-    
+
     try:
-        event_id = int(event_id)
+        event_id = int(event_id_str)
     except ValueError:
         await update.message.reply_text("❌ Event ID must be a number.")
         return
@@ -32,21 +37,26 @@ async def collect_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             Event.__table__.select().where(Event.event_id == event_id)
         )
         event = result.scalar_one_or_none()
-        
+
         if not event:
             await update.message.reply_text("❌ Event not found.")
             await session.close()
             return
-        
+
         if event.state != "completed":
             await update.message.reply_text(
-                f"❌ Event {event_id} is not completed yet. Wait until the event is finished."
+                f"❌ Event {event_id} is not completed yet. "
+                "Wait until the event is finished."
             )
             await session.close()
             return
-        
-        user_id = update.effective_user.id
-        
+
+        user = update.effective_user
+        if not user:
+            return
+
+        user_id = user.id
+
         existing = await _get_existing_feedback(session, event_id, user_id)
         if existing:
             await update.message.reply_text(
@@ -57,17 +67,27 @@ async def collect_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         
         keyboard = [
             [
-                InlineKeyboardButton("1 ⭐", callback_data=f"feedback_{event_id}_1"),
-                InlineKeyboardButton("2 ⭐", callback_data=f"feedback_{event_id}_2"),
-                InlineKeyboardButton("3 ⭐", callback_data=f"feedback_{event_id}_3"),
+                InlineKeyboardButton(
+                    "1 ⭐", callback_data=f"feedback_{event_id}_1"
+                ),
+                InlineKeyboardButton(
+                    "2 ⭐", callback_data=f"feedback_{event_id}_2"
+                ),
+                InlineKeyboardButton(
+                    "3 ⭐", callback_data=f"feedback_{event_id}_3"
+                ),
             ],
             [
-                InlineKeyboardButton("4 ⭐", callback_data=f"feedback_{event_id}_4"),
-                InlineKeyboardButton("5 ⭐", callback_data=f"feedback_{event_id}_5"),
+                InlineKeyboardButton(
+                    "4 ⭐", callback_data=f"feedback_{event_id}_4"
+                ),
+                InlineKeyboardButton(
+                    "5 ⭐", callback_data=f"feedback_{event_id}_5"
+                ),
             ],
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
-        
+
         await update.message.reply_text(
             f"⭐ *Rate Event {event_id}*\n\n"
             f"Type: {event.event_type}\n"
@@ -78,16 +98,18 @@ async def collect_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         await session.close()
 
 
-async def handle_feedback_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def handle_feedback_callback(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
     """Handle feedback callback queries."""
     query = update.callback_query
     if not query:
         return
     await query.answer()
-    
+
     data = query.data
-    
-    if data.startswith("feedback_"):
+
+    if data and data.startswith("feedback_"):
         parts = data.split("_")
         if len(parts) >= 3:
             event_id = int(parts[1])
@@ -95,7 +117,9 @@ async def handle_feedback_callback(update: Update, context: ContextTypes.DEFAULT
             await process_feedback(query, context, event_id, score)
 
 
-async def process_feedback(query, context: ContextTypes.DEFAULT_TYPE, event_id: int, score: int) -> None:
+async def process_feedback(
+    query, _context: ContextTypes.DEFAULT_TYPE, event_id: int, score: int
+) -> None:
     """Process feedback submission."""
     user_id = query.from_user.id
     
@@ -124,7 +148,10 @@ async def process_feedback(query, context: ContextTypes.DEFAULT_TYPE, event_id: 
             event_id=event_id,
             user_id=user_id,
             action="feedback_submitted",
-            metadata_dict={"score": score, "timestamp": datetime.utcnow().isoformat()}
+            metadata_dict={
+                "score": score,
+                "timestamp": datetime.utcnow().isoformat()
+            }
         )
         session.add(log)
         
@@ -139,7 +166,6 @@ async def process_feedback(query, context: ContextTypes.DEFAULT_TYPE, event_id: 
 
 async def _get_existing_feedback(session, event_id: int, user_id: int):
     """Check if user already provided feedback."""
-    from db.models import Feedback
     result = await session.execute(
         Feedback.__table__.select().where(
             Feedback.event_id == event_id,
@@ -154,7 +180,12 @@ def generate_random_feedback_request(event_id: int) -> str:
     templates = [
         f"⭐ How was event {event_id}? Please share your feedback!",
         f"🔔 Event {event_id} is complete. Rate your experience!",
-        f"📊 What did you think about event {event_id}? We'd love your feedback!",
-        f"✅ Event {event_id} ended. Your feedback helps us improve!",
+        (
+            f"📋 What did you think about event {event_id}? "
+            "We'd love your feedback!"
+        ),
+        (
+            f"✅ Event {event_id} ended. Your feedback helps us improve!"
+        ),
     ]
     return random.choice(templates)

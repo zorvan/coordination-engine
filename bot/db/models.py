@@ -2,11 +2,15 @@
 Database models for the coordination bot.
 """
 from datetime import datetime
-from sqlalchemy import Column, Integer, BigInteger, String, Float, DateTime, JSON, Text, ForeignKey, CheckConstraint, UniqueConstraint
+from typing import Any
+from sqlalchemy import (
+    Column, Integer, BigInteger, String, Float, DateTime, JSON, Text,
+    ForeignKey, CheckConstraint, UniqueConstraint
+)
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
 
-Base = declarative_base()
+Base: Any = declarative_base()
 
 
 class User(Base):
@@ -18,10 +22,18 @@ class User(Base):
     display_name = Column(String(255))
     reputation = Column(Float, default=1.0)
     expertise_per_activity = Column(JSON, default=dict)
-    created_at = Column(DateTime, default=lambda: datetime.utcnow())
-    
-    constraints = relationship("Constraint", back_populates="user", foreign_keys="[Constraint.user_id]")
-    target_constraints = relationship("Constraint", back_populates="target_user", foreign_keys="[Constraint.target_user_id]")
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    constraints = relationship(
+        "Constraint",
+        back_populates="user",
+        foreign_keys="[Constraint.user_id]"
+    )
+    target_constraints = relationship(
+        "Constraint",
+        back_populates="target_user",
+        foreign_keys="[Constraint.target_user_id]"
+    )
     logs = relationship("Log", back_populates="user")
     feedback = relationship("Feedback", back_populates="user")
     reputation_records = relationship("Reputation", back_populates="user")
@@ -36,7 +48,7 @@ class Group(Base):
     group_name = Column(String(255))
     group_type = Column(String(50), default="casual")
     member_list = Column(JSON, default=list)
-    created_at = Column(DateTime, default=lambda: datetime.utcnow())
+    created_at = Column(DateTime, default=datetime.utcnow)
     
     events = relationship("Event", back_populates="group")
 
@@ -46,21 +58,33 @@ class Event(Base):
     __tablename__ = "events"
     
     event_id = Column(Integer, primary_key=True)
-    group_id = Column(Integer, ForeignKey("groups.group_id", ondelete="CASCADE"), nullable=False)
+    group_id = Column(
+        Integer,
+        ForeignKey("groups.group_id", ondelete="CASCADE"),
+        nullable=False
+    )
     event_type = Column(String(100), nullable=False)
     scheduled_time = Column(DateTime)
     threshold_attendance = Column(Integer, default=0)
     attendance_list = Column(JSON, default=list)
     ai_score = Column(Float, default=0.0)
     state = Column(String(20), default="proposed")
-    created_at = Column(DateTime, default=lambda: datetime.utcnow())
+    created_at = Column(DateTime, default=datetime.utcnow)
     locked_at = Column(DateTime)
     completed_at = Column(DateTime)
-    
+
     group = relationship("Group", back_populates="events")
-    constraints = relationship("Constraint", back_populates="event", cascade="all, delete-orphan")
+    constraints = relationship(
+        "Constraint",
+        back_populates="event",
+        cascade="all, delete-orphan"
+    )
     logs = relationship("Log", back_populates="event")
-    feedback = relationship("Feedback", back_populates="event", cascade="all, delete-orphan")
+    feedback = relationship(
+        "Feedback",
+        back_populates="event",
+        cascade="all, delete-orphan"
+    )
     ailog = relationship("AILog", back_populates="event")
 
 
@@ -69,16 +93,35 @@ class Constraint(Base):
     __tablename__ = "constraints"
     
     constraint_id = Column(Integer, primary_key=True)
-    user_id = Column(Integer, ForeignKey("users.user_id", ondelete="CASCADE"), nullable=False)
-    target_user_id = Column(Integer, ForeignKey("users.user_id", ondelete="SET NULL"))
-    event_id = Column(Integer, ForeignKey("events.event_id", ondelete="CASCADE"), nullable=False)
+    user_id = Column(
+        Integer,
+        ForeignKey("users.user_id", ondelete="CASCADE"),
+        nullable=False
+    )
+    target_user_id = Column(
+        Integer,
+        ForeignKey("users.user_id", ondelete="SET NULL")
+    )
+    event_id = Column(
+        Integer,
+        ForeignKey("events.event_id", ondelete="CASCADE"),
+        nullable=False
+    )
     type = Column(String(50), nullable=False)
     confidence = Column(Float, default=1.0)
-    created_at = Column(DateTime, default=lambda: datetime.utcnow())
-    
-    user = relationship("User", back_populates="constraints", foreign_keys=[user_id])
-    target_user = relationship("User", back_populates="target_constraints", foreign_keys=[target_user_id])
-    event = relationship("Event", back_populates="event")
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    user = relationship(
+        "User",
+        back_populates="constraints",
+        foreign_keys=[user_id]
+    )
+    target_user = relationship(
+        "User",
+        back_populates="target_constraints",
+        foreign_keys=[target_user_id]
+    )
+    event = relationship("Event", back_populates="constraints")
 
 
 class Reputation(Base):
@@ -86,15 +129,25 @@ class Reputation(Base):
     __tablename__ = "reputation"
     
     reputation_id = Column(Integer, primary_key=True)
-    user_id = Column(Integer, ForeignKey("users.user_id", ondelete="CASCADE"), nullable=False)
+    user_id = Column(
+        Integer,
+        ForeignKey("users.user_id", ondelete="CASCADE"),
+        nullable=False
+    )
     activity_type = Column(String(100), nullable=False)
     score = Column(Float, default=1.0)
     decay_rate = Column(Float, default=0.05)
-    last_updated = Column(DateTime, default=lambda: datetime.utcnow())
-    
+    last_updated = Column(DateTime, default=datetime.utcnow)
+
     __table_args__ = (
-        CheckConstraint("score >= 0 AND score <= 5", name="reputation_score_range"),
-        CheckConstraint("decay_rate >= 0 AND decay_rate <= 1", name="reputation_decay_range"),
+        CheckConstraint(
+            "score >= 0 AND score <= 5",
+            name="reputation_score_range"
+        ),
+        CheckConstraint(
+            "decay_rate >= 0 AND decay_rate <= 1",
+            name="reputation_decay_range"
+        ),
         UniqueConstraint("user_id", "activity_type", name="uq_user_activity"),
     )
     
@@ -106,10 +159,16 @@ class Log(Base):
     __tablename__ = "logs"
     
     log_id = Column(Integer, primary_key=True)
-    event_id = Column(Integer, ForeignKey("events.event_id", ondelete="SET NULL"))
-    user_id = Column(Integer, ForeignKey("users.user_id", ondelete="SET NULL"))
+    event_id = Column(
+        Integer,
+        ForeignKey("events.event_id", ondelete="SET NULL")
+    )
+    user_id = Column(
+        Integer,
+        ForeignKey("users.user_id", ondelete="SET NULL")
+    )
     action = Column(String(100), nullable=False)
-    timestamp = Column(DateTime, default=lambda: datetime.utcnow())
+    timestamp = Column(DateTime, default=datetime.utcnow)
     metadata_dict = Column(JSON, default=dict)
     
     event = relationship("Event", back_populates="logs")
@@ -121,16 +180,32 @@ class Feedback(Base):
     __tablename__ = "feedback"
     
     feedback_id = Column(Integer, primary_key=True)
-    event_id = Column(Integer, ForeignKey("events.event_id", ondelete="CASCADE"), nullable=False)
-    user_id = Column(Integer, ForeignKey("users.user_id", ondelete="CASCADE"), nullable=False)
+    event_id = Column(
+        Integer,
+        ForeignKey("events.event_id", ondelete="CASCADE"),
+        nullable=False
+    )
+    user_id = Column(
+        Integer,
+        ForeignKey("users.user_id", ondelete="CASCADE"),
+        nullable=False
+    )
     score_type = Column(String(50), nullable=False)
     value = Column(Float, nullable=False)
     comment = Column(Text)
-    timestamp = Column(DateTime, default=lambda: datetime.utcnow())
+    timestamp = Column(DateTime, default=datetime.utcnow)
     
     __table_args__ = (
-        CheckConstraint("value >= 0 AND value <= 5", name="feedback_value_range"),
-        UniqueConstraint("event_id", "user_id", "score_type", name="uq_feedback_user_event"),
+        CheckConstraint(
+            "value >= 0 AND value <= 5",
+            name="feedback_value_range"
+        ),
+        UniqueConstraint(
+            "event_id",
+            "user_id",
+            "score_type",
+            name="uq_feedback_user_event"
+        ),
     )
     
     event = relationship("Event", back_populates="feedback")
@@ -142,11 +217,14 @@ class AILog(Base):
     __tablename__ = "ailog"
     
     ailog_id = Column(Integer, primary_key=True)
-    event_id = Column(Integer, ForeignKey("events.event_id", ondelete="SET NULL"))
+    event_id = Column(
+        Integer,
+        ForeignKey("events.event_id", ondelete="SET NULL")
+    )
     recommendation_type = Column(String(100), nullable=False)
     recommendation_value = Column(Text, nullable=False)
     confidence = Column(Float)
     is_fallback = Column(Integer, default=0)
-    timestamp = Column(DateTime, default=lambda: datetime.utcnow())
-    
+    timestamp = Column(DateTime, default=datetime.utcnow)
+
     event = relationship("Event", back_populates="ailog")

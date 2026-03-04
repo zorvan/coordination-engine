@@ -2,10 +2,32 @@
 """Main entry point for the Telegram bot."""
 import logging
 from telegram import Update
-from telegram.ext import ApplicationBuilder, ContextTypes, MessageHandler, filters
+from telegram.ext import (
+    ApplicationBuilder,
+    CallbackQueryHandler,
+    CommandHandler,
+    ContextTypes,
+    MessageHandler,
+    filters,
+)
 
 from config.settings import Settings
 from config.logging import setup_logging
+from bot.commands import (
+    start,
+    my_groups,
+    profile,
+    reputation,
+    organize_event,
+    join,
+    confirm,
+    cancel,
+    constraints,
+    suggest_time,
+    status,
+    event_details,
+)
+from bot.handlers import event_flow, feedback
 
 
 async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -49,10 +71,51 @@ def main():
         .token(settings.telegram_token)
         .build()
     )
+
+    # Command logging runs before all regular command handlers.
     application.add_handler(
         MessageHandler(filters.COMMAND, log_telegram_command),
         group=-1,
     )
+
+    # Commands
+    application.add_handler(CommandHandler("start", start.handle))
+    application.add_handler(CommandHandler("help", start.handle))
+    application.add_handler(CommandHandler("my_groups", my_groups.handle))
+    application.add_handler(CommandHandler("profile", profile.handle))
+    application.add_handler(CommandHandler("reputation", reputation.handle))
+    application.add_handler(CommandHandler("organize_event", organize_event.handle))
+    application.add_handler(CommandHandler("join", join.handle))
+    application.add_handler(CommandHandler("confirm", confirm.handle))
+    application.add_handler(CommandHandler("cancel", cancel.handle))
+    application.add_handler(CommandHandler("constraints", constraints.handle))
+    application.add_handler(CommandHandler("suggest_time", suggest_time.handle))
+    application.add_handler(CommandHandler("status", status.handle))
+    application.add_handler(CommandHandler("event_details", event_details.handle))
+    application.add_handler(CommandHandler("feedback", feedback.collect_feedback))
+
+    # Callback queries
+    application.add_handler(
+        CallbackQueryHandler(organize_event.handle_callback, pattern=r"^event_(type|threshold|final|cancel)_")
+    )
+    application.add_handler(
+        CallbackQueryHandler(event_flow.handle_event_flow, pattern=r"^event_(join|confirm|cancel|lock)_")
+    )
+    application.add_handler(
+        CallbackQueryHandler(event_details.handle_callback, pattern=r"^event_(logs|constraints|close)_")
+    )
+    application.add_handler(
+        CallbackQueryHandler(suggest_time.handle_callback, pattern=r"^suggest_time_retry_")
+    )
+    application.add_handler(
+        CallbackQueryHandler(feedback.handle_feedback_callback, pattern=r"^feedback_")
+    )
+
+    # Non-command messages used by the event creation flow.
+    application.add_handler(
+        MessageHandler(filters.TEXT & ~filters.COMMAND, organize_event.handle_message)
+    )
+
     application.add_error_handler(on_error)
     
     logger.info("Bot started. Press Ctrl+C to stop.")

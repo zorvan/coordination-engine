@@ -1,0 +1,53 @@
+services:
+  bot:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    environment:
+      - TELEGRAM_TOKEN=${TELEGRAM_TOKEN}
+      - DB_URL=postgresql://coord_user:coord_pass@db:5432/coord_db
+      - AI_ENDPOINT=http://ai:8080/v1/chat/completions
+      - AI_MODEL=${AI_MODEL:-qwen/qwen-2-7b-instruct}
+      - AI_API_KEY=${AI_API_KEY:-dummy-key}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    depends_on:
+      - db
+      - ai
+    networks:
+      - coordination-network
+    volumes:
+      - .:/app
+    restart: unless-stopped
+
+  db:
+    image: postgres:15
+    environment:
+      - POSTGRES_USER=coord_user
+      - POSTGRES_PASSWORD=coord_pass
+      - POSTGRES_DB=coord_db
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - coordination-network
+    restart: unless-stopped
+
+  ai:
+    image: qwen/qwen2-7b-instruct
+    ports:
+      - "8080:8080"
+    environment:
+      - MODEL_NAME=qwen2-7b-instruct
+      - PORT=8080
+    volumes:
+      - ai_models:/models
+    networks:
+      - coordination-network
+    restart: unless-stopped
+
+networks:
+  coordination-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  ai_models:

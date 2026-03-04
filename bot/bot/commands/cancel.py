@@ -1,0 +1,98 @@
+#!/usr/bin/env python3
+"""Cancel attendance command handler with nudges."""
+from telegram import Update
+from telegram.ext import ContextTypes
+from db.models import Event, Log, Constraint
+from db.connection import get_session
+from config.settings import settings
+from datetime import datetime
+from bot.utils.nudges import generate_nudge_message
+
+
+async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /cancel command - cancel attendance with nudges."""
+    if not update.message:
+        return
+    
+    user_id = update.effective_user.id
+    event_id = context.args[0] if context.args else None
+    
+    if not event_id:
+        await update.message.reply_text(
+            "Usage: /cancel <event_id>\n\n"
+            "Example: /cancel 123"
+        )
+        return
+    
+    try:
+        event_id = int(event_id)
+    except ValueError:
+        await update.message.reply_text("❌ Event ID must be a number.")
+        return
+    
+    async for session in get_session(settings.db_url):
+        result = await session.execute(
+            Event.__table__.select().where(Event.event_id == event_id)
+        )
+        event = result.scalar_one_or_none()
+        
+        if not event:
+            await update.message.reply_text("❌ Event not found.")
+            await session.close()
+            return
+        
+        if event.state == "locked":
+            await update.message.reply_text(
+                f"❌ Cannot cancel event {event_id} - it's already locked."
+            )
+            await session.close()
+            return
+        
+        attendance_list = [e for e in event.attendance_list 
+                          if not str(e).startswith(f"{user_id}:confirmed")]
+        
+        if user_id not in attendance_list:
+            await update.message.reply_text(
+                f"❌ You haven't joined event {event_id} yet. Nothing to cancel."
+            )
+            await session.close()
+            return
+        
+        event.attendance_list = attendance_list
+        
+        log = Log(
+            event_id=event_id,
+            user_id=user_id,
+            action="cancelled",
+            metadata_dict={"timestamp": datetime.utcnow().isoformat()}
+        )
+        session.add(log)
+        
+        await session.commit()
+        
+        nudge_msg = generate_nudge_message(event_id, user_id, event.event_type)
+        
+        await update.message.reply_text(
+            f"❌ *Attendance cancelled for event {event_id}!*\n\n"
+            f"{nudge_msg}\n\n"
+            f"Event: {event.event_type}\n"
+            f"Time: {event.scheduled_time}"
+        )
+        await session.close()
+
+
+async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle callback queries for cancel buttons."""
+    query = update.callback_query
+    await query.answer()
+    
+    data = query.data
+    
+    if data.startswith("event_cancel_"):
+        event_id = int(data.replace("event_cancel_", ""))
+        context.args = [str(event_id)]
+        await handle(query, context)
+        await query.edit_message_text(
+            f"❌ *Attendance cancelled for event {event_id}!*\n\n"
+            "You can rejoin anytime using /join."
+        )

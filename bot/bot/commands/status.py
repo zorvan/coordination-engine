@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from db.models import Event, Log, Constraint
 from db.connection import get_session
 from config.settings import settings
+from bot.common.event_presenters import format_status_message
 
 
 async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -31,7 +32,7 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
     db_url = settings.db_url or ""
-    async for session in get_session(db_url):
+    async with get_session(db_url) as session:
         result = await session.execute(
             select(Event).where(Event.event_id == event_id)
         )
@@ -39,25 +40,15 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
         if not event:
             await update.message.reply_text("❌ Event not found.")
-            await session.close()
+            
             return
 
         log_count = await _get_log_count(session, event_id)
         constraint_count = await _get_constraint_count(session, event_id)
-
         await update.message.reply_text(
-            f"📊 *Event {event_id} Status*\n\n"
-            f"Type: {event.event_type}\n"
-            f"Time: {event.scheduled_time}\n"
-            f"Threshold: {event.threshold_attendance}\n"
-            f"State: {event.state}\n"
-            f"AI Score: {event.ai_score:.2f}\n\n"
-            f"Attendees: {len(event.attendance_list)}\n"
-            f"Logs: {log_count}\n"
-            f"Constraints: {constraint_count}\n"
-            f"Created: {event.created_at}"
+            format_status_message(event_id, event, log_count, constraint_count)
         )
-        await session.close()
+        
 
 
 async def _get_log_count(session: AsyncSession, event_id: int) -> int:

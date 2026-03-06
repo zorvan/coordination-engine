@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Suggest time command handler for AI time suggestions."""
+from datetime import datetime
 from typing import cast
 from telegram import (
     Update,
@@ -80,22 +81,36 @@ async def _send_suggestion(
     msg = cast(Message, message)
 
     db_url = settings.db_url or ""
-    async for session in get_session(db_url):
+    async with get_session(db_url) as session:
         result = await session.execute(
             select(Event).where(Event.event_id == event_id)
         )
         event = result.scalar_one_or_none()
         if not event:
             await msg.reply_text("❌ Event not found.")
-            await session.close()
+            
             return
 
-        engine = AICoordinationEngine(create_session_factory(db_url))
-        suggestion = await engine.suggest_event_time(event_id)
+        session_factory = create_session_factory(db_url)
+        engine = AICoordinationEngine(session_factory)
+        suggestion = await engine.suggest_event_time(session=session,
+                                                     event_id=event_id)
         if "error" in suggestion:
             await msg.reply_text(f"❌ Error: {suggestion['error']}")
-            await session.close()
+            
             return
+
+        suggested_time_raw = suggestion.get("suggested_time")
+        normalized_suggested = (
+            str(suggested_time_raw) if suggested_time_raw is not None else "TBD"
+        )
+        auto_applied = False
+        if event.scheduled_time is None:
+            parsed = _parse_suggested_time(normalized_suggested)
+            if parsed:
+                event.scheduled_time = parsed
+                await session.commit()
+                auto_applied = True
 
         keyboard = [[
             InlineKeyboardButton(
@@ -107,15 +122,18 @@ async def _send_suggestion(
 
         await msg.reply_text(
             f"🤖 *AI Time Suggestion for Event {event_id}*\n\n"
-            f"Suggested Time: {suggestion.get('suggested_time', 'TBD')}\n"
+            f"Suggested Time: {normalized_suggested}\n"
             f"Reasoning: {suggestion.get('reasoning', 'N/A')}\n"
             f"Confidence: {suggestion.get('confidence', 0):.2f}\n\n"
             f"Availability Score: "
             f"{suggestion.get('availability_score', 0):.2f}\n"
-            f"Reliability Score: {suggestion.get('reliability_score', 0):.2f}",
+            f"Reliability Score: {suggestion.get('reliability_score', 0):.2f}"
+            + (
+                "\n\n✅ Applied this suggested time to the event."
+                if auto_applied else ""
+            ),
             reply_markup=reply_markup,
         )
-        await session.close()
 
 
 def create_session_factory(db_url: str):
@@ -124,3 +142,21 @@ def create_session_factory(db_url: str):
     from sqlalchemy.ext.asyncio import create_async_engine
     engine = create_async_engine(db_url)
     return create_session(engine)
+
+
+def _parse_suggested_time(raw_value: str) -> datetime | None:
+    """Parse common suggested time formats into datetime."""
+    value = raw_value.strip()
+    if not value or value.upper() == "TBD":
+        return None
+
+    for fmt in ("%Y-%m-%d %H:%M", "%Y-%m-%dT%H:%M", "%Y-%m-%dT%H:%M:%S"):
+        try:
+            return datetime.strptime(value, fmt)
+        except ValueError:
+            continue
+
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError:
+        return None

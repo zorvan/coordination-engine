@@ -18,7 +18,7 @@ async def handle(update: Update, _context: ContextTypes.DEFAULT_TYPE) -> None:
     is_group_chat = chat.type in {"group", "supergroup"}
     db_url = settings.db_url or ""
 
-    async for session in get_session(db_url):
+    async with get_session(db_url) as session:
         query = (
             select(Event, Group)
             .join(Group, Event.group_id == Group.group_id, isouter=True)
@@ -34,7 +34,7 @@ async def handle(update: Update, _context: ContextTypes.DEFAULT_TYPE) -> None:
 
         if not rows:
             await update.message.reply_text("ℹ️ No events found.")
-            await session.close()
+            
             return
 
         title = (
@@ -50,13 +50,18 @@ async def handle(update: Update, _context: ContextTypes.DEFAULT_TYPE) -> None:
                 if group and group.group_name
                 else str(group.telegram_group_id) if group else "Unknown Group"
             )
+            description = (event.description or "No description").strip()
+            if len(description) > 80:
+                description = f"{description[:77]}..."
             lines.append(
                 f"• ID `{event.event_id}` | {event.event_type} | {event.state}"
             )
             lines.append(
-                f"  Group: {group_name} | Time: {event.scheduled_time or 'TBD'}"
+                f"  Group: {group_name} | Time: {event.scheduled_time or 'TBD'} | "
+                f"Duration: {event.duration_minutes or 120}m"
             )
+            lines.append(f"  Description: {description}")
 
         await update.message.reply_text("\n".join(lines))
-        await session.close()
+        
         return

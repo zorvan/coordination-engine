@@ -5,7 +5,7 @@ from telegram.ext import ContextTypes
 from sqlalchemy import select
 
 from config.settings import settings
-from db.connection import create_engine, create_session
+from db.connection import get_session
 from db.models import Group
 
 
@@ -18,10 +18,7 @@ async def handle(
 
     telegram_user_id = update.effective_user.id
 
-    engine = create_engine(settings.db_url)
-    Session = create_session(engine)
-
-    async with Session() as session:
+    async with get_session(settings.db_url) as session:
         result = await session.execute(select(Group))
         groups = result.scalars().all()
 

@@ -4,6 +4,7 @@
 CREATE TABLE IF NOT EXISTS users (
     user_id SERIAL PRIMARY KEY,
     telegram_user_id BIGINT UNIQUE NOT NULL,
+    username VARCHAR(255) UNIQUE,
     display_name VARCHAR(255),
     reputation FLOAT DEFAULT 1.0 CHECK (reputation >= 0 AND reputation <= 5),
     expertise_per_activity JSONB DEFAULT '{}',
@@ -25,7 +26,9 @@ CREATE TABLE IF NOT EXISTS events (
     event_id SERIAL PRIMARY KEY,
     group_id INTEGER REFERENCES groups(group_id) ON DELETE CASCADE,
     event_type VARCHAR(100) NOT NULL,
+    description TEXT,
     scheduled_time TIMESTAMP,
+    duration_minutes INTEGER DEFAULT 120,
     threshold_attendance INTEGER DEFAULT 0,
     attendance_list JSONB DEFAULT '[]',
     ai_score FLOAT DEFAULT 0.0,
@@ -41,7 +44,10 @@ CREATE TABLE IF NOT EXISTS constraints (
     user_id INTEGER REFERENCES users(user_id) ON DELETE CASCADE,
     target_user_id INTEGER REFERENCES users(user_id) ON DELETE SET NULL,
     event_id INTEGER REFERENCES events(event_id) ON DELETE CASCADE,
-    type VARCHAR(50) NOT NULL CHECK (type IN ('if_joins', 'if_attends', 'unless_joins')),
+    type VARCHAR(50) NOT NULL CHECK (
+        type IN ('if_joins', 'if_attends', 'unless_joins')
+        OR type LIKE 'available:%'
+    ),
     confidence FLOAT DEFAULT 1.0 CHECK (confidence >= 0 AND confidence <= 1),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );

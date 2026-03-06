@@ -7,6 +7,7 @@ from db.models import Event, Log
 from db.connection import get_session
 from db.users import get_or_create_user_id
 from config.settings import settings
+from bot.common.scheduling import find_user_event_conflict
 from datetime import datetime
 
 
@@ -21,6 +22,7 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     telegram_user_id = user.id
     display_name = user.full_name
+    username = user.username
     event_id_str = context.args[0] if context.args else None
 
     if not event_id_str:
@@ -36,7 +38,7 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text("❌ Event ID must be a number.")
         return
 
-    async for session in get_session(settings.db_url):
+    async with get_session(settings.db_url) as session:
         result = await session.execute(
             select(Event).where(Event.event_id == event_id)
         )
@@ -44,42 +46,73 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
         if not event:
             await update.message.reply_text("❌ Event not found.")
-            await session.close()
+            
             return
 
         if event.state == "locked":
             await update.message.reply_text(
                 f"❌ Cannot confirm event {event_id} - it's already locked."
             )
-            await session.close()
+            
             return
 
-        if telegram_user_id not in event.attendance_list:
+        if event.state in ["completed", "cancelled"]:
             await update.message.reply_text(
-                f"❌ You haven't joined event {event_id} yet. Use /join first."
+                f"❌ Cannot confirm event {event_id} - it's {event.state}."
             )
-            await session.close()
             return
 
-        if "confirmed" not in event.attendance_list:
+        conflict = await find_user_event_conflict(
+            session=session,
+            telegram_user_id=telegram_user_id,
+            start_time=event.scheduled_time,
+            duration_minutes=event.duration_minutes,
+            ignore_event_id=event.event_id,
+        )
+        if conflict:
+            await update.message.reply_text(
+                "❌ You have a conflicting event.\n"
+                f"Conflicting Event ID: {conflict.event_id}\n"
+                f"Time: {conflict.scheduled_time}\n"
+                f"Duration: {conflict.duration_minutes or 120} minutes"
+            )
+            return
+
+        attendance = event.attendance_list or []
+        has_joined = any(
+            str(att) == str(telegram_user_id)
+            or str(att).startswith(f"{telegram_user_id}:")
+            for att in attendance
+        )
+        if not has_joined:
+            event.attendance_list.append(telegram_user_id)
+            attendance = event.attendance_list
+
+        already_confirmed = any(
+            str(att).startswith(f"{telegram_user_id}:confirmed")
+            for att in attendance
+        )
+        if not already_confirmed:
             event.attendance_list = [
-                e for e in event.attendance_list if e != telegram_user_id
+                e for e in attendance if str(e) != str(telegram_user_id)
             ]
             event.attendance_list.append(f"{telegram_user_id}:confirmed")
-            user_id = await get_or_create_user_id(
-                session,
-                telegram_user_id=telegram_user_id,
-                display_name=display_name,
-            )
+        event.state = "confirmed"
+        user_id = await get_or_create_user_id(
+            session,
+            telegram_user_id=telegram_user_id,
+            display_name=display_name,
+            username=username,
+        )
 
-            log = Log(
-                event_id=event_id,
-                user_id=user_id,
-                action="confirm",
-                metadata_dict={"timestamp": datetime.utcnow().isoformat()}
-            )
-            session.add(log)
-            await session.commit()
+        log = Log(
+            event_id=event_id,
+            user_id=user_id,
+            action="confirm",
+            metadata_dict={"timestamp": datetime.utcnow().isoformat()}
+        )
+        session.add(log)
+        await session.commit()
 
         await update.message.reply_text(
             f"✅ *Confirmed attendance for event {event_id}!*\n\n"
@@ -87,7 +120,7 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             f"Time: {event.scheduled_time}\n"
             f"State: {event.state}"
         )
-        await session.close()
+        
 
 
 async def handle_callback(

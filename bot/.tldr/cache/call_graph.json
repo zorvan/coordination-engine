@@ -1,0 +1,740 @@
+{
+  "edges": [
+    {
+      "from_file": "bot/commands/confirm.py",
+      "from_func": "handle",
+      "to_file": "db/connection.py",
+      "to_func": "get_session"
+    },
+    {
+      "from_file": "bot/commands/constraints.py",
+      "from_func": "view_constraints",
+      "to_file": "db/connection.py",
+      "to_func": "get_session"
+    },
+    {
+      "from_file": "ai/core.py",
+      "from_func": "__init__",
+      "to_file": "ai/llm.py",
+      "to_func": "LLMClient"
+    },
+    {
+      "from_file": "bot/commands/constraints.py",
+      "from_func": "add_constraint",
+      "to_file": "db/connection.py",
+      "to_func": "get_session"
+    },
+    {
+      "from_file": "bot/handlers/event_flow.py",
+      "from_func": "handle_confirm",
+      "to_file": "db/models.py",
+      "to_func": "Log"
+    },
+    {
+      "from_file": "bot/handlers/event_flow.py",
+      "from_func": "handle_join",
+      "to_file": "db/connection.py",
+      "to_func": "get_session"
+    },
+    {
+      "from_file": "bot/commands/constraints.py",
+      "from_func": "add_availability_slots",
+      "to_file": "db/users.py",
+      "to_func": "get_or_create_user_id"
+    },
+    {
+      "from_file": "bot/commands/event_details.py",
+      "from_func": "handle",
+      "to_file": "bot/commands/event_details.py",
+      "to_func": "_get_event_constraints"
+    },
+    {
+      "from_file": "bot/commands/status.py",
+      "from_func": "handle",
+      "to_file": "bot/commands/status.py",
+      "to_func": "_get_constraint_count"
+    },
+    {
+      "from_file": "ai/core.py",
+      "from_func": "__init__",
+      "to_file": "ai/rules.py",
+      "to_func": "RuleBasedEngine"
+    },
+    {
+      "from_file": "bot/commands/event_details.py",
+      "from_func": "show_details",
+      "to_file": "bot/commands/event_details.py",
+      "to_func": "_get_event_constraints"
+    },
+    {
+      "from_file": "tests/test_integration.py",
+      "from_func": "test_nudge_generation",
+      "to_file": "bot/utils/nudges.py",
+      "to_func": "generate_threshold_warning"
+    },
+    {
+      "from_file": "db/connection.py",
+      "from_func": "get_session",
+      "to_file": "db/connection.py",
+      "to_func": "create_session"
+    },
+    {
+      "from_file": "bot/handlers/event_flow.py",
+      "from_func": "handle_cancel",
+      "to_file": "db/users.py",
+      "to_func": "get_or_create_user_id"
+    },
+    {
+      "from_file": "bot/commands/suggest_time.py",
+      "from_func": "_send_suggestion",
+      "to_file": "bot/commands/suggest_time.py",
+      "to_func": "create_session_factory"
+    },
+    {
+      "from_file": "tests/test_setup.py",
+      "from_func": "<module>",
+      "to_file": "tests/test_setup.py",
+      "to_func": "test_all"
+    },
+    {
+      "from_file": "bot/commands/organize_event.py",
+      "from_func": "parse_invitee_input",
+      "to_file": "bot/commands/organize_event.py",
+      "to_func": "parse_invitee_handles"
+    },
+    {
+      "from_file": "bot/handlers/event_flow.py",
+      "from_func": "handle_join",
+      "to_file": "db/models.py",
+      "to_func": "Log"
+    },
+    {
+      "from_file": "bot/handlers/feedback.py",
+      "from_func": "collect_feedback",
+      "to_file": "db/connection.py",
+      "to_func": "get_session"
+    },
+    {
+      "from_file": "bot/handlers/membership.py",
+      "from_func": "track_group_members",
+      "to_file": "db/users.py",
+      "to_func": "get_or_create_user_id"
+    },
+    {
+      "from_file": "bot/commands/constraints.py",
+      "from_func": "handle",
+      "to_file": "bot/commands/constraints.py",
+      "to_func": "add_constraint"
+    },
+    {
+      "from_file": "db/users.py",
+      "from_func": "get_user_id_by_username",
+      "to_file": "db/users.py",
+      "to_func": "_normalize_username"
+    },
+    {
+      "from_file": "bot/commands/event_details.py",
+      "from_func": "handle",
+      "to_file": "bot/commands/event_details.py",
+      "to_func": "_get_event_logs"
+    },
+    {
+      "from_file": "bot/commands/confirm.py",
+      "from_func": "handle",
+      "to_file": "db/models.py",
+      "to_func": "Log"
+    },
+    {
+      "from_file": "bot/commands/organize_event.py",
+      "from_func": "handle_message",
+      "to_file": "bot/commands/organize_event.py",
+      "to_func": "build_event_type_markup"
+    },
+    {
+      "from_file": "bot/handlers/event_flow.py",
+      "from_func": "handle_event_flow",
+      "to_file": "bot/handlers/event_flow.py",
+      "to_func": "handle_cancel"
+    },
+    {
+      "from_file": "bot/handlers/feedback.py",
+      "from_func": "handle_feedback_callback",
+      "to_file": "bot/handlers/feedback.py",
+      "to_func": "process_feedback"
+    },
+    {
+      "from_file": "bot/handlers/event_flow.py",
+      "from_func": "handle_event_flow",
+      "to_file": "bot/handlers/event_flow.py",
+      "to_func": "handle_join"
+    },
+    {
+      "from_file": "bot/commands/event_details.py",
+      "from_func": "show_details",
+      "to_file": "bot/commands/event_details.py",
+      "to_func": "_get_event_logs"
+    },
+    {
+      "from_file": "test_setup.py",
+      "from_func": "test_all",
+      "to_file": "config/logging.py",
+      "to_func": "setup_logging"
+    },
+    {
+      "from_file": "tests/test_integration.py",
+      "from_func": "test_nudge_generation",
+      "to_file": "bot/utils/nudges.py",
+      "to_func": "generate_fallback_warning"
+    },
+    {
+      "from_file": "bot/commands/suggest_time.py",
+      "from_func": "_send_suggestion",
+      "to_file": "ai/core.py",
+      "to_func": "AICoordinationEngine"
+    },
+    {
+      "from_file": "bot/handlers/event_flow.py",
+      "from_func": "handle_confirm",
+      "to_file": "db/connection.py",
+      "to_func": "get_session"
+    },
+    {
+      "from_file": "bot/commands/event_details.py",
+      "from_func": "handle_callback",
+      "to_file": "bot/commands/event_details.py",
+      "to_func": "show_details"
+    },
+    {
+      "from_file": "bot/commands/event_details.py",
+      "from_func": "show_details",
+      "to_file": "db/connection.py",
+      "to_func": "get_session"
+    },
+    {
+      "from_file": "tests/test_setup.py",
+      "from_func": "test_all",
+      "to_file": "config/logging.py",
+      "to_func": "setup_logging"
+    },
+    {
+      "from_file": "main.py",
+      "from_func": "check_llm_availability",
+      "to_file": "ai/llm.py",
+      "to_func": "LLMClient"
+    },
+    {
+      "from_file": "db/connection.py",
+      "from_func": "get_session",
+      "to_file": "db/connection.py",
+      "to_func": "create_engine"
+    },
+    {
+      "from_file": "bot/commands/event_details.py",
+      "from_func": "handle_callback",
+      "to_file": "bot/commands/event_details.py",
+      "to_func": "show_constraints"
+    },
+    {
+      "from_file": "tests/test_integration.py",
+      "from_func": "test_nudge_generation",
+      "to_file": "bot/utils/nudges.py",
+      "to_func": "generate_lock_warning"
+    },
+    {
+      "from_file": "tests/test_integration.py",
+      "from_func": "test_event_flow_state_machine",
+      "to_file": "bot/handlers/event_flow.py",
+      "to_func": "can_transition"
+    },
+    {
+      "from_file": "main.py",
+      "from_func": "main",
+      "to_file": "config/logging.py",
+      "to_func": "setup_logging"
+    },
+    {
+      "from_file": "bot/commands/status.py",
+      "from_func": "handle",
+      "to_file": "db/connection.py",
+      "to_func": "get_session"
+    },
+    {
+      "from_file": "bot/handlers/event_flow.py",
+      "from_func": "handle_lock",
+      "to_file": "db/connection.py",
+      "to_func": "get_session"
+    },
+    {
+      "from_file": "bot/commands/cancel.py",
+      "from_func": "handle",
+      "to_file": "db/models.py",
+      "to_func": "Log"
+    },
+    {
+      "from_file": "bot/commands/join.py",
+      "from_func": "handle",
+      "to_file": "db/connection.py",
+      "to_func": "get_session"
+    },
+    {
+      "from_file": "bot/commands/organize_event.py",
+      "from_func": "finalize_event",
+      "to_file": "db/connection.py",
+      "to_func": "get_session"
+    },
+    {
+      "from_file": "bot/commands/constraints.py",
+      "from_func": "add_constraint",
+      "to_file": "db/users.py",
+      "to_func": "get_user_id_by_username"
+    },
+    {
+      "from_file": "bot/handlers/event_flow.py",
+      "from_func": "handle_event_flow",
+      "to_file": "bot/handlers/event_flow.py",
+      "to_func": "handle_confirm"
+    },
+    {
+      "from_file": "bot/commands/confirm.py",
+      "from_func": "handle",
+      "to_file": "db/users.py",
+      "to_func": "get_or_create_user_id"
+    },
+    {
+      "from_file": "bot/commands/organize_event.py",
+      "from_func": "parse_invitee_handles",
+      "to_file": "bot/commands/organize_event.py",
+      "to_func": "handle"
+    },
+    {
+      "from_file": "bot/commands/constraints.py",
+      "from_func": "add_constraint",
+      "to_file": "db/users.py",
+      "to_func": "get_or_create_user_id"
+    },
+    {
+      "from_file": "bot/commands/suggest_time.py",
+      "from_func": "handle",
+      "to_file": "bot/commands/suggest_time.py",
+      "to_func": "_send_suggestion"
+    },
+    {
+      "from_file": "bot/handlers/event_flow.py",
+      "from_func": "handle_join",
+      "to_file": "db/users.py",
+      "to_func": "get_or_create_user_id"
+    },
+    {
+      "from_file": "bot/commands/event_details.py",
+      "from_func": "handle",
+      "to_file": "bot/commands/event_details.py",
+      "to_func": "_format_event_details"
+    },
+    {
+      "from_file": "tests/test_integration.py",
+      "from_func": "test_feedback_collection",
+      "to_file": "bot/handlers/feedback.py",
+      "to_func": "collect_feedback"
+    },
+    {
+      "from_file": "bot/commands/join.py",
+      "from_func": "handle",
+      "to_file": "db/models.py",
+      "to_func": "Log"
+    },
+    {
+      "from_file": "test_setup.py",
+      "from_func": "test_all",
+      "to_file": "test_setup.py",
+      "to_func": "check_db"
+    },
+    {
+      "from_file": "bot/commands/event_details.py",
+      "from_func": "handle",
+      "to_file": "db/connection.py",
+      "to_func": "get_session"
+    },
+    {
+      "from_file": "tests/test_integration.py",
+      "from_func": "test_nudge_generation",
+      "to_file": "bot/utils/nudges.py",
+      "to_func": "generate_nudge_message"
+    },
+    {
+      "from_file": "tests/test_integration.py",
+      "from_func": "test_nudge_generation",
+      "to_file": "bot/utils/nudges.py",
+      "to_func": "generate_deadline_warning"
+    },
+    {
+      "from_file": "bot/commands/constraints.py",
+      "from_func": "add_constraint",
+      "to_file": "db/models.py",
+      "to_func": "Constraint"
+    },
+    {
+      "from_file": "bot/commands/event_details.py",
+      "from_func": "handle_callback",
+      "to_file": "bot/commands/event_details.py",
+      "to_func": "show_logs"
+    },
+    {
+      "from_file": "bot/commands/event_details.py",
+      "from_func": "show_logs",
+      "to_file": "db/connection.py",
+      "to_func": "get_session"
+    },
+    {
+      "from_file": "bot/commands/organize_event.py",
+      "from_func": "handle_calendar_callback",
+      "to_file": "bot/commands/organize_event.py",
+      "to_func": "build_calendar_markup"
+    },
+    {
+      "from_file": "bot/commands/cancel.py",
+      "from_func": "handle",
+      "to_file": "bot/utils/nudges.py",
+      "to_func": "generate_nudge_message"
+    },
+    {
+      "from_file": "bot/commands/cancel.py",
+      "from_func": "handle",
+      "to_file": "db/connection.py",
+      "to_func": "get_session"
+    },
+    {
+      "from_file": "bot/commands/constraints.py",
+      "from_func": "add_availability_slots",
+      "to_file": "db/models.py",
+      "to_func": "Constraint"
+    },
+    {
+      "from_file": "bot/handlers/event_flow.py",
+      "from_func": "handle_confirm",
+      "to_file": "db/users.py",
+      "to_func": "get_or_create_user_id"
+    },
+    {
+      "from_file": "bot/commands/suggest_time.py",
+      "from_func": "_send_suggestion",
+      "to_file": "bot/commands/suggest_time.py",
+      "to_func": "_parse_suggested_time"
+    },
+    {
+      "from_file": "bot/commands/constraints.py",
+      "from_func": "handle",
+      "to_file": "bot/commands/constraints.py",
+      "to_func": "view_constraints"
+    },
+    {
+      "from_file": "bot/handlers/event_flow.py",
+      "from_func": "handle_cancel",
+      "to_file": "db/connection.py",
+      "to_func": "get_session"
+    },
+    {
+      "from_file": "bot/commands/organize_event.py",
+      "from_func": "_start_event_flow",
+      "to_file": "db/models.py",
+      "to_func": "Group"
+    },
+    {
+      "from_file": "bot/commands/my_groups.py",
+      "from_func": "handle",
+      "to_file": "db/connection.py",
+      "to_func": "get_session"
+    },
+    {
+      "from_file": "bot/commands/suggest_time.py",
+      "from_func": "create_session_factory",
+      "to_file": "db/connection.py",
+      "to_func": "create_session"
+    },
+    {
+      "from_file": "bot/commands/constraints.py",
+      "from_func": "handle",
+      "to_file": "bot/commands/constraints.py",
+      "to_func": "add_availability_slots"
+    },
+    {
+      "from_file": "bot/commands/join.py",
+      "from_func": "handle",
+      "to_file": "db/users.py",
+      "to_func": "get_or_create_user_id"
+    },
+    {
+      "from_file": "bot/handlers/event_flow.py",
+      "from_func": "show_event_details",
+      "to_file": "db/connection.py",
+      "to_func": "get_session"
+    },
+    {
+      "from_file": "test_setup.py",
+      "from_func": "test_all",
+      "to_file": "db/connection.py",
+      "to_func": "create_engine"
+    },
+    {
+      "from_file": "bot/commands/constraints.py",
+      "from_func": "remove_constraint",
+      "to_file": "db/connection.py",
+      "to_func": "get_session"
+    },
+    {
+      "from_file": "bot/commands/join.py",
+      "from_func": "handle_callback",
+      "to_file": "bot/commands/join.py",
+      "to_func": "handle"
+    },
+    {
+      "from_file": "tests/test_integration.py",
+      "from_func": "test_feedback_callback",
+      "to_file": "bot/handlers/feedback.py",
+      "to_func": "handle_feedback_callback"
+    },
+    {
+      "from_file": "bot/handlers/feedback.py",
+      "from_func": "collect_feedback",
+      "to_file": "db/users.py",
+      "to_func": "get_or_create_user_id"
+    },
+    {
+      "from_file": "main.py",
+      "from_func": "<module>",
+      "to_file": "main.py",
+      "to_func": "main"
+    },
+    {
+      "from_file": "bot/commands/event_details.py",
+      "from_func": "show_details",
+      "to_file": "bot/commands/event_details.py",
+      "to_func": "_format_event_details"
+    },
+    {
+      "from_file": "db/users.py",
+      "from_func": "get_or_create_user_id",
+      "to_file": "db/users.py",
+      "to_func": "_normalize_username"
+    },
+    {
+      "from_file": "bot/commands/organize_event.py",
+      "from_func": "handle_callback",
+      "to_file": "bot/commands/organize_event.py",
+      "to_func": "finalize_event"
+    },
+    {
+      "from_file": "bot/commands/suggest_time.py",
+      "from_func": "handle_callback",
+      "to_file": "bot/commands/suggest_time.py",
+      "to_func": "_send_suggestion"
+    },
+    {
+      "from_file": "bot/commands/constraints.py",
+      "from_func": "handle",
+      "to_file": "bot/commands/constraints.py",
+      "to_func": "remove_constraint"
+    },
+    {
+      "from_file": "main.py",
+      "from_func": "main",
+      "to_file": "config/settings.py",
+      "to_func": "Settings"
+    },
+    {
+      "from_file": "bot/commands/organize_event.py",
+      "from_func": "_start_event_flow",
+      "to_file": "db/connection.py",
+      "to_func": "get_session"
+    },
+    {
+      "from_file": "bot/commands/organize_event.py",
+      "from_func": "handle_message",
+      "to_file": "bot/commands/organize_event.py",
+      "to_func": "parse_invitee_input"
+    },
+    {
+      "from_file": "bot/commands/confirm.py",
+      "from_func": "handle_callback",
+      "to_file": "bot/commands/confirm.py",
+      "to_func": "handle"
+    },
+    {
+      "from_file": "bot/commands/organize_event.py",
+      "from_func": "handle_callback",
+      "to_file": "bot/commands/organize_event.py",
+      "to_func": "handle_calendar_callback"
+    },
+    {
+      "from_file": "bot/commands/organize_event.py",
+      "from_func": "handle_callback",
+      "to_file": "bot/commands/organize_event.py",
+      "to_func": "build_calendar_markup"
+    },
+    {
+      "from_file": "bot/commands/constraints.py",
+      "from_func": "add_availability_slots",
+      "to_file": "db/connection.py",
+      "to_func": "get_session"
+    },
+    {
+      "from_file": "bot/commands/organize_event.py",
+      "from_func": "handle_flexible",
+      "to_file": "bot/commands/organize_event.py",
+      "to_func": "_start_event_flow"
+    },
+    {
+      "from_file": "tests/test_setup.py",
+      "from_func": "test_all",
+      "to_file": "tests/test_setup.py",
+      "to_func": "check_db"
+    },
+    {
+      "from_file": "bot/commands/cancel.py",
+      "from_func": "handle",
+      "to_file": "db/users.py",
+      "to_func": "get_or_create_user_id"
+    },
+    {
+      "from_file": "bot/commands/constraints.py",
+      "from_func": "add_availability_slots",
+      "to_file": "bot/commands/constraints.py",
+      "to_func": "_parse_slot"
+    },
+    {
+      "from_file": "tests/test_commands.py",
+      "from_func": "test_start_command",
+      "to_file": "tests/test_commands.py",
+      "to_func": "MockContext"
+    },
+    {
+      "from_file": "bot/handlers/event_flow.py",
+      "from_func": "handle_event_flow",
+      "to_file": "bot/handlers/event_flow.py",
+      "to_func": "handle_lock"
+    },
+    {
+      "from_file": "bot/handlers/feedback.py",
+      "from_func": "collect_feedback",
+      "to_file": "bot/handlers/feedback.py",
+      "to_func": "_get_existing_feedback"
+    },
+    {
+      "from_file": "db/users.py",
+      "from_func": "get_or_create_user_id",
+      "to_file": "db/models.py",
+      "to_func": "User"
+    },
+    {
+      "from_file": "bot/commands/organize_event.py",
+      "from_func": "handle",
+      "to_file": "bot/commands/organize_event.py",
+      "to_func": "_start_event_flow"
+    },
+    {
+      "from_file": "bot/handlers/membership.py",
+      "from_func": "track_group_members",
+      "to_file": "db/connection.py",
+      "to_func": "get_session"
+    },
+    {
+      "from_file": "bot/commands/event_details.py",
+      "from_func": "show_constraints",
+      "to_file": "db/connection.py",
+      "to_func": "get_session"
+    },
+    {
+      "from_file": "bot/commands/suggest_time.py",
+      "from_func": "_send_suggestion",
+      "to_file": "db/connection.py",
+      "to_func": "get_session"
+    },
+    {
+      "from_file": "bot/commands/organize_event.py",
+      "from_func": "finalize_event",
+      "to_file": "db/models.py",
+      "to_func": "Event"
+    },
+    {
+      "from_file": "main.py",
+      "from_func": "main",
+      "to_file": "main.py",
+      "to_func": "check_llm_availability"
+    },
+    {
+      "from_file": "bot/handlers/event_flow.py",
+      "from_func": "handle_cancel",
+      "to_file": "db/models.py",
+      "to_func": "Log"
+    },
+    {
+      "from_file": "bot/handlers/feedback.py",
+      "from_func": "process_feedback",
+      "to_file": "db/connection.py",
+      "to_func": "get_session"
+    },
+    {
+      "from_file": "bot/commands/cancel.py",
+      "from_func": "handle_callback",
+      "to_file": "bot/commands/cancel.py",
+      "to_func": "handle"
+    },
+    {
+      "from_file": "bot/handlers/feedback.py",
+      "from_func": "process_feedback",
+      "to_file": "db/models.py",
+      "to_func": "Feedback"
+    },
+    {
+      "from_file": "tests/test_setup.py",
+      "from_func": "test_all",
+      "to_file": "db/connection.py",
+      "to_func": "create_engine"
+    },
+    {
+      "from_file": "bot/handlers/membership.py",
+      "from_func": "track_group_members",
+      "to_file": "db/models.py",
+      "to_func": "Group"
+    },
+    {
+      "from_file": "main.py",
+      "from_func": "main",
+      "to_file": "main.py",
+      "to_func": "on_error"
+    },
+    {
+      "from_file": "test_setup.py",
+      "from_func": "<module>",
+      "to_file": "test_setup.py",
+      "to_func": "test_all"
+    },
+    {
+      "from_file": "bot/commands/events.py",
+      "from_func": "handle",
+      "to_file": "db/connection.py",
+      "to_func": "get_session"
+    },
+    {
+      "from_file": "bot/handlers/feedback.py",
+      "from_func": "process_feedback",
+      "to_file": "db/users.py",
+      "to_func": "get_or_create_user_id"
+    },
+    {
+      "from_file": "tests/test_integration.py",
+      "from_func": "test_nudge_generation",
+      "to_file": "bot/utils/nudges.py",
+      "to_func": "generate_reliability_warning"
+    },
+    {
+      "from_file": "bot/commands/status.py",
+      "from_func": "handle",
+      "to_file": "bot/commands/status.py",
+      "to_func": "_get_log_count"
+    }
+  ],
+  "languages": [
+    "python"
+  ],
+  "timestamp": 1772740122.3035727
+}

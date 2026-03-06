@@ -1,12 +1,18 @@
 #!/usr/bin/env python3
 """Unit tests for command handlers."""
 import pytest
+from unittest.mock import MagicMock
 from telegram import Update, Message, User, Chat
-from telegram.ext import ContextTypes
 
 from bot.commands import start, my_groups, profile, reputation
 from bot.commands import organize_event, join, confirm, cancel
 from bot.commands import constraints, suggest_time, status, event_details
+
+
+class MockContext:
+    """Mock context for testing."""
+    def __init__(self):
+        self.args = None
 
 
 @pytest.mark.asyncio
@@ -21,7 +27,7 @@ async def test_start_command():
             from_user=User(id=456, first_name="Test", is_bot=False)
         )
     )
-    context = ContextTypes.DEFAULT_TYPE()
+    context = MockContext()
     
     await start.handle(update, context)
     

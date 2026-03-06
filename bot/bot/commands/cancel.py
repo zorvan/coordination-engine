@@ -22,6 +22,7 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     telegram_user_id = user.id
     display_name = user.full_name
+    username = user.username
     event_id_str = context.args[0] if context.args else None
 
     if not event_id_str:
@@ -37,7 +38,7 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text("❌ Event ID must be a number.")
         return
 
-    async for session in get_session(settings.db_url):
+    async with get_session(settings.db_url) as session:
         result = await session.execute(
             select(Event).where(Event.event_id == event_id)
         )
@@ -45,14 +46,12 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
         if not event:
             await update.message.reply_text("❌ Event not found.")
-            await session.close()
             return
 
         if event.state == "locked":
             await update.message.reply_text(
                 f"❌ Cannot cancel event {event_id} - it's already locked."
             )
-            await session.close()
             return
 
         attendance_list = [
@@ -65,7 +64,6 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                 f"❌ You haven't joined event {event_id} yet. "
                 "Nothing to cancel."
             )
-            await session.close()
             return
 
         event.attendance_list = attendance_list
@@ -73,6 +71,7 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             session,
             telegram_user_id=telegram_user_id,
             display_name=display_name,
+            username=username,
         )
 
         log = Log(
@@ -95,7 +94,6 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             f"Event: {event.event_type}\n"
             f"Time: {event.scheduled_time}"
         )
-        await session.close()
 
 
 async def handle_callback(

@@ -1,12 +1,10 @@
 #!/usr/bin/env python3
 """Nudges utility - soft friction messages for the coordination bot."""
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+import random
 
 
 def generate_nudge_message(event_id: int, user_id: int, event_type: str) -> str:
     """Generate appropriate nudge message based on context."""
-    import random
-    
     nudges = [
         f"❗️ {user_id} has cancelled event {event_id}. "
         f"Participation is needed for this {event_type} event.",
@@ -74,24 +72,3 @@ def generate_threshold_warning(event_id: int, current: int, threshold: int) -> s
         f"Current: {current} / Required: {threshold}\n"
         "More attendees needed to lock this event."
     )
-
-
-def generate_compromise_suggestion(event_id: int, suggestions: list) -> str:
-    """Generate compromise suggestion message."""
-    msg = f"🔄 Event {event_id} - Suggested compromises:\n"
-    for i, suggestion in enumerate(suggestions, 1):
-        msg += f"{i}. {suggestion}\n"
-    return msg
-
-
-def get_inline_keyboard_for_event(event_id: int, event_state: str):
-    """Get inline keyboard for event actions."""
-    buttons = []
-    
-    if event_state == "proposed":
-        buttons.append(InlineKeyboardButton("✅ Confirm", callback_data=f"event_confirm_{event_id}"))
-        buttons.append(InlineKeyboardButton("❌ Cancel", callback_data=f"event_cancel_{event_id}"))
-    elif event_state == "interested":
-        buttons.append(InlineKeyboardButton("✅ Confirm", callback_data=f"event_confirm_{event_id}"))
-    
-    return InlineKeyboardMarkup([buttons])

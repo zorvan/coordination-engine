@@ -6,11 +6,18 @@ from sqlalchemy import select
 from db.models import Event
 from db.connection import get_session
 from config.settings import settings
+from bot.common.deeplinks import build_start_link
+from bot.common.event_presenters import format_event_details_message
 
 
 async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle /event_details command - show detailed event information."""
     if not update.message:
+        return
+    if not settings.db_url:
+        await update.message.reply_text(
+            "❌ Database configuration is unavailable."
+        )
         return
 
     user = update.effective_user
@@ -22,7 +29,8 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not event_id_str:
         await update.message.reply_text(
             "Usage: /event_details <event_id>\n\n"
-            "Example: /event_details 123"
+            "Examples:\n"
+            "/event_details 123\n"
         )
         return
 
@@ -32,7 +40,7 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text("❌ Event ID must be a number.")
         return
 
-    async for session in get_session(settings.db_url):
+    async with get_session(settings.db_url) as session:
         result = await session.execute(
             select(Event).where(Event.event_id == event_id)
         )
@@ -40,57 +48,20 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
         if not event:
             await update.message.reply_text("❌ Event not found.")
-            await session.close()
+            
             return
 
         logs = await _get_event_logs(session, event_id)
         constraints = await _get_event_constraints(session, event_id)
 
-        keyboard = [
-            [
-                InlineKeyboardButton(
-                    "View Logs", callback_data=f"event_logs_{event_id}"
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    "Manage Constraints",
-                    callback_data=f"event_constraints_{event_id}"
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    "Close", callback_data=f"event_close_{event_id}"
-                )
-            ],
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        bot_username = context.bot.username if context.bot else None
+        reply_markup = build_event_details_action_markup(event_id, bot_username)
 
-        attendees = []
-        for att in event.attendance_list:
-            if str(att).endswith(":confirmed"):
-                attendees.append(f"✓ {str(att).replace(':confirmed', '')}")
-            else:
-                attendees.append(f"- {att}")
-
-        attendees_text = "\n".join(attendees)
         await update.message.reply_text(
-            f"📋 *Event {event_id} Details*\n\n"
-            f"Type: {event.event_type}\n"
-            f"Time: {event.scheduled_time}\n"
-            f"Threshold: {event.threshold_attendance}\n"
-            f"State: {event.state}\n"
-            f"AI Score: {event.ai_score:.2f}\n"
-            f"Created: {event.created_at}\n"
-            f"Locked: {event.locked_at or 'N/A'}\n"
-            f"Completed: {event.completed_at or 'N/A'}\n\n"
-            f"Attendees ({len(event.attendance_list)}):\n"
-            f"{attendees_text}\n\n"
-            f"Logs: {len(logs)}\n"
-            f"Constraints: {len(constraints)}",
+            format_event_details_message(event_id, event, logs, constraints),
             reply_markup=reply_markup
         )
-        await session.close()
+        
 
 
 async def handle_callback(
@@ -105,7 +76,10 @@ async def handle_callback(
 
     data = query.data
 
-    if data and data.startswith("event_logs_"):
+    if data and data.startswith("event_details_"):
+        event_id = int(data.replace("event_details_", ""))
+        await show_details(query, event_id)
+    elif data and data.startswith("event_logs_"):
         event_id = int(data.replace("event_logs_", ""))
         await show_logs(query, event_id)
     elif data and data.startswith("event_constraints_"):
@@ -115,10 +89,34 @@ async def handle_callback(
         await query.edit_message_text("✅ Event details closed.")
 
 
+async def show_details(query, event_id: int) -> None:
+    """Show full event details for callback-based navigation."""
+    async with get_session(settings.db_url) as session:
+        result = await session.execute(
+            select(Event).where(Event.event_id == event_id)
+        )
+        event = result.scalar_one_or_none()
+
+        if not event:
+            await query.edit_message_text("❌ Event not found.")
+            return
+
+        logs = await _get_event_logs(session, event_id)
+        constraints = await _get_event_constraints(session, event_id)
+
+        bot_username = query.bot.username if query.bot else None
+        reply_markup = build_event_details_action_markup(event_id, bot_username)
+
+        await query.edit_message_text(
+            format_event_details_message(event_id, event, logs, constraints),
+            reply_markup=reply_markup
+        )
+
+
 async def show_logs(query, event_id: int) -> None:
     """Show event logs."""
     from db.models import Log as LogModel
-    async for session in get_session(settings.db_url):
+    async with get_session(settings.db_url) as session:
         result = await session.execute(
             select(LogModel)
             .where(LogModel.event_id == event_id)
@@ -130,7 +128,7 @@ async def show_logs(query, event_id: int) -> None:
             await query.edit_message_text(
                 f"ℹ️ Event {event_id} has no logs yet."
             )
-            await session.close()
+            
             return
 
         msg = f"📝 *Event {event_id} Logs*\n\n"
@@ -150,13 +148,13 @@ async def show_logs(query, event_id: int) -> None:
         reply_markup = InlineKeyboardMarkup(keyboard)
 
         await query.edit_message_text(msg, reply_markup=reply_markup)
-        await session.close()
+        
 
 
 async def show_constraints(query, event_id: int) -> None:
     """Show event constraints."""
     from db.models import Constraint as ConstraintModel
-    async for session in get_session(settings.db_url):
+    async with get_session(settings.db_url) as session:
         result = await session.execute(
             select(ConstraintModel).where(
                 ConstraintModel.event_id == event_id
@@ -168,7 +166,7 @@ async def show_constraints(query, event_id: int) -> None:
             await query.edit_message_text(
                 f"ℹ️ Event {event_id} has no constraints."
             )
-            await session.close()
+            
             return
 
         msg = f"🔗 *Event {event_id} Constraints*\n\n"
@@ -192,7 +190,7 @@ async def show_constraints(query, event_id: int) -> None:
         reply_markup = InlineKeyboardMarkup(keyboard)
 
         await query.edit_message_text(msg, reply_markup=reply_markup)
-        await session.close()
+        
 
 
 async def _get_event_logs(session, event_id: int) -> list:
@@ -213,3 +211,30 @@ async def _get_event_constraints(session, event_id: int) -> list:
         )
     )
     return result.scalars().all()
+
+
+def build_event_details_action_markup(
+    event_id: int, bot_username: str | None
+) -> InlineKeyboardMarkup:
+    """Build standard action keyboard for event details view."""
+    keyboard = [
+        [InlineKeyboardButton("View Logs", callback_data=f"event_logs_{event_id}")],
+        [
+            InlineKeyboardButton(
+                "Manage Constraints",
+                callback_data=f"event_constraints_{event_id}",
+            )
+        ],
+        [InlineKeyboardButton("Close", callback_data=f"event_close_{event_id}")],
+    ]
+    avail_link = build_start_link(bot_username, f"avail_{event_id}")
+    feedback_link = build_start_link(bot_username, f"feedback_{event_id}")
+    if avail_link:
+        keyboard.append(
+            [InlineKeyboardButton("📥 Set Availability in DM", url=avail_link)]
+        )
+    if feedback_link:
+        keyboard.append(
+            [InlineKeyboardButton("⭐ Give Feedback in DM", url=feedback_link)]
+        )
+    return InlineKeyboardMarkup(keyboard)

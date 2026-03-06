@@ -19,6 +19,7 @@ class User(Base):
     
     user_id = Column(Integer, primary_key=True)
     telegram_user_id = Column(BigInteger, unique=True, nullable=False)
+    username = Column(String(255), unique=True)
     display_name = Column(String(255))
     reputation = Column(Float, default=1.0)
     expertise_per_activity = Column(JSON, default=dict)
@@ -64,7 +65,9 @@ class Event(Base):
         nullable=False
     )
     event_type = Column(String(100), nullable=False)
+    description = Column(Text)
     scheduled_time = Column(DateTime)
+    duration_minutes = Column(Integer, default=120)
     threshold_attendance = Column(Integer, default=0)
     attendance_list = Column(JSON, default=list)
     ai_score = Column(Float, default=0.0)

@@ -7,6 +7,7 @@ from db.models import Event, Log
 from db.connection import get_session
 from db.users import get_or_create_user_id
 from config.settings import settings
+from bot.common.scheduling import find_user_event_conflict
 from datetime import datetime
 
 
@@ -21,6 +22,7 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     telegram_user_id = user.id
     display_name = user.full_name
+    username = user.username
     event_id_str = context.args[0] if context.args else None
 
     if not event_id_str:
@@ -36,7 +38,7 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text("❌ Event ID must be a number.")
         return
 
-    async for session in get_session(settings.db_url):
+    async with get_session(settings.db_url) as session:
         result = await session.execute(
             select(Event).where(Event.event_id == event_id)
         )
@@ -44,14 +46,28 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
         if not event:
             await update.message.reply_text("❌ Event not found.")
-            await session.close()
             return
 
         if event.state in ["locked", "completed"]:
             await update.message.reply_text(
                 f"❌ Cannot join event {event_id} - it's {event.state}."
             )
-            await session.close()
+            return
+
+        conflict = await find_user_event_conflict(
+            session=session,
+            telegram_user_id=telegram_user_id,
+            start_time=event.scheduled_time,
+            duration_minutes=event.duration_minutes,
+            ignore_event_id=event.event_id,
+        )
+        if conflict:
+            await update.message.reply_text(
+                "❌ You have a conflicting event.\n"
+                f"Conflicting Event ID: {conflict.event_id}\n"
+                f"Time: {conflict.scheduled_time}\n"
+                f"Duration: {conflict.duration_minutes or 120} minutes"
+            )
             return
 
         if telegram_user_id not in event.attendance_list:
@@ -60,6 +76,7 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                 session,
                 telegram_user_id=telegram_user_id,
                 display_name=display_name,
+                username=username,
             )
             log = Log(
                 event_id=event_id,
@@ -92,7 +109,6 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             f"Please confirm your attendance.",
             reply_markup=reply_markup
         )
-        await session.close()
 
 
 async def handle_callback(

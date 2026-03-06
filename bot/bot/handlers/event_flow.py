@@ -7,29 +7,13 @@ from db.models import Event, Log
 from db.connection import get_session
 from db.users import get_or_create_user_id
 from config.settings import settings
+from bot.common.event_states import (
+    EVENT_STATE_TRANSITIONS,
+    STATE_EXPLANATIONS,
+    can_transition,
+)
+from bot.common.scheduling import find_user_event_conflict
 from datetime import datetime
-
-
-class EventFlowStateMachine:
-    """State machine for event lifecycle: proposed → interested → confirmed → locked → completed."""
-    
-    def __init__(self):
-        self.states = {
-            "proposed": ["interested", "cancelled"],
-            "interested": ["confirmed", "cancelled"],
-            "confirmed": ["locked", "cancelled"],
-            "locked": ["completed", "cancelled"],
-            "cancelled": [],
-            "completed": [],
-        }
-    
-    def can_transition(self, current_state: str, target_state: str) -> bool:
-        """Check if transition is valid."""
-        return target_state in self.states.get(current_state, [])
-    
-    def get_available_transitions(self, current_state: str) -> list:
-        """Get list of available transitions."""
-        return self.states.get(current_state, [])
 
 
 async def handle_event_flow(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -63,9 +47,10 @@ async def handle_join(query, context: ContextTypes.DEFAULT_TYPE, event_id: int) 
     """Handle joining an event - transition to interested state."""
     telegram_user_id = query.from_user.id
     display_name = query.from_user.full_name
+    username = query.from_user.username
     
     db_url = settings.db_url or ""
-    async for session in get_session(db_url):
+    async with get_session(db_url) as session:
         result = await session.execute(
             select(Event).where(Event.event_id == event_id)
         )
@@ -73,26 +58,51 @@ async def handle_join(query, context: ContextTypes.DEFAULT_TYPE, event_id: int) 
         
         if not event:
             await query.edit_message_text("❌ Event not found.")
-            await session.close()
+            
             return
         
-        if event.state not in ["proposed", "interested"]:
+        if event.state in ["locked", "completed", "cancelled"]:
             await query.edit_message_text(
-                f"❌ Cannot join event {event_id} - it's already {event.state}."
+                f"❌ Cannot join event {event_id}.\n"
+                f"Current state: {event.state}\n"
+                f"Meaning: {STATE_EXPLANATIONS.get(event.state, 'Unavailable')}"
             )
-            await session.close()
+            
+            return
+
+        conflict = await find_user_event_conflict(
+            session=session,
+            telegram_user_id=telegram_user_id,
+            start_time=event.scheduled_time,
+            duration_minutes=event.duration_minutes,
+            ignore_event_id=event.event_id,
+        )
+        if conflict:
+            await query.edit_message_text(
+                "❌ You have a conflicting event.\n"
+                f"Conflicting Event ID: {conflict.event_id}\n"
+                f"Time: {conflict.scheduled_time}\n"
+                f"Duration: {conflict.duration_minutes or 120} minutes"
+            )
             return
         
-        if telegram_user_id not in event.attendance_list:
+        already_present = any(
+            str(att) == str(telegram_user_id)
+            or str(att).startswith(f"{telegram_user_id}:")
+            for att in (event.attendance_list or [])
+        )
+        if not already_present:
             event.attendance_list.append(telegram_user_id)
 
         user_id = await get_or_create_user_id(
             session,
             telegram_user_id=telegram_user_id,
             display_name=display_name,
+            username=username,
         )
         
-        event.state = "interested"
+        if event.state == "proposed":
+            event.state = "interested"
         
         log = Log(
             event_id=event_id,
@@ -111,20 +121,22 @@ async def handle_join(query, context: ContextTypes.DEFAULT_TYPE, event_id: int) 
         
         await query.edit_message_text(
             f"✅ *Joined event {event_id}!*\n\n"
-            f"State: interested\n"
+            f"State: {event.state}\n"
+            f"Meaning: {STATE_EXPLANATIONS.get(event.state, 'Unknown state')}\n"
             f"Use /confirm <event_id> to confirm attendance.",
             reply_markup=reply_markup
         )
-        await session.close()
+        
 
 
 async def handle_confirm(query, context: ContextTypes.DEFAULT_TYPE, event_id: int) -> None:
     """Handle confirming attendance - transition from interested to confirmed."""
     telegram_user_id = query.from_user.id
     display_name = query.from_user.full_name
+    username = query.from_user.username
     
     db_url = settings.db_url or ""
-    async for session in get_session(db_url):
+    async with get_session(db_url) as session:
         result = await session.execute(
             select(Event).where(Event.event_id == event_id)
         )
@@ -132,26 +144,61 @@ async def handle_confirm(query, context: ContextTypes.DEFAULT_TYPE, event_id: in
         
         if not event:
             await query.edit_message_text("❌ Event not found.")
-            await session.close()
+            
             return
         
-        if event.state != "interested":
+        if event.state in ["locked", "completed", "cancelled"]:
             await query.edit_message_text(
-                f"❌ Cannot confirm event {event_id} - it's {event.state}."
+                f"❌ Cannot confirm event {event_id}.\n"
+                f"Current state: {event.state}\n"
+                f"Meaning: {STATE_EXPLANATIONS.get(event.state, 'Unavailable')}\n"
+                "You can confirm only before the event is locked/completed/cancelled."
             )
-            await session.close()
+            
             return
-        
-        event.attendance_list = [
-            e for e in event.attendance_list if e != telegram_user_id
-        ]
-        event.attendance_list.append(f"{telegram_user_id}:confirmed")
+
+        conflict = await find_user_event_conflict(
+            session=session,
+            telegram_user_id=telegram_user_id,
+            start_time=event.scheduled_time,
+            duration_minutes=event.duration_minutes,
+            ignore_event_id=event.event_id,
+        )
+        if conflict:
+            await query.edit_message_text(
+                "❌ You have a conflicting event.\n"
+                f"Conflicting Event ID: {conflict.event_id}\n"
+                f"Time: {conflict.scheduled_time}\n"
+                f"Duration: {conflict.duration_minutes or 120} minutes"
+            )
+            return
+
+        attendance = event.attendance_list or []
+        has_joined = any(
+            str(att) == str(telegram_user_id)
+            or str(att).startswith(f"{telegram_user_id}:")
+            for att in attendance
+        )
+        if not has_joined:
+            event.attendance_list.append(telegram_user_id)
+            attendance = event.attendance_list
+
+        already_confirmed = any(
+            str(att).startswith(f"{telegram_user_id}:confirmed")
+            for att in attendance
+        )
+        if not already_confirmed:
+            event.attendance_list = [
+                e for e in attendance if str(e) != str(telegram_user_id)
+            ]
+            event.attendance_list.append(f"{telegram_user_id}:confirmed")
         event.state = "confirmed"
 
         user_id = await get_or_create_user_id(
             session,
             telegram_user_id=telegram_user_id,
             display_name=display_name,
+            username=username,
         )
         
         log = Log(
@@ -171,19 +218,21 @@ async def handle_confirm(query, context: ContextTypes.DEFAULT_TYPE, event_id: in
         await query.edit_message_text(
             f"✅ *Confirmed attendance for event {event_id}!*\n\n"
             f"State: confirmed\n"
+            f"Meaning: {STATE_EXPLANATIONS['confirmed']}\n"
             f"Use /lock to lock the event.",
             reply_markup=reply_markup
         )
-        await session.close()
+        
 
 
 async def handle_cancel(query, context: ContextTypes.DEFAULT_TYPE, event_id: int) -> None:
     """Handle cancelling attendance - transitions to cancelled state."""
     telegram_user_id = query.from_user.id
     display_name = query.from_user.full_name
+    username = query.from_user.username
     
     db_url = settings.db_url or ""
-    async for session in get_session(db_url):
+    async with get_session(db_url) as session:
         result = await session.execute(
             select(Event).where(Event.event_id == event_id)
         )
@@ -191,7 +240,7 @@ async def handle_cancel(query, context: ContextTypes.DEFAULT_TYPE, event_id: int
         
         if not event:
             await query.edit_message_text("❌ Event not found.")
-            await session.close()
+            
             return
         
         event.attendance_list = [
@@ -205,6 +254,7 @@ async def handle_cancel(query, context: ContextTypes.DEFAULT_TYPE, event_id: int
             session,
             telegram_user_id=telegram_user_id,
             display_name=display_name,
+            username=username,
         )
         
         log = Log(
@@ -218,9 +268,10 @@ async def handle_cancel(query, context: ContextTypes.DEFAULT_TYPE, event_id: int
         
         await query.edit_message_text(
             f"❌ *Attendance cancelled for event {event_id}!*\n\n"
-            f"State: cancelled"
+            f"State: cancelled\n"
+            f"Meaning: {STATE_EXPLANATIONS['cancelled']}"
         )
-        await session.close()
+        
 
 
 async def handle_lock(query, context: ContextTypes.DEFAULT_TYPE, event_id: int) -> None:
@@ -228,7 +279,7 @@ async def handle_lock(query, context: ContextTypes.DEFAULT_TYPE, event_id: int) 
     user_id = query.from_user.id
     
     db_url = settings.db_url or ""
-    async for session in get_session(db_url):
+    async with get_session(db_url) as session:
         result = await session.execute(
             select(Event).where(Event.event_id == event_id)
         )
@@ -236,14 +287,17 @@ async def handle_lock(query, context: ContextTypes.DEFAULT_TYPE, event_id: int) 
         
         if not event:
             await query.edit_message_text("❌ Event not found.")
-            await session.close()
+            
             return
         
         if event.state != "confirmed":
             await query.edit_message_text(
-                f"❌ Cannot lock event {event_id} - it's {event.state}."
+                f"❌ Cannot lock event {event_id}.\n"
+                f"Current state: {event.state}\n"
+                f"Meaning: {STATE_EXPLANATIONS.get(event.state, 'Unavailable')}\n"
+                "You can lock only when state is 'confirmed'."
             )
-            await session.close()
+            
             return
         
         event.state = "locked"
@@ -254,15 +308,16 @@ async def handle_lock(query, context: ContextTypes.DEFAULT_TYPE, event_id: int) 
         await query.edit_message_text(
             f"🔒 *Event {event_id} locked!*\n\n"
             f"State: locked\n"
+            f"Meaning: {STATE_EXPLANATIONS['locked']}\n"
             f"Locked at: {event.locked_at}"
         )
-        await session.close()
+        
 
 
 async def show_event_details(query, context: ContextTypes.DEFAULT_TYPE, event_id: int) -> None:
     """Show detailed event information."""
     db_url = settings.db_url or ""
-    async for session in get_session(db_url):
+    async with get_session(db_url) as session:
         result = await session.execute(
             select(Event).where(Event.event_id == event_id)
         )
@@ -270,7 +325,7 @@ async def show_event_details(query, context: ContextTypes.DEFAULT_TYPE, event_id
         
         if not event:
             await query.edit_message_text("❌ Event not found.")
-            await session.close()
+            
             return
         
         await query.edit_message_text(
@@ -281,4 +336,4 @@ async def show_event_details(query, context: ContextTypes.DEFAULT_TYPE, event_id
             f"Threshold: {event.threshold_attendance}\n"
             f"Attendees: {len(event.attendance_list)}"
         )
-        await session.close()
+        

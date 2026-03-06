@@ -172,6 +172,10 @@ class LLMClient:
         - event_details
         - suggest_time
         - constraint_add
+        - join
+        - confirm
+        - cancel
+        - lock
 
         If action is unclear, use opinion.
         If event_id is unknown, set event_id to null.
@@ -186,7 +190,7 @@ class LLMClient:
 
         Output JSON only:
         {{
-          "action_type": "opinion|status|event_details|suggest_time|constraint_add",
+          "action_type": "opinion|status|event_details|suggest_time|constraint_add|join|confirm|cancel|lock",
           "event_id": 123 or null,
           "target_username": "alice" or null,
           "constraint_type": "if_joins|if_attends|unless_joins|null",
@@ -203,6 +207,10 @@ class LLMClient:
                 "event_details",
                 "suggest_time",
                 "constraint_add",
+                "join",
+                "confirm",
+                "cancel",
+                "lock",
             }:
                 action_type = "opinion"
             event_id = parsed.get("event_id")
@@ -240,6 +248,14 @@ class LLMClient:
                 fallback_action = "suggest_time"
             elif "constraint" in lowered or "if " in lowered:
                 fallback_action = "constraint_add"
+            elif "join" in lowered:
+                fallback_action = "join"
+            elif "confirm" in lowered:
+                fallback_action = "confirm"
+            elif "cancel" in lowered:
+                fallback_action = "cancel"
+            elif "lock" in lowered:
+                fallback_action = "lock"
 
             # Basic event id extraction fallback
             event_id = None

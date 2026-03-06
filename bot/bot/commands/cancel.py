@@ -11,6 +11,16 @@ from datetime import datetime
 from bot.utils.nudges import generate_nudge_message
 
 
+def _derive_state_from_attendance(event: Event) -> str:
+    """Derive non-terminal state from current attendance markers."""
+    records = event.attendance_list or []
+    if any(str(e).endswith(":confirmed") for e in records):
+        return "confirmed"
+    if records:
+        return "interested"
+    return "proposed"
+
+
 async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle /cancel command - cancel attendance with nudges."""
     if not update.message:
@@ -54,12 +64,14 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             )
             return
 
+        attendance_before = list(event.attendance_list or [])
         attendance_list = [
             e for e in event.attendance_list
-            if not str(e).startswith(f"{telegram_user_id}:confirmed")
+            if str(e) != str(telegram_user_id)
+            and not str(e).startswith(f"{telegram_user_id}:")
         ]
 
-        if telegram_user_id not in attendance_list:
+        if len(attendance_list) == len(attendance_before):
             await update.message.reply_text(
                 f"❌ You haven't joined event {event_id} yet. "
                 "Nothing to cancel."
@@ -67,6 +79,8 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             return
 
         event.attendance_list = attendance_list
+        if event.state not in {"locked", "completed", "cancelled"}:
+            event.state = _derive_state_from_attendance(event)
         user_id = await get_or_create_user_id(
             session,
             telegram_user_id=telegram_user_id,

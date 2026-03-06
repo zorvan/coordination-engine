@@ -16,7 +16,7 @@ from config.settings import Settings
 from config.logging import setup_logging
 from bot.commands import (
     start, my_groups, profile, reputation, organize_event,
-    join, confirm, cancel, constraints, suggest_time, status,
+    join, confirm, cancel, lock, constraints, suggest_time, status,
     event_details, events,
 )
 from bot.handlers import event_flow, feedback, membership, mentions
@@ -89,6 +89,7 @@ def main():
         "join": join.handle,
         "confirm": confirm.handle,
         "cancel": cancel.handle,
+        "lock": lock.handle,
         "constraints": constraints.handle,
         "suggest_time": suggest_time.handle,
         "status": status.handle,

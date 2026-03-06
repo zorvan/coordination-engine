@@ -70,8 +70,15 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             )
             return
 
-        if telegram_user_id not in event.attendance_list:
+        already_present = any(
+            str(att) == str(telegram_user_id)
+            or str(att).startswith(f"{telegram_user_id}:")
+            for att in (event.attendance_list or [])
+        )
+        if not already_present:
             event.attendance_list.append(telegram_user_id)
+            if event.state == "proposed":
+                event.state = "interested"
             user_id = await get_or_create_user_id(
                 session,
                 telegram_user_id=telegram_user_id,

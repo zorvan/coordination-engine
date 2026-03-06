@@ -15,18 +15,34 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ai.llm import LLMClient
-from bot.commands import suggest_time
+from bot.commands import organize_event, suggest_time
+from bot.common.scheduling import find_user_event_conflict
 from bot.common.event_presenters import (
     format_event_details_message,
     format_status_message,
 )
 from config.settings import settings
 from db.connection import get_session
-from db.models import Constraint, Event, User
+from db.models import Constraint, Event, Log, User
 from db.users import get_or_create_user_id, get_user_id_by_username
 
 HISTORY_LIMIT = 40
 MENTION_PATTERN = re.compile(r"@([A-Za-z0-9_]{5,32})")
+EVENT_ID_PATTERNS = (
+    re.compile(r"\bevent\s*(?:id)?\s*[:#]?\s*(\d{1,9})\b", re.IGNORECASE),
+    re.compile(r"\bid\s*[:#]?\s*(\d{1,9})\b", re.IGNORECASE),
+    re.compile(r"\bevent_id\s*[:=]?\s*(\d{1,9})\b", re.IGNORECASE),
+)
+
+
+def _derive_state_from_attendance(event: Event) -> str:
+    """Derive non-terminal state from current attendance markers."""
+    records = event.attendance_list or []
+    if any(str(item).endswith(":confirmed") for item in records):
+        return "confirmed"
+    if records:
+        return "interested"
+    return "proposed"
 
 
 async def record_group_history(
@@ -82,6 +98,7 @@ async def handle_mention(
     if not has_bot_mention and not is_reply_to_bot:
         return
 
+    parent_text = ""
     history = context.bot_data.get("chat_history", {}).get(chat.id, [])
     if is_reply_to_bot:
         # Give model stronger local context from the replied bot message.
@@ -101,16 +118,29 @@ async def handle_mention(
                     "timestamp": datetime.utcnow().isoformat(),
                 },
             ]
-    llm = LLMClient()
-    try:
-        action = await llm.infer_group_mention_action(
-            text=text,
-            history=history,
-        )
-    finally:
-        await llm.close()
+    direct_action = _infer_direct_action(text=text, parent_text=parent_text)
+    if direct_action is not None:
+        action = direct_action
+    else:
+        llm = LLMClient()
+        try:
+            action = await llm.infer_group_mention_action(
+                text=text,
+                history=history,
+            )
+        finally:
+            await llm.close()
 
     action_type = str(action.get("action_type", "opinion")).strip().lower()
+    if action_type in {"organize_event", "organize_event_flexible"}:
+        scheduling_mode = (
+            "flexible" if action_type == "organize_event_flexible" else "fixed"
+        )
+        await organize_event._start_event_flow(
+            update, context, scheduling_mode=scheduling_mode
+        )
+        return
+
     if action_type == "opinion":
         response = str(action.get("assistant_response", "")).strip()
         if not response:
@@ -121,11 +151,23 @@ async def handle_mention(
         await message.reply_text(f"🤖 {response}")
         return
 
+    if action_type in {"join", "confirm", "cancel", "lock"} and not action.get("event_id"):
+        await message.reply_text(
+            "❌ I inferred an action, but event ID is missing.\n"
+            "Use a specific message like: `confirm event 12`."
+        )
+        return
+
     participant_user_ids = await _resolve_mentioned_participants(
         text=text,
         bot_username=bot_username,
     )
-    if participant_user_ids:
+    approval_required_actions = {
+        "constraint_add",
+        "organize_event",
+        "organize_event_flexible",
+    }
+    if participant_user_ids and action_type in approval_required_actions:
         pending_id = uuid4().hex[:10]
         pending_root = context.bot_data.setdefault("pending_mention_actions", {})
         pending_root[pending_id] = {
@@ -163,6 +205,8 @@ async def handle_mention(
         context=context,
         action=action,
         requester_id=user.id,
+        requester_display_name=user.full_name,
+        requester_username=user.username,
         reply_message=message,
     )
 
@@ -224,6 +268,8 @@ async def handle_mention_callback(
         context=context,
         action=action,
         requester_id=requester_id,
+        requester_display_name=None,
+        requester_username=None,
         reply_message=message,
     )
 
@@ -261,6 +307,8 @@ async def _execute_inferred_action(
     context: ContextTypes.DEFAULT_TYPE,
     action: dict,
     requester_id: int,
+    requester_display_name: str | None,
+    requester_username: str | None,
     reply_message,
 ) -> None:
     """Execute inferred action if supported."""
@@ -291,6 +339,22 @@ async def _execute_inferred_action(
             target_username=target_username,
             constraint_type=constraint_type,
             summary=summary,
+        )
+        return
+    if action_type in {"join", "confirm", "cancel"} and event_id is not None:
+        await _apply_participation_action(
+            reply_message=reply_message,
+            requester_telegram_user_id=requester_id,
+            requester_display_name=requester_display_name,
+            requester_username=requester_username,
+            event_id=event_id,
+            action_type=action_type,
+        )
+        return
+    if action_type == "lock" and event_id is not None:
+        await _apply_lock_action(
+            reply_message=reply_message,
+            event_id=event_id,
         )
         return
 
@@ -442,3 +506,208 @@ def _is_reply_to_bot_message(message, context: ContextTypes.DEFAULT_TYPE) -> boo
         bot_id = context.bot.id if context.bot else None
         return bot_id is None or parent.from_user.id == bot_id
     return False
+
+
+def _infer_direct_action(text: str, parent_text: str = "") -> dict | None:
+    """Infer explicit imperative actions without LLM for reliability."""
+    lowered = text.lower()
+    mapping = [
+        ("organize_event_flexible", {"organize flexible", "flexible event", "plan flexible"}),
+        ("organize_event", {"organize event", "schedule event", "create event", "plan event"}),
+        ("confirm", {"confirm", "confirmed"}),
+        ("join", {"join", "joined"}),
+        ("cancel", {"cancel", "leave", "withdraw"}),
+        ("lock", {"lock", "finalize", "close"}),
+        ("status", {"status"}),
+        ("event_details", {"details", "detail"}),
+        ("suggest_time", {"suggest time", "suggest", "time options"}),
+    ]
+    selected_action: str | None = None
+    for action_name, keywords in mapping:
+        if any(keyword in lowered for keyword in keywords):
+            selected_action = action_name
+            break
+    if not selected_action:
+        return None
+
+    event_id = _extract_event_id(text) or _extract_event_id(parent_text)
+    return {
+        "action_type": selected_action,
+        "event_id": event_id,
+        "target_username": None,
+        "constraint_type": None,
+        "assistant_response": "Parsed explicit action from message.",
+    }
+
+
+def _extract_event_id(raw_text: str) -> int | None:
+    """Extract event id from free text."""
+    if not raw_text:
+        return None
+    for pattern in EVENT_ID_PATTERNS:
+        match = pattern.search(raw_text)
+        if not match:
+            continue
+        try:
+            return int(match.group(1))
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
+async def _apply_participation_action(
+    reply_message,
+    requester_telegram_user_id: int,
+    requester_display_name: str | None,
+    requester_username: str | None,
+    event_id: int,
+    action_type: str,
+) -> None:
+    """Apply join/confirm/cancel and persist in DB."""
+    if not settings.db_url:
+        await reply_message.reply_text("❌ Database configuration is unavailable.")
+        return
+
+    async with get_session(settings.db_url) as session:
+        event = (
+            await session.execute(
+                select(Event).where(Event.event_id == event_id)
+            )
+        ).scalar_one_or_none()
+        if not event:
+            await reply_message.reply_text("❌ Event not found.")
+            return
+
+        if action_type in {"join", "confirm"}:
+            conflict = await find_user_event_conflict(
+                session=session,
+                telegram_user_id=requester_telegram_user_id,
+                start_time=event.scheduled_time,
+                duration_minutes=event.duration_minutes,
+                ignore_event_id=event.event_id,
+            )
+            if conflict:
+                await reply_message.reply_text(
+                    "❌ You have a conflicting event.\n"
+                    f"Conflicting Event ID: {conflict.event_id}\n"
+                    f"Time: {conflict.scheduled_time}\n"
+                    f"Duration: {conflict.duration_minutes or 120} minutes"
+                )
+                return
+
+        attendance = list(event.attendance_list or [])
+        has_joined = any(
+            str(att) == str(requester_telegram_user_id)
+            or str(att).startswith(f"{requester_telegram_user_id}:")
+            for att in attendance
+        )
+
+        if action_type == "join":
+            if event.state in {"locked", "completed"}:
+                await reply_message.reply_text(
+                    f"❌ Cannot join event {event_id} - it's {event.state}."
+                )
+                return
+            if not has_joined:
+                attendance.append(requester_telegram_user_id)
+                event.attendance_list = attendance
+            if event.state == "proposed":
+                event.state = "interested"
+
+        elif action_type == "confirm":
+            if event.state in {"locked", "completed", "cancelled"}:
+                await reply_message.reply_text(
+                    f"❌ Cannot confirm event {event_id} - it's {event.state}."
+                )
+                return
+            if not has_joined:
+                attendance.append(requester_telegram_user_id)
+            already_confirmed = any(
+                str(att).startswith(f"{requester_telegram_user_id}:confirmed")
+                for att in attendance
+            )
+            if not already_confirmed:
+                attendance = [
+                    att for att in attendance
+                    if str(att) != str(requester_telegram_user_id)
+                ]
+                attendance.append(f"{requester_telegram_user_id}:confirmed")
+            event.attendance_list = attendance
+            event.state = "confirmed"
+
+        elif action_type == "cancel":
+            if event.state == "locked":
+                await reply_message.reply_text(
+                    f"❌ Cannot cancel event {event_id} - it's already locked."
+                )
+                return
+            filtered = [
+                att for att in attendance
+                if str(att) != str(requester_telegram_user_id)
+                and not str(att).startswith(f"{requester_telegram_user_id}:")
+            ]
+            if len(filtered) == len(attendance):
+                await reply_message.reply_text(
+                    f"❌ You haven't joined event {event_id} yet. Nothing to cancel."
+                )
+                return
+            event.attendance_list = filtered
+            if event.state not in {"locked", "completed", "cancelled"}:
+                event.state = _derive_state_from_attendance(event)
+
+        user_id = await get_or_create_user_id(
+            session,
+            telegram_user_id=requester_telegram_user_id,
+            display_name=requester_display_name,
+            username=requester_username,
+        )
+        session.add(
+            Log(
+                event_id=event_id,
+                user_id=user_id,
+                action=action_type,
+                metadata_dict={"timestamp": datetime.utcnow().isoformat()},
+            )
+        )
+        await session.commit()
+
+    if action_type == "join":
+        await reply_message.reply_text(
+            f"✅ Joined event {event_id}.\nUse /confirm {event_id} to confirm attendance."
+        )
+    elif action_type == "confirm":
+        await reply_message.reply_text(
+            f"✅ Confirmed attendance for event {event_id}.\nEvent state is now `confirmed`."
+        )
+    else:
+        await reply_message.reply_text(f"❌ Attendance cancelled for event {event_id}.")
+
+
+async def _apply_lock_action(reply_message, event_id: int) -> None:
+    """Lock event in DB when it is already confirmed."""
+    if not settings.db_url:
+        await reply_message.reply_text("❌ Database configuration is unavailable.")
+        return
+
+    async with get_session(settings.db_url) as session:
+        event = (
+            await session.execute(
+                select(Event).where(Event.event_id == event_id)
+            )
+        ).scalar_one_or_none()
+        if not event:
+            await reply_message.reply_text("❌ Event not found.")
+            return
+        if event.state != "confirmed":
+            await reply_message.reply_text(
+                f"❌ Cannot lock event {event_id}. Current state: {event.state}. "
+                "Lock is allowed only when state is `confirmed`."
+            )
+            return
+        event.state = "locked"
+        event.locked_at = datetime.utcnow()
+        await session.commit()
+
+    await reply_message.reply_text(
+        f"🔒 Event {event_id} locked successfully at {datetime.utcnow().isoformat()}."
+    )

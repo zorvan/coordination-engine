@@ -16,6 +16,16 @@ from bot.common.scheduling import find_user_event_conflict
 from datetime import datetime
 
 
+def _derive_state_from_attendance(event: Event) -> str:
+    """Derive non-terminal state from current attendance markers."""
+    records = event.attendance_list or []
+    if any(str(item).endswith(":confirmed") for item in records):
+        return "confirmed"
+    if records:
+        return "interested"
+    return "proposed"
+
+
 async def handle_event_flow(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Main event flow handler - routes to state-specific handlers."""
     query = update.callback_query
@@ -226,7 +236,7 @@ async def handle_confirm(query, context: ContextTypes.DEFAULT_TYPE, event_id: in
 
 
 async def handle_cancel(query, context: ContextTypes.DEFAULT_TYPE, event_id: int) -> None:
-    """Handle cancelling attendance - transitions to cancelled state."""
+    """Handle cancelling attendance for the clicking user."""
     telegram_user_id = query.from_user.id
     display_name = query.from_user.full_name
     username = query.from_user.username
@@ -243,12 +253,19 @@ async def handle_cancel(query, context: ContextTypes.DEFAULT_TYPE, event_id: int
             
             return
         
+        before = list(event.attendance_list or [])
         event.attendance_list = [
-            e for e in event.attendance_list 
+            e for e in before
             if str(e) != str(telegram_user_id)
             and not str(e).startswith(f"{telegram_user_id}:")
         ]
-        event.state = "cancelled"
+        if len(event.attendance_list) == len(before):
+            await query.edit_message_text(
+                f"❌ You haven't joined event {event_id} yet. Nothing to cancel."
+            )
+            return
+        if event.state not in {"locked", "completed", "cancelled"}:
+            event.state = _derive_state_from_attendance(event)
 
         user_id = await get_or_create_user_id(
             session,
@@ -268,8 +285,8 @@ async def handle_cancel(query, context: ContextTypes.DEFAULT_TYPE, event_id: int
         
         await query.edit_message_text(
             f"❌ *Attendance cancelled for event {event_id}!*\n\n"
-            f"State: cancelled\n"
-            f"Meaning: {STATE_EXPLANATIONS['cancelled']}"
+            f"State: {event.state}\n"
+            f"Meaning: {STATE_EXPLANATIONS.get(event.state, 'Unknown state')}"
         )
         
 

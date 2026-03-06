@@ -27,10 +27,13 @@ CREATE TABLE IF NOT EXISTS events (
     group_id INTEGER REFERENCES groups(group_id) ON DELETE CASCADE,
     event_type VARCHAR(100) NOT NULL,
     description TEXT,
+    organizer_telegram_user_id BIGINT,
     scheduled_time TIMESTAMP,
+    commit_by TIMESTAMP,
     duration_minutes INTEGER DEFAULT 120,
     threshold_attendance INTEGER DEFAULT 0,
     attendance_list JSONB DEFAULT '[]',
+    planning_prefs JSONB DEFAULT '{}',
     ai_score FLOAT DEFAULT 0.0,
     state VARCHAR(20) DEFAULT 'proposed' CHECK (state IN ('proposed', 'interested', 'confirmed', 'locked', 'completed', 'cancelled')),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -85,7 +88,28 @@ CREATE TABLE IF NOT EXISTS feedback (
     UNIQUE(event_id, user_id, score_type)
 );
 
--- 8. AILog: AI decision tracking
+-- 8. EarlyFeedback: Pre-event behavioral signals (normalized)
+CREATE TABLE IF NOT EXISTS early_feedback (
+    early_feedback_id SERIAL PRIMARY KEY,
+    event_id INTEGER REFERENCES events(event_id) ON DELETE CASCADE,
+    source_user_id INTEGER REFERENCES users(user_id) ON DELETE SET NULL,
+    target_user_id INTEGER REFERENCES users(user_id) ON DELETE CASCADE,
+    source_type VARCHAR(50) NOT NULL CHECK (
+        source_type IN ('constraint', 'discussion', 'private_peer', 'system')
+    ),
+    signal_type VARCHAR(50) NOT NULL DEFAULT 'overall' CHECK (
+        signal_type IN ('overall', 'reliability', 'cooperation', 'toxicity', 'commitment', 'trust')
+    ),
+    value FLOAT NOT NULL CHECK (value >= 0 AND value <= 5),
+    weight FLOAT DEFAULT 0.5 CHECK (weight >= 0 AND weight <= 1),
+    confidence FLOAT DEFAULT 0.6 CHECK (confidence >= 0 AND confidence <= 1),
+    sanitized_comment TEXT,
+    is_private BOOLEAN DEFAULT FALSE,
+    metadata JSONB DEFAULT '{}',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 9. AILog: AI decision tracking
 CREATE TABLE IF NOT EXISTS ailog (
     ailog_id SERIAL PRIMARY KEY,
     event_id INTEGER REFERENCES events(event_id) ON DELETE SET NULL,
@@ -102,5 +126,9 @@ CREATE INDEX IF NOT EXISTS idx_events_state ON events(state);
 CREATE INDEX IF NOT EXISTS idx_constraints_event ON constraints(event_id);
 CREATE INDEX IF NOT EXISTS idx_logs_event ON logs(event_id);
 CREATE INDEX IF NOT EXISTS idx_feedback_event ON feedback(event_id);
+CREATE INDEX IF NOT EXISTS idx_early_feedback_event ON early_feedback(event_id);
+CREATE INDEX IF NOT EXISTS idx_early_feedback_target ON early_feedback(target_user_id);
+CREATE INDEX IF NOT EXISTS idx_early_feedback_source ON early_feedback(source_user_id);
+CREATE INDEX IF NOT EXISTS idx_early_feedback_source_type ON early_feedback(source_type);
 CREATE INDEX IF NOT EXISTS idx_ailog_event ON ailog(event_id);
 CREATE INDEX IF NOT EXISTS idx_reputation_user ON reputation(user_id);

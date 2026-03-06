@@ -6,7 +6,7 @@ Core AI coordination engine with hybrid approach:
 from typing import Any, Callable
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from db.models import Event, Constraint, Log
+from db.models import Event, Constraint, Log, EarlyFeedback
 
 
 class AICoordinationEngine:
@@ -44,6 +44,7 @@ class AICoordinationEngine:
         availability = self.rules_engine.check_availability(event, constraints)
         reliability = self.rules_engine.compute_reliability(event)
         confidence = self._calculate_confidence(availability, reliability)
+        notes = await self._collect_event_notes(event.event_id)
         
         if confidence >= 0.7:
             return self.rules_engine.resolve_conflicts(
@@ -53,7 +54,9 @@ class AICoordinationEngine:
                 constraints,
             )
         
-        return await self.llm.resolve_conflicts(event, availability, reliability)
+        return await self.llm.resolve_conflicts(
+            event, availability, reliability, notes=notes
+        )
     
     def _calculate_confidence(self, availability: dict, reliability: dict) -> float:
         """Calculate confidence score for AI decision."""
@@ -64,6 +67,27 @@ class AICoordinationEngine:
         avg_reliability = sum(reliability.values()) / len(reliability) if reliability else 0
         
         return (avg_availability * 0.5 + avg_reliability / 5 * 0.5)
+
+    async def _collect_event_notes(self, event_id: int) -> list[str]:
+        """Collect private attendee notes to enrich LLM reasoning context."""
+        async with self.session_factory() as session:
+            rows = (
+                await session.execute(
+                    select(EarlyFeedback).where(
+                        EarlyFeedback.event_id == event_id,
+                        EarlyFeedback.source_type == "private_peer",
+                    ).order_by(EarlyFeedback.created_at.desc()).limit(20)
+                )
+            ).scalars().all()
+            notes: list[str] = []
+            for row in rows:
+                metadata = row.metadata_dict if isinstance(row.metadata_dict, dict) else {}
+                if metadata.get("role") != "event_note":
+                    continue
+                text = (row.sanitized_comment or "").strip()
+                if text:
+                    notes.append(text)
+            return notes[:10]
     
     async def check_constraint_compatibility(self, session: AsyncSession, event_id: int) -> dict[str, Any]:
         """Check and resolve constraint conflicts."""

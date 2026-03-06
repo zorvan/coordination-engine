@@ -1,0 +1,175 @@
+#!/usr/bin/env python3
+"""Request confirmation command handler."""
+from __future__ import annotations
+
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram.ext import ContextTypes
+from sqlalchemy import select
+
+from config.settings import settings
+from db.connection import get_session
+from db.models import Event, User, EarlyFeedback
+from bot.common.event_access import get_event_organizer_telegram_id
+from bot.common.attendance import parse_attendance
+
+
+def _format_user_label(user: User | None, telegram_user_id: int) -> str:
+    """Format a user mention/label for status output."""
+    if user and user.username:
+        return f"@{user.username}"
+    if user and user.display_name:
+        return user.display_name
+    return str(telegram_user_id)
+
+
+async def send_confirmation_request_message(
+    reply_message,
+    context: ContextTypes.DEFAULT_TYPE,
+    event_id: int,
+) -> None:
+    """Send a group message asking participants to confirm via inline button."""
+    if not settings.db_url:
+        await reply_message.reply_text("❌ Database configuration is unavailable.")
+        return
+
+    async with get_session(settings.db_url) as session:
+        event = (
+            await session.execute(select(Event).where(Event.event_id == event_id))
+        ).scalar_one_or_none()
+        if not event:
+            await reply_message.reply_text("❌ Event not found.")
+            return
+
+        participants, confirmed = parse_attendance(event.attendance_list or [])
+        pending = sorted(participants - confirmed)
+
+        users_by_tid: dict[int, User] = {}
+        if participants:
+            users = (
+                await session.execute(
+                    select(User).where(User.telegram_user_id.in_(list(participants)))
+                )
+            ).scalars().all()
+            users_by_tid = {int(u.telegram_user_id): u for u in users}
+        organizer_tg_id = get_event_organizer_telegram_id(event)
+        all_private_rows = (
+            await session.execute(
+                select(EarlyFeedback).where(
+                    EarlyFeedback.event_id == event_id,
+                    EarlyFeedback.source_type == "private_peer",
+                ).order_by(EarlyFeedback.created_at.desc()).limit(20)
+            )
+        ).scalars().all()
+        note_rows = [
+            row for row in all_private_rows
+            if isinstance(row.metadata_dict, dict)
+            and row.metadata_dict.get("role") == "event_note"
+        ]
+
+    pending_labels = (
+        ", ".join(_format_user_label(users_by_tid.get(uid), uid) for uid in pending)
+        if pending else "No pending participants."
+    )
+    confirmed_labels = (
+        ", ".join(
+            _format_user_label(users_by_tid.get(uid), uid)
+            for uid in sorted(confirmed)
+        )
+        if confirmed else "None"
+    )
+
+    keyboard = InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton("✅ Confirm", callback_data=f"event_confirm_{event_id}"),
+                InlineKeyboardButton("↩️ Back", callback_data=f"event_back_{event_id}"),
+            ],
+            [
+                InlineKeyboardButton("❌ Cancel", callback_data=f"event_cancel_{event_id}"),
+                InlineKeyboardButton("🔒 Lock", callback_data=f"event_lock_{event_id}"),
+            ],
+            [InlineKeyboardButton("📊 Status", callback_data=f"event_details_{event_id}")],
+        ]
+    )
+    await reply_message.reply_text(
+        "📣 *Confirmation Request*\n\n"
+        f"Event ID: {event_id}\n"
+        f"Type: {event.event_type}\n"
+        f"Time: {event.scheduled_time or 'TBD'}\n"
+        f"State: {event.state}\n\n"
+        f"Pending commitments ({len(pending)}): {pending_labels}\n"
+        f"Already committed ({len(confirmed)}): {confirmed_labels}\n\n"
+        "Participants should click *Confirm* to commit attendance.",
+        reply_markup=keyboard,
+    )
+    # Send final confirmation DM to attendees.
+    dm_keyboard = InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton("✅ Final Confirm", callback_data=f"event_confirm_{event_id}"),
+                InlineKeyboardButton("↩️ Back", callback_data=f"event_back_{event_id}"),
+            ]
+        ]
+    )
+    dm_sent = 0
+    for tid in sorted(participants):
+        try:
+            await context.bot.send_message(
+                chat_id=tid,
+                text=(
+                    "📩 *Final Confirmation Required*\n\n"
+                    f"Event ID: {event_id}\n"
+                    f"Type: {event.event_type}\n"
+                    f"Time: {event.scheduled_time or 'TBD'}\n\n"
+                    "Please commit or go back."
+                ),
+                reply_markup=dm_keyboard,
+            )
+            dm_sent += 1
+        except Exception:
+            continue
+
+    await reply_message.reply_text(
+        f"ℹ️ Final-confirmation DM sent to {dm_sent}/{len(participants)} attendees."
+    )
+    # Organizer gets private-note context summary if available.
+    if organizer_tg_id and note_rows:
+        note_lines = []
+        for row in note_rows[:8]:
+            source_label = f"user:{row.source_user_id}" if row.source_user_id else "unknown"
+            note_lines.append(f"- {source_label}: {row.sanitized_comment or 'N/A'}")
+        try:
+            await context.bot.send_message(
+                chat_id=organizer_tg_id,
+                text=(
+                    f"🧠 *Private Notes Context for Event {event_id}*\n\n"
+                    + "\n".join(note_lines)
+                ),
+            )
+        except Exception:
+            pass
+
+
+async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /request_confirmations command."""
+    if not update.message:
+        return
+
+    event_id_raw = context.args[0] if context.args else None
+    if not event_id_raw:
+        await update.message.reply_text(
+            "Usage: /request_confirmations <event_id>\n\n"
+            "Example: /request_confirmations 123"
+        )
+        return
+    try:
+        event_id = int(event_id_raw)
+    except ValueError:
+        await update.message.reply_text("❌ Event ID must be a number.")
+        return
+
+    await send_confirmation_request_message(
+        reply_message=update.message,
+        context=context,
+        event_id=event_id,
+    )

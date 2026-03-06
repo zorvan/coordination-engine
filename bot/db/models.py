@@ -38,6 +38,16 @@ class User(Base):
     logs = relationship("Log", back_populates="user")
     feedback = relationship("Feedback", back_populates="user")
     reputation_records = relationship("Reputation", back_populates="user")
+    early_feedback_given = relationship(
+        "EarlyFeedback",
+        back_populates="source_user",
+        foreign_keys="[EarlyFeedback.source_user_id]",
+    )
+    early_feedback_received = relationship(
+        "EarlyFeedback",
+        back_populates="target_user",
+        foreign_keys="[EarlyFeedback.target_user_id]",
+    )
 
 
 class Group(Base):
@@ -66,10 +76,13 @@ class Event(Base):
     )
     event_type = Column(String(100), nullable=False)
     description = Column(Text)
+    organizer_telegram_user_id = Column(BigInteger)
     scheduled_time = Column(DateTime)
+    commit_by = Column(DateTime)
     duration_minutes = Column(Integer, default=120)
     threshold_attendance = Column(Integer, default=0)
     attendance_list = Column(JSON, default=list)
+    planning_prefs = Column(JSON, default=dict)
     ai_score = Column(Float, default=0.0)
     state = Column(String(20), default="proposed")
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -87,6 +100,11 @@ class Event(Base):
         "Feedback",
         back_populates="event",
         cascade="all, delete-orphan"
+    )
+    early_feedback = relationship(
+        "EarlyFeedback",
+        back_populates="event",
+        cascade="all, delete-orphan",
     )
     ailog = relationship("AILog", back_populates="event")
 
@@ -213,6 +231,62 @@ class Feedback(Base):
     
     event = relationship("Event", back_populates="feedback")
     user = relationship("User", back_populates="feedback")
+
+
+class EarlyFeedback(Base):
+    """Pre-event behavioral feedback signals for analytics and reputation."""
+    __tablename__ = "early_feedback"
+
+    early_feedback_id = Column(Integer, primary_key=True)
+    event_id = Column(
+        Integer,
+        ForeignKey("events.event_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    source_user_id = Column(
+        Integer,
+        ForeignKey("users.user_id", ondelete="SET NULL")
+    )
+    target_user_id = Column(
+        Integer,
+        ForeignKey("users.user_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    source_type = Column(String(50), nullable=False)
+    signal_type = Column(String(50), nullable=False, default="overall")
+    value = Column(Float, nullable=False)
+    weight = Column(Float, default=0.5)
+    confidence = Column(Float, default=0.6)
+    sanitized_comment = Column(Text)
+    is_private = Column(Integer, default=0)
+    metadata_dict = Column("metadata", JSON, default=dict)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        CheckConstraint(
+            "source_type IN ('constraint', 'discussion', 'private_peer', 'system')",
+            name="early_feedback_source_type",
+        ),
+        CheckConstraint(
+            "signal_type IN ('overall', 'reliability', 'cooperation', 'toxicity', 'commitment', 'trust')",
+            name="early_feedback_signal_type",
+        ),
+        CheckConstraint("value >= 0 AND value <= 5", name="early_feedback_value_range"),
+        CheckConstraint("weight >= 0 AND weight <= 1", name="early_feedback_weight_range"),
+        CheckConstraint("confidence >= 0 AND confidence <= 1", name="early_feedback_confidence_range"),
+    )
+
+    event = relationship("Event", back_populates="early_feedback")
+    source_user = relationship(
+        "User",
+        back_populates="early_feedback_given",
+        foreign_keys=[source_user_id],
+    )
+    target_user = relationship(
+        "User",
+        back_populates="early_feedback_received",
+        foreign_keys=[target_user_id],
+    )
 
 
 class AILog(Base):

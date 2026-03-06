@@ -6,7 +6,7 @@ from telegram.ext import ContextTypes
 
 from config.settings import settings
 from db.connection import get_session
-from db.models import User, Feedback, Reputation
+from db.models import User, Feedback, Reputation, EarlyFeedback
 
 
 async def handle(
@@ -43,6 +43,19 @@ async def handle(
             ).where(Feedback.user_id == user.user_id)
         )
         feedback_count, avg_feedback = feedback_stats.one()
+        early_received_stats = await session.execute(
+            select(
+                func.count(EarlyFeedback.early_feedback_id),
+                func.avg(EarlyFeedback.value),
+            ).where(EarlyFeedback.target_user_id == user.user_id)
+        )
+        early_received_count, early_received_avg = early_received_stats.one()
+        early_given_stats = await session.execute(
+            select(func.count(EarlyFeedback.early_feedback_id)).where(
+                EarlyFeedback.source_user_id == user.user_id
+            )
+        )
+        early_given_count = early_given_stats.scalar_one()
 
         rep_rows = await session.execute(
             select(Reputation)
@@ -60,6 +73,9 @@ async def handle(
         f"Global Reputation: {float(user.reputation or 1.0):.2f}/5",
         f"Feedback Entries: {int(feedback_count or 0)}",
         f"Avg Feedback Score: {float(avg_feedback or 0.0):.2f}",
+        f"Early Feedback Received: {int(early_received_count or 0)}",
+        f"Avg Early Signal: {float(early_received_avg or 0.0):.2f}",
+        f"Early Feedback Given: {int(early_given_count or 0)}",
         "",
         "Top Activity Reputation:",
     ]

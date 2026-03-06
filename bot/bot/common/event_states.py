@@ -11,8 +11,8 @@ EVENT_STATE_TRANSITIONS = {
 
 STATE_EXPLANATIONS = {
     "proposed": "Event created; participants should join.",
-    "interested": "People joined; waiting for confirmations.",
-    "confirmed": "At least one participant confirmed attendance.",
+    "interested": "People joined; waiting for commitments.",
+    "confirmed": "At least one participant committed attendance.",
     "locked": "Event is finalized; attendance is closed.",
     "cancelled": "Event was cancelled.",
     "completed": "Event finished.",
@@ -22,4 +22,3 @@ STATE_EXPLANATIONS = {
 def can_transition(current_state: str, target_state: str) -> bool:
     """Check if a state transition is valid."""
     return target_state in EVENT_STATE_TRANSITIONS.get(current_state, [])
-

@@ -8,6 +8,7 @@ from db.connection import get_session
 from db.users import get_or_create_user_id
 from config.settings import settings
 from ai.llm import LLMClient
+from bot.common.early_feedback import aggregate_early_feedback_for_user
 from datetime import datetime
 import random
 
@@ -313,7 +314,26 @@ async def _store_feedback_and_update_reputation(
     expertise_adjustments: dict,
 ) -> None:
     """Persist feedback and apply weighted profile/reputation updates."""
-    weight_marker = f"[ai_weight={float(weight):.2f}]"
+    blended_score = float(score)
+    blended_weight = float(weight)
+    early_avg, early_weight_total, early_count = await aggregate_early_feedback_for_user(
+        session,
+        event_id=event.event_id,
+        target_user_id=user_id,
+    )
+    if early_avg is not None and early_weight_total > 0:
+        early_influence = min(0.35, early_weight_total / 6.0)
+        blended_score = (
+            float(score) * (1.0 - early_influence)
+            + float(early_avg) * early_influence
+        )
+        blended_weight = min(1.0, float(weight) + min(0.25, early_weight_total / 12.0))
+
+    weight_marker = (
+        f"[ai_weight={float(weight):.2f}]"
+        f"[blended_weight={float(blended_weight):.2f}]"
+        f"[early_signals={int(early_count)}]"
+    )
     persisted_comment = (
         f"{weight_marker} {sanitized_comment}".strip()
         if sanitized_comment
@@ -323,7 +343,7 @@ async def _store_feedback_and_update_reputation(
         event_id=event.event_id,
         user_id=user_id,
         score_type="event_quality",
-        value=float(score),
+        value=float(max(0.0, min(5.0, blended_score))),
         comment=persisted_comment[:2000],
         timestamp=datetime.utcnow()
     )
@@ -332,7 +352,7 @@ async def _store_feedback_and_update_reputation(
         session=session,
         user_id=user_id,
         activity_type=str(event.event_type or "general"),
-        score=float(score),
-        weight=float(weight),
+        score=float(max(0.0, min(5.0, blended_score))),
+        weight=float(max(0.0, min(1.0, blended_weight))),
         expertise_adjustments=expertise_adjustments if isinstance(expertise_adjustments, dict) else {},
     )

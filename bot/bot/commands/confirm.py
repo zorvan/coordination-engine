@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Confirm event command handler."""
-from telegram import Update
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from sqlalchemy import select
 from db.models import Event, Log
@@ -8,12 +8,14 @@ from db.connection import get_session
 from db.users import get_or_create_user_id
 from config.settings import settings
 from bot.common.scheduling import find_user_event_conflict
+from bot.common.attendance import mark_confirmed
 from datetime import datetime
 
 
 async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle /confirm command - confirm attendance intent."""
-    if not update.message:
+    """Handle /confirm|/interested command - mark attendance commitment."""
+    message = update.effective_message
+    if not message:
         return
 
     user = update.effective_user
@@ -26,7 +28,7 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     event_id_str = context.args[0] if context.args else None
 
     if not event_id_str:
-        await update.message.reply_text(
+        await message.reply_text(
             "Usage: /confirm <event_id>\n\n"
             "Example: /confirm 123"
         )
@@ -35,7 +37,7 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     try:
         event_id = int(event_id_str)
     except ValueError:
-        await update.message.reply_text("❌ Event ID must be a number.")
+        await message.reply_text("❌ Event ID must be a number.")
         return
 
     async with get_session(settings.db_url) as session:
@@ -45,19 +47,17 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         event = result.scalar_one_or_none()
 
         if not event:
-            await update.message.reply_text("❌ Event not found.")
-            
+            await message.reply_text("❌ Event not found.")
             return
 
         if event.state == "locked":
-            await update.message.reply_text(
+            await message.reply_text(
                 f"❌ Cannot confirm event {event_id} - it's already locked."
             )
-            
             return
 
         if event.state in ["completed", "cancelled"]:
-            await update.message.reply_text(
+            await message.reply_text(
                 f"❌ Cannot confirm event {event_id} - it's {event.state}."
             )
             return
@@ -70,7 +70,7 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             ignore_event_id=event.event_id,
         )
         if conflict:
-            await update.message.reply_text(
+            await message.reply_text(
                 "❌ You have a conflicting event.\n"
                 f"Conflicting Event ID: {conflict.event_id}\n"
                 f"Time: {conflict.scheduled_time}\n"
@@ -78,25 +78,11 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             )
             return
 
-        attendance = event.attendance_list or []
-        has_joined = any(
-            str(att) == str(telegram_user_id)
-            or str(att).startswith(f"{telegram_user_id}:")
-            for att in attendance
+        new_attendance, _ = mark_confirmed(
+            event.attendance_list,
+            telegram_user_id,
         )
-        if not has_joined:
-            event.attendance_list.append(telegram_user_id)
-            attendance = event.attendance_list
-
-        already_confirmed = any(
-            str(att).startswith(f"{telegram_user_id}:confirmed")
-            for att in attendance
-        )
-        if not already_confirmed:
-            event.attendance_list = [
-                e for e in attendance if str(e) != str(telegram_user_id)
-            ]
-            event.attendance_list.append(f"{telegram_user_id}:confirmed")
+        event.attendance_list = new_attendance
         event.state = "confirmed"
         user_id = await get_or_create_user_id(
             session,
@@ -114,11 +100,25 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         session.add(log)
         await session.commit()
 
-        await update.message.reply_text(
-            f"✅ *Confirmed attendance for event {event_id}!*\n\n"
+        reply_markup = InlineKeyboardMarkup(
+            [
+                [
+                    InlineKeyboardButton(
+                        "↩️ Back", callback_data=f"event_back_{event_id}"
+                    ),
+                    InlineKeyboardButton(
+                        "🔒 Lock Event", callback_data=f"event_lock_{event_id}"
+                    ),
+                ]
+            ]
+        )
+        await message.reply_text(
+            f"✅ *Committed to event {event_id}!*\n\n"
             f"Type: {event.event_type}\n"
             f"Time: {event.scheduled_time}\n"
-            f"State: {event.state}"
+            f"State: {event.state}\n"
+            f"Use /back {event_id} to revert commitment before lock.",
+            reply_markup=reply_markup,
         )
         
 
@@ -145,6 +145,6 @@ async def handle_callback(
         context.args = [str(event_id)]
         await handle(callback_update, context)
         await query.edit_message_text(
-            f"✅ *Confirmed attendance for event {event_id}!*\n\n"
+            f"✅ *Committed to event {event_id}!*\n\n"
             f"Use /status {event_id} to view event progress."
         )

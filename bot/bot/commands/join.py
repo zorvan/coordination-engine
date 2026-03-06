@@ -8,12 +8,14 @@ from db.connection import get_session
 from db.users import get_or_create_user_id
 from config.settings import settings
 from bot.common.scheduling import find_user_event_conflict
+from bot.common.attendance import mark_joined
 from datetime import datetime
 
 
 async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle /join command - mark attendance intent."""
-    if not update.message:
+    message = update.effective_message
+    if not message:
         return
 
     user = update.effective_user
@@ -26,7 +28,7 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     event_id_str = context.args[0] if context.args else None
 
     if not event_id_str:
-        await update.message.reply_text(
+        await message.reply_text(
             "Usage: /join <event_id>\n\n"
             "Example: /join 123"
         )
@@ -35,7 +37,7 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     try:
         event_id = int(event_id_str)
     except ValueError:
-        await update.message.reply_text("❌ Event ID must be a number.")
+        await message.reply_text("❌ Event ID must be a number.")
         return
 
     async with get_session(settings.db_url) as session:
@@ -45,11 +47,11 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         event = result.scalar_one_or_none()
 
         if not event:
-            await update.message.reply_text("❌ Event not found.")
+            await message.reply_text("❌ Event not found.")
             return
 
         if event.state in ["locked", "completed"]:
-            await update.message.reply_text(
+            await message.reply_text(
                 f"❌ Cannot join event {event_id} - it's {event.state}."
             )
             return
@@ -62,7 +64,7 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             ignore_event_id=event.event_id,
         )
         if conflict:
-            await update.message.reply_text(
+            await message.reply_text(
                 "❌ You have a conflicting event.\n"
                 f"Conflicting Event ID: {conflict.event_id}\n"
                 f"Time: {conflict.scheduled_time}\n"
@@ -70,13 +72,12 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             )
             return
 
-        already_present = any(
-            str(att) == str(telegram_user_id)
-            or str(att).startswith(f"{telegram_user_id}:")
-            for att in (event.attendance_list or [])
+        new_attendance, changed = mark_joined(
+            event.attendance_list,
+            telegram_user_id,
         )
-        if not already_present:
-            event.attendance_list.append(telegram_user_id)
+        if changed:
+            event.attendance_list = new_attendance
             if event.state == "proposed":
                 event.state = "interested"
             user_id = await get_or_create_user_id(
@@ -97,7 +98,7 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         keyboard = [
             [
                 InlineKeyboardButton(
-                    "✅ Confirm", callback_data=f"event_confirm_{event_id}"
+                    "✅ Commit", callback_data=f"event_confirm_{event_id}"
                 )
             ],
             [
@@ -108,12 +109,12 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
 
-        await update.message.reply_text(
+        await message.reply_text(
             f"✅ *Joined event {event_id}!*\n\n"
             f"Type: {event.event_type}\n"
             f"Time: {event.scheduled_time}\n"
             f"State: {event.state}\n\n"
-            f"Please confirm your attendance.",
+            "Please commit attendance.",
             reply_markup=reply_markup
         )
 

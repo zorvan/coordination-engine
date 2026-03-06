@@ -7,6 +7,7 @@ from telegram.ext import ContextTypes
 from sqlalchemy import select
 
 from bot.common.event_states import STATE_EXPLANATIONS
+from bot.common.attendance import finalize_commitments
 from config.settings import settings
 from db.connection import get_session
 from db.models import Event
@@ -55,6 +56,7 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             return
 
         event.state = "locked"
+        event.attendance_list, _ = finalize_commitments(event.attendance_list)
         event.locked_at = datetime.utcnow()
         await session.commit()
 

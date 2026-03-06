@@ -8,22 +8,14 @@ from db.connection import get_session
 from db.users import get_or_create_user_id
 from config.settings import settings
 from datetime import datetime
+from bot.common.attendance import derive_state_from_attendance, remove_attendee
 from bot.utils.nudges import generate_nudge_message
-
-
-def _derive_state_from_attendance(event: Event) -> str:
-    """Derive non-terminal state from current attendance markers."""
-    records = event.attendance_list or []
-    if any(str(e).endswith(":confirmed") for e in records):
-        return "confirmed"
-    if records:
-        return "interested"
-    return "proposed"
 
 
 async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle /cancel command - cancel attendance with nudges."""
-    if not update.message:
+    message = update.effective_message
+    if not message:
         return
 
     user = update.effective_user
@@ -36,7 +28,7 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     event_id_str = context.args[0] if context.args else None
 
     if not event_id_str:
-        await update.message.reply_text(
+        await message.reply_text(
             "Usage: /cancel <event_id>\n\n"
             "Example: /cancel 123"
         )
@@ -45,7 +37,7 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     try:
         event_id = int(event_id_str)
     except ValueError:
-        await update.message.reply_text("❌ Event ID must be a number.")
+        await message.reply_text("❌ Event ID must be a number.")
         return
 
     async with get_session(settings.db_url) as session:
@@ -55,24 +47,21 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         event = result.scalar_one_or_none()
 
         if not event:
-            await update.message.reply_text("❌ Event not found.")
+            await message.reply_text("❌ Event not found.")
             return
 
         if event.state == "locked":
-            await update.message.reply_text(
+            await message.reply_text(
                 f"❌ Cannot cancel event {event_id} - it's already locked."
             )
             return
 
-        attendance_before = list(event.attendance_list or [])
-        attendance_list = [
-            e for e in event.attendance_list
-            if str(e) != str(telegram_user_id)
-            and not str(e).startswith(f"{telegram_user_id}:")
-        ]
-
-        if len(attendance_list) == len(attendance_before):
-            await update.message.reply_text(
+        attendance_list, changed = remove_attendee(
+            event.attendance_list,
+            telegram_user_id,
+        )
+        if not changed:
+            await message.reply_text(
                 f"❌ You haven't joined event {event_id} yet. "
                 "Nothing to cancel."
             )
@@ -80,7 +69,7 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
         event.attendance_list = attendance_list
         if event.state not in {"locked", "completed", "cancelled"}:
-            event.state = _derive_state_from_attendance(event)
+            event.state = derive_state_from_attendance(attendance_list)
         user_id = await get_or_create_user_id(
             session,
             telegram_user_id=telegram_user_id,
@@ -102,7 +91,7 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             event_id, telegram_user_id, event.event_type
         )
 
-        await update.message.reply_text(
+        await message.reply_text(
             f"❌ *Attendance cancelled for event {event_id}!*\n\n"
             f"{nudge_msg}\n\n"
             f"Event: {event.event_type}\n"

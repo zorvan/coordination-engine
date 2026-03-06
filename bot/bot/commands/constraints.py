@@ -10,6 +10,8 @@ from db.connection import get_session
 from db.users import get_or_create_user_id, get_user_id_by_username
 from config.settings import settings
 from ai.llm import LLMClient
+from bot.common.early_feedback import add_early_feedback_signal
+from bot.common.event_access import get_event_organizer_telegram_id, is_attendee
 
 ALLOWED_CONSTRAINT_TYPES = {"if_joins", "if_attends", "unless_joins"}
 CONSTRAINT_TYPE_ALIASES = {
@@ -295,6 +297,30 @@ async def _save_constraint_from_inputs(
                 await message.reply_text("❌ Event not found.")
             
             return
+        chat = update.effective_chat
+        is_private_chat = bool(chat and chat.type == "private")
+        requester_tg_id = int(update.effective_user.id)
+        if is_private_chat:
+            organizer_id = get_event_organizer_telegram_id(event)
+            if organizer_id is not None and requester_tg_id == organizer_id:
+                error_msg = (
+                    "❌ Organizer cannot add private constraints. "
+                    "Private constraints are for interested attendees."
+                )
+                if edit_via_query and query:
+                    await query.edit_message_text(error_msg)
+                elif message:
+                    await message.reply_text(error_msg)
+                return
+            if not is_attendee(event, requester_tg_id):
+                error_msg = (
+                    "❌ Only interested attendees can add private constraints."
+                )
+                if edit_via_query and query:
+                    await query.edit_message_text(error_msg)
+                elif message:
+                    await message.reply_text(error_msg)
+                return
 
         source_user_id = await get_or_create_user_id(
             session,
@@ -355,6 +381,33 @@ async def _save_constraint_from_inputs(
             confidence=confidence
         )
         session.add(constraint)
+        # Persist a normalized pre-event trust signal from constraints.
+        score_by_type = {
+            "if_attends": 4.2,
+            "if_joins": 3.8,
+            "unless_joins": 2.8,
+        }
+        signal_score = score_by_type.get(constraint_type, 3.2)
+        try:
+            await add_early_feedback_signal(
+                session,
+                event_id=event_id,
+                source_user_id=source_user_id,
+                target_user_id=target_user_id,
+                source_type="constraint",
+                signal_type="trust",
+                value=signal_score,
+                weight=max(0.2, min(1.0, float(confidence))),
+                confidence=max(0.2, min(1.0, float(confidence))),
+                sanitized_comment=(
+                    summary
+                    or f"Constraint signal: {constraint_type} on {target_label}"
+                ),
+                metadata={"constraint_type": constraint_type},
+            )
+        except Exception:
+            # Constraint persistence is primary; skip signal on failure.
+            pass
         try:
             await session.commit()
         except IntegrityError:
@@ -479,6 +532,21 @@ async def add_availability_slots(
         if not event:
             await update.message.reply_text("❌ Event not found.")
             return
+        chat = update.effective_chat
+        is_private_chat = bool(chat and chat.type == "private")
+        requester_tg_id = int(update.effective_user.id)
+        if is_private_chat:
+            organizer_id = get_event_organizer_telegram_id(event)
+            if organizer_id is not None and requester_tg_id == organizer_id:
+                await update.message.reply_text(
+                    "❌ Organizer cannot add private availability notes here."
+                )
+                return
+            if not is_attendee(event, requester_tg_id):
+                await update.message.reply_text(
+                    "❌ Only interested attendees can add private availability."
+                )
+                return
 
         source_user_id = await get_or_create_user_id(
             session,

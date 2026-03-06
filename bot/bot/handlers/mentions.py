@@ -15,8 +15,17 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ai.llm import LLMClient
-from bot.commands import organize_event, suggest_time
+from bot.commands import organize_event, request_confirmations, suggest_time
 from bot.common.scheduling import find_user_event_conflict
+from bot.common.attendance import (
+    derive_state_from_attendance,
+    finalize_commitments,
+    has_attendee,
+    has_confirmed,
+    mark_confirmed,
+    mark_joined,
+    remove_attendee,
+)
 from bot.common.event_presenters import (
     format_event_details_message,
     format_status_message,
@@ -33,16 +42,6 @@ EVENT_ID_PATTERNS = (
     re.compile(r"\bid\s*[:#]?\s*(\d{1,9})\b", re.IGNORECASE),
     re.compile(r"\bevent_id\s*[:=]?\s*(\d{1,9})\b", re.IGNORECASE),
 )
-
-
-def _derive_state_from_attendance(event: Event) -> str:
-    """Derive non-terminal state from current attendance markers."""
-    records = event.attendance_list or []
-    if any(str(item).endswith(":confirmed") for item in records):
-        return "confirmed"
-    if records:
-        return "interested"
-    return "proposed"
 
 
 async def record_group_history(
@@ -91,6 +90,13 @@ async def handle_mention(
     # Slash commands should stay in the classic command handlers.
     if text.startswith("/"):
         return
+    # If user is in organize_event text stages, let that FSM consume input.
+    user_data = context.user_data or {}
+    event_flow = user_data.get("event_flow")
+    if isinstance(event_flow, dict):
+        stage = str(event_flow.get("stage", "")).strip().lower()
+        if stage in {"description", "time", "invitees", "final"}:
+            return
 
     bot_username = (context.bot.username or "").lower()
     has_bot_mention = bool(bot_username and f"@{bot_username}" in text.lower())
@@ -136,8 +142,20 @@ async def handle_mention(
         scheduling_mode = (
             "flexible" if action_type == "organize_event_flexible" else "fixed"
         )
-        await organize_event._start_event_flow(
-            update, context, scheduling_mode=scheduling_mode
+        llm = LLMClient()
+        try:
+            draft = await llm.infer_event_draft_from_context(
+                message_text=text,
+                history=history,
+                scheduling_mode=scheduling_mode,
+            )
+        finally:
+            await llm.close()
+        await organize_event.start_event_flow_from_prefill(
+            update=update,
+            context=context,
+            scheduling_mode=scheduling_mode,
+            prefill=draft,
         )
         return
 
@@ -151,7 +169,13 @@ async def handle_mention(
         await message.reply_text(f"🤖 {response}")
         return
 
-    if action_type in {"join", "confirm", "cancel", "lock"} and not action.get("event_id"):
+    if action_type in {
+        "join",
+        "confirm",
+        "cancel",
+        "lock",
+        "request_confirmations",
+    } and not action.get("event_id"):
         await message.reply_text(
             "❌ I inferred an action, but event ID is missing.\n"
             "Use a specific message like: `confirm event 12`."
@@ -333,6 +357,7 @@ async def _execute_inferred_action(
         constraint_type = str(action.get("constraint_type", "")).strip()
         summary = str(action.get("assistant_response", "")).strip()
         await _save_constraint_from_inferred(
+            context=context,
             reply_message=reply_message,
             requester_telegram_user_id=requester_id,
             event_id=event_id,
@@ -354,6 +379,13 @@ async def _execute_inferred_action(
     if action_type == "lock" and event_id is not None:
         await _apply_lock_action(
             reply_message=reply_message,
+            event_id=event_id,
+        )
+        return
+    if action_type == "request_confirmations" and event_id is not None:
+        await request_confirmations.send_confirmation_request_message(
+            reply_message=reply_message,
+            context=context,
             event_id=event_id,
         )
         return
@@ -432,6 +464,7 @@ async def _send_event_details(reply_message, event_id: int) -> None:
 
 
 async def _save_constraint_from_inferred(
+    context: ContextTypes.DEFAULT_TYPE,
     reply_message,
     requester_telegram_user_id: int,
     event_id: int,
@@ -471,10 +504,19 @@ async def _save_constraint_from_inferred(
         )
         target_user_id = await get_user_id_by_username(session, target_input)
         if target_user_id is None:
-            await reply_message.reply_text(
-                f"❌ Target {target_input} not found in records."
-            )
-            return
+            try:
+                target_chat = await context.bot.get_chat(target_input)
+                target_user_id = await get_or_create_user_id(
+                    session,
+                    telegram_user_id=target_chat.id,
+                    display_name=getattr(target_chat, "full_name", None),
+                    username=getattr(target_chat, "username", None),
+                )
+            except Exception:
+                await reply_message.reply_text(
+                    f"❌ Target {target_input} not found in records and could not be resolved from Telegram API."
+                )
+                return
 
         session.add(
             Constraint(
@@ -513,8 +555,22 @@ def _infer_direct_action(text: str, parent_text: str = "") -> dict | None:
     lowered = text.lower()
     mapping = [
         ("organize_event_flexible", {"organize flexible", "flexible event", "plan flexible"}),
-        ("organize_event", {"organize event", "schedule event", "create event", "plan event"}),
-        ("confirm", {"confirm", "confirmed"}),
+        (
+            "organize_event",
+            {
+                "organize event",
+                "organize this event",
+                "schedule event",
+                "create event",
+                "new event",
+                "plan event",
+            },
+        ),
+        (
+            "request_confirmations",
+            {"request confirmations", "ask confirmations", "confirm buttons"},
+        ),
+        ("confirm", {"confirm", "confirmed", "interested", "interest"}),
         ("join", {"join", "joined"}),
         ("cancel", {"cancel", "leave", "withdraw"}),
         ("lock", {"lock", "finalize", "close"}),
@@ -596,11 +652,7 @@ async def _apply_participation_action(
                 return
 
         attendance = list(event.attendance_list or [])
-        has_joined = any(
-            str(att) == str(requester_telegram_user_id)
-            or str(att).startswith(f"{requester_telegram_user_id}:")
-            for att in attendance
-        )
+        has_joined = has_attendee(attendance, requester_telegram_user_id)
 
         if action_type == "join":
             if event.state in {"locked", "completed"}:
@@ -608,9 +660,8 @@ async def _apply_participation_action(
                     f"❌ Cannot join event {event_id} - it's {event.state}."
                 )
                 return
-            if not has_joined:
-                attendance.append(requester_telegram_user_id)
-                event.attendance_list = attendance
+            attendance, _ = mark_joined(attendance, requester_telegram_user_id)
+            event.attendance_list = attendance
             if event.state == "proposed":
                 event.state = "interested"
 
@@ -620,18 +671,8 @@ async def _apply_participation_action(
                     f"❌ Cannot confirm event {event_id} - it's {event.state}."
                 )
                 return
-            if not has_joined:
-                attendance.append(requester_telegram_user_id)
-            already_confirmed = any(
-                str(att).startswith(f"{requester_telegram_user_id}:confirmed")
-                for att in attendance
-            )
-            if not already_confirmed:
-                attendance = [
-                    att for att in attendance
-                    if str(att) != str(requester_telegram_user_id)
-                ]
-                attendance.append(f"{requester_telegram_user_id}:confirmed")
+            if not has_joined or not has_confirmed(attendance, requester_telegram_user_id):
+                attendance, _ = mark_confirmed(attendance, requester_telegram_user_id)
             event.attendance_list = attendance
             event.state = "confirmed"
 
@@ -641,19 +682,18 @@ async def _apply_participation_action(
                     f"❌ Cannot cancel event {event_id} - it's already locked."
                 )
                 return
-            filtered = [
-                att for att in attendance
-                if str(att) != str(requester_telegram_user_id)
-                and not str(att).startswith(f"{requester_telegram_user_id}:")
-            ]
-            if len(filtered) == len(attendance):
+            filtered, changed = remove_attendee(
+                attendance,
+                requester_telegram_user_id,
+            )
+            if not changed:
                 await reply_message.reply_text(
                     f"❌ You haven't joined event {event_id} yet. Nothing to cancel."
                 )
                 return
             event.attendance_list = filtered
             if event.state not in {"locked", "completed", "cancelled"}:
-                event.state = _derive_state_from_attendance(event)
+                event.state = derive_state_from_attendance(filtered)
 
         user_id = await get_or_create_user_id(
             session,
@@ -673,11 +713,11 @@ async def _apply_participation_action(
 
     if action_type == "join":
         await reply_message.reply_text(
-            f"✅ Joined event {event_id}.\nUse /confirm {event_id} to confirm attendance."
+            f"✅ Joined event {event_id}.\nUse /confirm {event_id} to commit attendance."
         )
     elif action_type == "confirm":
         await reply_message.reply_text(
-            f"✅ Confirmed attendance for event {event_id}.\nEvent state is now `confirmed`."
+            f"✅ Committed to event {event_id}.\nEvent state is now `confirmed`."
         )
     else:
         await reply_message.reply_text(f"❌ Attendance cancelled for event {event_id}.")
@@ -705,6 +745,7 @@ async def _apply_lock_action(reply_message, event_id: int) -> None:
             )
             return
         event.state = "locked"
+        event.attendance_list, _ = finalize_commitments(event.attendance_list)
         event.locked_at = datetime.utcnow()
         await session.commit()
 

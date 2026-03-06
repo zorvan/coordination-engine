@@ -65,7 +65,7 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 async def handle_callback(
-    update: Update, _context: ContextTypes.DEFAULT_TYPE
+    update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> None:
     """Handle callback queries for event detail actions."""
     query = update.callback_query
@@ -78,7 +78,7 @@ async def handle_callback(
 
     if data and data.startswith("event_details_"):
         event_id = int(data.replace("event_details_", ""))
-        await show_details(query, event_id)
+        await show_details(query, context, event_id)
     elif data and data.startswith("event_logs_"):
         event_id = int(data.replace("event_logs_", ""))
         await show_logs(query, event_id)
@@ -89,7 +89,7 @@ async def handle_callback(
         await query.edit_message_text("✅ Event details closed.")
 
 
-async def show_details(query, event_id: int) -> None:
+async def show_details(query, context: ContextTypes.DEFAULT_TYPE, event_id: int) -> None:
     """Show full event details for callback-based navigation."""
     async with get_session(settings.db_url) as session:
         result = await session.execute(
@@ -104,7 +104,7 @@ async def show_details(query, event_id: int) -> None:
         logs = await _get_event_logs(session, event_id)
         constraints = await _get_event_constraints(session, event_id)
 
-        bot_username = query.bot.username if query.bot else None
+        bot_username = context.bot.username if context.bot else None
         reply_markup = build_event_details_action_markup(event_id, bot_username)
 
         await query.edit_message_text(
@@ -218,6 +218,14 @@ def build_event_details_action_markup(
 ) -> InlineKeyboardMarkup:
     """Build standard action keyboard for event details view."""
     keyboard = [
+        [
+            InlineKeyboardButton("✅ Commit", callback_data=f"event_confirm_{event_id}"),
+            InlineKeyboardButton("↩️ Back", callback_data=f"event_back_{event_id}"),
+        ],
+        [
+            InlineKeyboardButton("❌ Cancel", callback_data=f"event_cancel_{event_id}"),
+            InlineKeyboardButton("🔒 Lock", callback_data=f"event_lock_{event_id}"),
+        ],
         [InlineKeyboardButton("View Logs", callback_data=f"event_logs_{event_id}")],
         [
             InlineKeyboardButton(

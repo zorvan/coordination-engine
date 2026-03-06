@@ -2,6 +2,7 @@
 from typing import Any
 
 from bot.common.event_states import STATE_EXPLANATIONS
+from bot.common.attendance import parse_attendance_with_status
 
 
 def summarize_description(description: str | None, max_len: int = 400) -> str:
@@ -14,22 +15,32 @@ def summarize_description(description: str | None, max_len: int = 400) -> str:
 
 def attendance_stats(attendance: list[Any] | None) -> tuple[int, int, str]:
     """Return interested count, confirmed count, and formatted attendee text."""
-    records = attendance or []
-    confirmed_count = sum(
-        1 for item in records if str(item).endswith(":confirmed")
+    status_by_user = parse_attendance_with_status(attendance)
+    interested_count = sum(
+        1 for status in status_by_user.values() if status == "interested"
     )
-    interested_count = len(records) - confirmed_count
+    committed_count = sum(
+        1 for status in status_by_user.values() if status == "committed"
+    )
+    confirmed_count = sum(
+        1 for status in status_by_user.values() if status == "confirmed"
+    )
 
-    if not records:
+    if not status_by_user:
         return interested_count, confirmed_count, "No attendees yet."
 
     lines = []
-    for item in records:
-        text = str(item)
-        if text.endswith(":confirmed"):
-            lines.append(f"✓ {text.replace(':confirmed', '')}")
-        else:
-            lines.append(f"- {text}")
+    for telegram_user_id in sorted(status_by_user.keys()):
+        status = status_by_user[telegram_user_id]
+        icon = {
+            "invited": "📨",
+            "interested": "•",
+            "committed": "⏳",
+            "confirmed": "✓",
+        }.get(status, "•")
+        lines.append(f"{icon} {telegram_user_id} ({status})")
+    if committed_count:
+        lines.append(f"\nCommitted pending lock: {committed_count}")
     return interested_count, confirmed_count, "\n".join(lines)
 
 
@@ -44,6 +55,16 @@ def format_event_details_message(
     availability_count = sum(
         1 for c in constraints if str(getattr(c, "type", "")).startswith("available:")
     )
+    planning_prefs = (
+        event.planning_prefs
+        if isinstance(getattr(event, "planning_prefs", None), dict)
+        else {}
+    )
+    location_type = str(planning_prefs.get("location_type", "n/a")).replace("_", " ")
+    budget_level = str(planning_prefs.get("budget_level", "n/a")).replace("_", " ")
+    transport_mode = str(planning_prefs.get("transport_mode", "n/a")).replace("_", " ")
+    time_window = str(planning_prefs.get("time_window", "n/a"))
+    date_preset = str(planning_prefs.get("date_preset", "n/a"))
 
     next_step = "Run /join <event_id> to gather interest."
     if event.scheduled_time is None:
@@ -64,6 +85,12 @@ def format_event_details_message(
         f"Type: {event.event_type}\n"
         f"Description: {event.description or 'N/A'}\n"
         f"Time: {event.scheduled_time or 'TBD'}\n"
+        f"Commit-By: {event.commit_by or 'N/A'}\n"
+        f"Date Preset: {date_preset}\n"
+        f"Time Window: {time_window}\n"
+        f"Location Type: {location_type}\n"
+        f"Budget: {budget_level}\n"
+        f"Transport: {transport_mode}\n"
         f"Duration: {event.duration_minutes or 120} minutes\n"
         f"Threshold: {threshold}\n"
         f"State: {event.state}\n"
@@ -89,11 +116,27 @@ def format_status_message(
 ) -> str:
     """Build consistent event status message."""
     description = summarize_description(event.description, max_len=400)
+    planning_prefs = (
+        event.planning_prefs
+        if isinstance(getattr(event, "planning_prefs", None), dict)
+        else {}
+    )
+    location_type = str(planning_prefs.get("location_type", "n/a")).replace("_", " ")
+    budget_level = str(planning_prefs.get("budget_level", "n/a")).replace("_", " ")
+    transport_mode = str(planning_prefs.get("transport_mode", "n/a")).replace("_", " ")
+    time_window = str(planning_prefs.get("time_window", "n/a"))
+    date_preset = str(planning_prefs.get("date_preset", "n/a"))
     return (
         f"📊 *Event {event_id} Status*\n\n"
         f"Type: {event.event_type}\n"
         f"Description: {description}\n"
         f"Time: {event.scheduled_time}\n"
+        f"Commit-By: {event.commit_by or 'N/A'}\n"
+        f"Date Preset: {date_preset}\n"
+        f"Time Window: {time_window}\n"
+        f"Location Type: {location_type}\n"
+        f"Budget: {budget_level}\n"
+        f"Transport: {transport_mode}\n"
         f"Duration: {event.duration_minutes or 120} minutes\n"
         f"Threshold: {event.threshold_attendance}\n"
         f"State: {event.state}\n"

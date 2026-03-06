@@ -16,6 +16,7 @@ from db.models import Event
 from db.connection import get_session
 from config.settings import settings
 from ai.core import AICoordinationEngine
+from bot.common.confirmation import invalidate_confirmations_and_notify
 
 
 async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -109,6 +110,11 @@ async def _send_suggestion(
             parsed = _parse_suggested_time(normalized_suggested)
             if parsed:
                 event.scheduled_time = parsed
+                await invalidate_confirmations_and_notify(
+                    context=SimpleContextProxy(msg.get_bot()),
+                    event=event,
+                    reason="event time auto-updated by AI suggestion",
+                )
                 await session.commit()
                 auto_applied = True
 
@@ -160,3 +166,9 @@ def _parse_suggested_time(raw_value: str) -> datetime | None:
         return datetime.fromisoformat(value)
     except ValueError:
         return None
+
+
+class SimpleContextProxy:
+    """Minimal context proxy exposing `bot` for notification helpers."""
+    def __init__(self, bot):
+        self.bot = bot

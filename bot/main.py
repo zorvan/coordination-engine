@@ -16,7 +16,7 @@ from config.settings import Settings
 from config.logging import setup_logging
 from bot.commands import (
     start, my_groups, profile, reputation, organize_event,
-    join, confirm, cancel, lock, constraints, suggest_time, status,
+    join, confirm, back, cancel, lock, request_confirmations, early_feedback, event_note, modify_event, constraints, suggest_time, status,
     event_details, events,
 )
 from bot.handlers import event_flow, feedback, membership, mentions
@@ -73,8 +73,9 @@ def main():
         MessageHandler(
             filters.TEXT & ~filters.COMMAND & filters.ChatType.GROUPS,
             mentions.handle_mention,
+            block=False,
         ),
-        group=0,
+        group=1,
     )
 
     # Register command handlers
@@ -88,8 +89,14 @@ def main():
         "organize_event_flexible": organize_event.handle_flexible,
         "join": join.handle,
         "confirm": confirm.handle,
+        "interested": confirm.handle,
+        "back": back.handle,
         "cancel": cancel.handle,
         "lock": lock.handle,
+        "request_confirmations": request_confirmations.handle,
+        "early_feedback": early_feedback.handle,
+        "event_note": event_note.handle,
+        "modify_event": modify_event.handle,
         "constraints": constraints.handle,
         "suggest_time": suggest_time.handle,
         "status": status.handle,
@@ -104,7 +111,7 @@ def main():
     # Register callback query handlers
     callback_handlers = [
         (r"^event_(type|threshold|duration|final|cancel|cal)_", organize_event.handle_callback),
-        (r"^event_(join|confirm|cancel|lock)_", event_flow.handle_event_flow),
+        (r"^event_(join|confirm|back|cancel|lock)_", event_flow.handle_event_flow),
         (r"^event_(details|logs|constraints|close)_", event_details.handle_callback),
         (r"^constraint_nl_", constraints.handle_callback),
         (r"^mentionact_", mentions.handle_mention_callback),
@@ -117,7 +124,8 @@ def main():
 
     # Register text message handler for event creation flow
     application.add_handler(
-        MessageHandler(filters.TEXT & ~filters.COMMAND, organize_event.handle_message)
+        MessageHandler(filters.TEXT & ~filters.COMMAND, organize_event.handle_message),
+        group=0,
     )
 
     application.add_error_handler(on_error)

@@ -3,6 +3,7 @@ OpenAI-compatible LLM client for Qwen3.
 """
 import httpx
 import json
+import re
 from typing import Dict, Any, Tuple
 from config.settings import settings
 from db.models import Event
@@ -21,9 +22,17 @@ class LLMClient:
             timeout=60.0
         )
     
-    async def resolve_conflicts(self, event: Event, availability: Dict[int, float], reliability: Dict[int, float]) -> Dict[str, Any]:
+    async def resolve_conflicts(
+        self,
+        event: Event,
+        availability: Dict[int, float],
+        reliability: Dict[int, float],
+        notes: list[str] | None = None,
+    ) -> Dict[str, Any]:
         """Generate conflict resolution suggestions using LLM."""
-        prompt = self._build_conflict_prompt(event, availability, reliability)
+        prompt = self._build_conflict_prompt(
+            event, availability, reliability, notes or []
+        )
         
         try:
             response = await self._call_llm(prompt)
@@ -157,6 +166,284 @@ class LLMClient:
                 "expertise_adjustments": {event_type: 0.1},
             }
 
+    async def infer_event_draft_patch(
+        self,
+        current_draft: Dict[str, Any],
+        message_text: str,
+    ) -> Dict[str, Any]:
+        """Infer a structured patch for event draft revisions."""
+        prompt = f"""
+        You update an event draft using user requested modifications.
+        Return JSON patch fields only when explicit in user request.
+        Keep deterministic and conservative.
+
+        Current draft:
+        {current_draft}
+
+        User modification:
+        {message_text}
+
+        Output JSON only:
+        {{
+          "description": "string or null",
+          "event_type": "social|sports|work|null",
+          "scheduled_time_iso": "YYYY-MM-DDTHH:MM or null",
+          "clear_time": true/false,
+          "duration_minutes": 90 or null,
+          "threshold_attendance": 5 or null,
+          "invitees_add": ["alice", "@bob"] or [],
+          "invitees_remove": ["charlie"] or [],
+          "invite_all_members": true/false/null,
+          "scheduling_mode": "fixed|flexible|null",
+          "note": "constraint/suggestion note or null"
+        }}
+        """
+        try:
+            response = await self._call_llm(prompt)
+            parsed = json.loads(response)
+            invitees_add = parsed.get("invitees_add")
+            invitees_remove = parsed.get("invitees_remove")
+            return {
+                "description": parsed.get("description"),
+                "event_type": parsed.get("event_type"),
+                "scheduled_time_iso": parsed.get("scheduled_time_iso"),
+                "clear_time": bool(parsed.get("clear_time", False)),
+                "duration_minutes": parsed.get("duration_minutes"),
+                "threshold_attendance": parsed.get("threshold_attendance"),
+                "invitees_add": invitees_add if isinstance(invitees_add, list) else [],
+                "invitees_remove": invitees_remove if isinstance(invitees_remove, list) else [],
+                "invite_all_members": parsed.get("invite_all_members"),
+                "scheduling_mode": parsed.get("scheduling_mode"),
+                "note": parsed.get("note"),
+            }
+        except Exception:
+            lowered = message_text.lower()
+            patch: Dict[str, Any] = {
+                "description": None,
+                "event_type": None,
+                "scheduled_time_iso": None,
+                "clear_time": False,
+                "duration_minutes": None,
+                "threshold_attendance": None,
+                "invitees_add": [],
+                "invitees_remove": [],
+                "invite_all_members": None,
+                "scheduling_mode": None,
+                "note": None,
+            }
+
+            if "flexible" in lowered:
+                patch["scheduling_mode"] = "flexible"
+            elif "fixed" in lowered:
+                patch["scheduling_mode"] = "fixed"
+
+            if "invite all" in lowered or "@all" in lowered:
+                patch["invite_all_members"] = True
+
+            threshold_match = re.search(r"\bthreshold(?:\s+to)?\s+(\d{1,3})\b", lowered)
+            if threshold_match:
+                patch["threshold_attendance"] = int(threshold_match.group(1))
+
+            duration_match = re.search(
+                r"\b(\d{1,3})\s*(minutes|minute|mins|min|hours|hour|hrs|hr)\b",
+                lowered,
+            )
+            if duration_match:
+                value = int(duration_match.group(1))
+                unit = duration_match.group(2)
+                patch["duration_minutes"] = value * 60 if "hour" in unit or "hr" in unit else value
+
+            datetime_match = re.search(
+                r"\b(\d{4}-\d{2}-\d{2})[ t](\d{1,2}:\d{2})\b",
+                message_text,
+            )
+            if datetime_match:
+                date_part = datetime_match.group(1)
+                time_part = datetime_match.group(2)
+                hour, minute = time_part.split(":")
+                patch["scheduled_time_iso"] = f"{date_part}T{int(hour):02d}:{minute}"
+
+            if (
+                "clear time" in lowered
+                or "no time" in lowered
+                or "time tbd" in lowered
+            ):
+                patch["clear_time"] = True
+
+            handles = re.findall(r"@([A-Za-z][A-Za-z0-9_]{4,31})", message_text)
+            if "remove" in lowered:
+                patch["invitees_remove"] = [h.lower() for h in handles]
+            elif "add" in lowered or "invite" in lowered:
+                patch["invitees_add"] = [h.lower() for h in handles]
+
+            if lowered.startswith("description:"):
+                patch["description"] = message_text.split(":", 1)[1].strip()
+            elif lowered.startswith("note:") or lowered.startswith("constraint:"):
+                patch["note"] = message_text.split(":", 1)[1].strip()
+
+            if any(token in lowered for token in {"social", "sports", "work"}):
+                if "sports" in lowered:
+                    patch["event_type"] = "sports"
+                elif "work" in lowered:
+                    patch["event_type"] = "work"
+                else:
+                    patch["event_type"] = "social"
+
+            return patch
+
+    async def infer_event_draft_from_context(
+        self,
+        *,
+        message_text: str,
+        history: list[dict[str, Any]] | None = None,
+        scheduling_mode: str = "fixed",
+    ) -> Dict[str, Any]:
+        """Infer a full event draft from mention text + recent chat context."""
+        compact_history = (history or [])[-30:]
+        prompt = f"""
+        Build an event draft JSON from group context.
+        Use conservative defaults when missing.
+        Defaults:
+        - event_type: social
+        - threshold_attendance: 3
+        - duration_minutes: 120
+        - invite_all_members: true
+
+        User message:
+        {message_text}
+
+        Recent chat history:
+        {compact_history}
+
+        Requested scheduling mode:
+        {scheduling_mode}
+
+        Output JSON only:
+        {{
+          "description": "short text",
+          "event_type": "social|sports|work",
+          "scheduled_time_iso": "YYYY-MM-DDTHH:MM or null",
+          "duration_minutes": 120,
+          "threshold_attendance": 3,
+          "invite_all_members": true,
+          "invitees": ["@alice", "@bob"],
+          "planning_notes": ["note 1", "note 2"]
+        }}
+        """
+        try:
+            response = await self._call_llm(prompt)
+            parsed = json.loads(response)
+            event_type = str(parsed.get("event_type", "social")).strip().lower()
+            if event_type not in {"social", "sports", "work"}:
+                event_type = "social"
+            duration = int(parsed.get("duration_minutes", 120))
+            threshold = int(parsed.get("threshold_attendance", 3))
+            invitees = parsed.get("invitees", [])
+            if not isinstance(invitees, list):
+                invitees = []
+            normalized_invitees = []
+            for raw in invitees:
+                s = str(raw).strip()
+                if not s:
+                    continue
+                if not s.startswith("@"):
+                    s = f"@{s}"
+                normalized_invitees.append(s.lower())
+            notes = parsed.get("planning_notes", [])
+            if not isinstance(notes, list):
+                notes = []
+            return {
+                "description": str(
+                    parsed.get("description", message_text or "Group planned event")
+                ).strip()[:500],
+                "event_type": event_type,
+                "scheduled_time": parsed.get("scheduled_time_iso"),
+                "duration_minutes": max(30, min(720, duration)),
+                "threshold_attendance": max(1, min(200, threshold)),
+                "invite_all_members": bool(parsed.get("invite_all_members", True)),
+                "invitees": normalized_invitees,
+                "planning_notes": [str(n).strip()[:300] for n in notes if str(n).strip()],
+            }
+        except Exception:
+            return {
+                "description": (message_text or "Group planned event").strip()[:500],
+                "event_type": "social",
+                "scheduled_time": None,
+                "duration_minutes": 120,
+                "threshold_attendance": 3,
+                "invite_all_members": True,
+                "invitees": ["@all"],
+                "planning_notes": ["Draft auto-generated from limited context."],
+            }
+
+    async def infer_early_feedback_from_text(
+        self,
+        text: str,
+    ) -> Dict[str, Any]:
+        """Infer early behavioral feedback signal from free text."""
+        prompt = f"""
+        Convert this peer behavioral feedback into JSON.
+        Remove toxicity while preserving intent.
+        Output fields:
+        - signal_type: overall|reliability|cooperation|toxicity|commitment|trust
+        - score: 0..5
+        - weight: 0..1
+        - confidence: 0..1
+        - sanitized_comment: short clean summary
+
+        Feedback text:
+        {text}
+
+        Output JSON only:
+        {{
+          "signal_type": "overall",
+          "score": 3.0,
+          "weight": 0.6,
+          "confidence": 0.7,
+          "sanitized_comment": "summary"
+        }}
+        """
+        try:
+            response = await self._call_llm(prompt)
+            parsed = json.loads(response)
+            signal_type = str(parsed.get("signal_type", "overall")).strip().lower()
+            if signal_type not in {
+                "overall",
+                "reliability",
+                "cooperation",
+                "toxicity",
+                "commitment",
+                "trust",
+            }:
+                signal_type = "overall"
+            return {
+                "signal_type": signal_type,
+                "score": max(0.0, min(5.0, float(parsed.get("score", 3.0)))),
+                "weight": max(0.0, min(1.0, float(parsed.get("weight", 0.6)))),
+                "confidence": max(0.0, min(1.0, float(parsed.get("confidence", 0.7)))),
+                "sanitized_comment": str(
+                    parsed.get("sanitized_comment", text)
+                ).strip()[:500],
+            }
+        except Exception:
+            cleaned = _sanitize_toxic_text(text)
+            lowered = cleaned.lower()
+            signal_type = "overall"
+            score = _simple_sentiment_score(cleaned)
+            if "late" in lowered or "no show" in lowered or "unreliable" in lowered:
+                signal_type = "reliability"
+                score = max(0.0, score - 0.5)
+            elif "helpful" in lowered or "cooperate" in lowered:
+                signal_type = "cooperation"
+                score = min(5.0, score + 0.4)
+            return {
+                "signal_type": signal_type,
+                "score": score,
+                "weight": 0.55,
+                "confidence": 0.5,
+                "sanitized_comment": cleaned[:500],
+            }
+
     async def infer_group_mention_action(
         self, text: str, history: list[dict[str, Any]] | None = None
     ) -> Dict[str, Any]:
@@ -168,6 +455,8 @@ class LLMClient:
 
         Allowed action_type values:
         - opinion
+        - organize_event
+        - organize_event_flexible
         - status
         - event_details
         - suggest_time
@@ -176,6 +465,7 @@ class LLMClient:
         - confirm
         - cancel
         - lock
+        - request_confirmations
 
         If action is unclear, use opinion.
         If event_id is unknown, set event_id to null.
@@ -190,7 +480,7 @@ class LLMClient:
 
         Output JSON only:
         {{
-          "action_type": "opinion|status|event_details|suggest_time|constraint_add|join|confirm|cancel|lock",
+          "action_type": "opinion|organize_event|organize_event_flexible|status|event_details|suggest_time|constraint_add|join|confirm|cancel|lock|request_confirmations",
           "event_id": 123 or null,
           "target_username": "alice" or null,
           "constraint_type": "if_joins|if_attends|unless_joins|null",
@@ -203,6 +493,8 @@ class LLMClient:
             action_type = str(parsed.get("action_type", "opinion")).strip().lower()
             if action_type not in {
                 "opinion",
+                "organize_event",
+                "organize_event_flexible",
                 "status",
                 "event_details",
                 "suggest_time",
@@ -211,6 +503,7 @@ class LLMClient:
                 "confirm",
                 "cancel",
                 "lock",
+                "request_confirmations",
             }:
                 action_type = "opinion"
             event_id = parsed.get("event_id")
@@ -240,7 +533,18 @@ class LLMClient:
         except Exception:
             lowered = text.lower()
             fallback_action = "opinion"
-            if "status" in lowered:
+            if (
+                "organize" in lowered
+                or "organise" in lowered
+                or "create event" in lowered
+                or "new event" in lowered
+                or "plan event" in lowered
+            ):
+                if "flexible" in lowered:
+                    fallback_action = "organize_event_flexible"
+                else:
+                    fallback_action = "organize_event"
+            elif "status" in lowered:
                 fallback_action = "status"
             elif "detail" in lowered:
                 fallback_action = "event_details"
@@ -248,9 +552,15 @@ class LLMClient:
                 fallback_action = "suggest_time"
             elif "constraint" in lowered or "if " in lowered:
                 fallback_action = "constraint_add"
+            elif (
+                "request confirmation" in lowered
+                or "confirm button" in lowered
+                or "ask confirmations" in lowered
+            ):
+                fallback_action = "request_confirmations"
             elif "join" in lowered:
                 fallback_action = "join"
-            elif "confirm" in lowered:
+            elif "confirm" in lowered or "interested" in lowered or "interest" in lowered:
                 fallback_action = "confirm"
             elif "cancel" in lowered:
                 fallback_action = "cancel"
@@ -298,7 +608,13 @@ class LLMClient:
         except Exception as e:
             return False, f"LLM unavailable: {type(e).__name__}: {e}"
     
-    def _build_conflict_prompt(self, event: Event, availability: Dict[int, float], reliability: Dict[int, float]) -> str:
+    def _build_conflict_prompt(
+        self,
+        event: Event,
+        availability: Dict[int, float],
+        reliability: Dict[int, float],
+        notes: list[str],
+    ) -> str:
         """Construct Qwen3 prompt for conflict resolution."""
         return f"""
         You are a scheduling assistant. Resolve conflicts for this event.
@@ -312,6 +628,9 @@ class LLMClient:
 
         Constraints:
         - User A: "I join only if Jim joins" (confidence: 0.8)
+
+        Private attendee notes:
+        {notes}
 
         Output JSON:
         {{

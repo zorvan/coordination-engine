@@ -38,7 +38,7 @@ def build_event_invitation_keyboard(
 
 
 def build_event_modification_keyboard(
-    bot_username: str | None, event_id: int
+    bot_username: str | None, event_id: int, request_id: str | None = None
 ) -> InlineKeyboardMarkup:
     """Build inline keyboard for event modification in DM."""
     rows: list[list[InlineKeyboardButton]] = []
@@ -47,6 +47,12 @@ def build_event_modification_keyboard(
         InlineKeyboardButton("📅 Modify Availability", url=build_start_link(bot_username, f"avail_{event_id}")),
         InlineKeyboardButton("📝 Contact Organizer", url=build_start_link(bot_username, f"contact_{event_id}")),
     ])
+    
+    if request_id:
+        rows.append([
+            InlineKeyboardButton("✅ Approve", callback_data=f"modreq_{request_id}_approve"),
+            InlineKeyboardButton("❌ Reject", callback_data=f"modreq_{request_id}_reject"),
+        ])
     
     return InlineKeyboardMarkup(rows)
 
@@ -136,6 +142,7 @@ async def send_event_modification_request_dm(
     event_data: dict[str, Any],
     event_id: int,
     deadline_info: str,
+    request_id: str | None = None,
 ) -> bool:
     """Send event modification request to user via private DM.
     
@@ -175,7 +182,7 @@ async def send_event_modification_request_dm(
                 "Please review the event and let the organizer know if you can attend "
                 "or if you need to modify your availability."
             ),
-            reply_markup=build_event_modification_keyboard(bot_username, event_id),
+            reply_markup=build_event_modification_keyboard(bot_username, event_id, request_id),
         )
         logger.info(f"Event modification request DM sent to user {telegram_user_id} for event {event_id}")
         return True

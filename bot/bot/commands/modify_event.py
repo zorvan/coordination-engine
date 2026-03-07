@@ -21,7 +21,7 @@ from bot.common.event_notifications import send_event_modification_request_dm
 from config.settings import settings
 from db.connection import get_session
 from db.models import Event
-import uuid
+import uuid as uuid_lib
 
 
 async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -183,7 +183,7 @@ async def _submit_modify_request(
         )
         return
     
-    request_id = uuid.uuid4().hex[:8]
+    request_id = uuid_lib.uuid4().hex[:8]
     pending_key = f"modify_request_{request_id}"
     context.bot_data.setdefault("pending_modify_requests", {})[pending_key] = {
         "event_id": event.event_id,
@@ -226,6 +226,7 @@ async def _submit_modify_request(
         },
         event_id=int(event.event_id),
         deadline_info="Please review and approve the modification request",
+        request_id=request_id,
     )
     
     if not adminDM_sent:

@@ -146,6 +146,9 @@ def main():
         (r"^event_", organize_event.handle_callback),
         (r"^private_event_", organize_event.private_handle_callback),
         
+        # Modify input handlers
+        (r"^modinput_", mentions.handle_callback),
+        
         # Other handlers
         (r"^constraint_nl_", constraints.handle_callback),
         (r"^mentionact_", mentions.handle_mention_callback),
@@ -161,6 +164,12 @@ def main():
     application.add_handler(
         MessageHandler(filters.TEXT & ~filters.COMMAND, organize_event.handle_message),
         group=0,
+    )
+
+    # Register text message handler for pending modification requests
+    application.add_handler(
+        MessageHandler(filters.TEXT & ~filters.COMMAND, mentions.handle_modify_message),
+        group=2,
     )
 
     application.add_error_handler(on_error)

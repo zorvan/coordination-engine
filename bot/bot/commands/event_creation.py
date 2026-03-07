@@ -1666,7 +1666,7 @@ async def finalize_event(query: CallbackQuery, context: ContextTypes.DEFAULT_TYP
         if send_to_all_members and group:
             group_members = group.member_list or []
             for telegram_user_id in group_members:
-                if telegram_user_id != int(creator_id):
+                if telegram_user_id:
                     try:
                         sent = await send_event_invitation_dm(
                             context,

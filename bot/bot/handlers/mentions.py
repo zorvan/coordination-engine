@@ -340,44 +340,34 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
             admin_id = get_event_admin_telegram_id(event)
 
-        requester_id = user.id if user else None
-        requester_username = user.username if user else None
-        request_id = uuid4().hex[:8]
-
-        pending_modify_root = context.bot_data.setdefault("pending_modify_requests", {})
-        pending_modify_root[request_id] = {
-            "request_id": request_id,
+        # Store event info for later use in processing modifications
+        modify_request = {
             "event_id": event_id,
-            "requester_id": requester_id,
-            "requester_username": requester_username,
-            "change_text": "",
+            "event_description": event.description or "",
+            "event_scheduled_time": event.scheduled_time.isoformat() if event and event.scheduled_time else None,
             "admin_id": admin_id,
-            "created_at": datetime.utcnow().isoformat(),
+            "requester_id": user.id if user else None,
+            "requester_username": user.username if user else None,
         }
+        request_id = uuid4().hex[:8]
+        context.user_data[f"pending_modify_request_{request_id}"] = modify_request
+
+        # Show keyboard for user to choose modification method
+        keyboard = [
+            [
+                InlineKeyboardButton("✍️ Write your own", callback_data=f"modinput_{request_id}_write"),
+                InlineKeyboardButton("🤖 AI suggested", callback_data=f"modinput_{request_id}_ai"),
+            ],
+            [InlineKeyboardButton("❌ Cancel", callback_data=f"modinput_{request_id}_cancel")],
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
 
         await query.edit_message_text(
-            "✅ *Modification request submitted!*\n\n"
-            "The event admin will review your request.",
+            "🔧 How would you like to modify the event?\n\n"
+            "Choose a method to specify the changes you want to make.",
+            reply_markup=reply_markup,
             parse_mode="Markdown",
         )
-
-        if admin_id:
-            await send_event_modification_request_dm(
-                context,
-                admin_id,
-                {
-                    "event_id": event_id,
-                    "requester_id": requester_id,
-                    "requester_username": requester_username,
-                    "change_text": "",
-                    "request_id": request_id,
-                    "description": event.description if event else "",
-                    "scheduled_time": event.scheduled_time.isoformat() if event and event.scheduled_time else "",
-                    "location_type": "cafe",
-                },
-                event_id,
-                "Please review and approve this modification request.",
-            )
 
         return
 
@@ -400,6 +390,217 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             return
         await _send_status(query.message, event_id)
         return
+
+    if data.startswith("modinput_"):
+        parts = data.split("_")
+        if len(parts) != 3:
+            await query.answer("❌ Invalid request format.")
+            return
+        
+        request_id = parts[1]
+        action = parts[2]
+        
+        pending_key = f"pending_modify_request_{request_id}"
+        modify_request = context.user_data.pop(pending_key, None)
+        
+        if not modify_request:
+            await query.edit_message_text("❌ This modification request has expired.")
+            return
+        
+        if action == "cancel":
+            await query.edit_message_text("✅ Modification request cancelled.")
+            return
+        
+        event_id = modify_request.get("event_id")
+        admin_id = modify_request.get("admin_id")
+        
+        if action == "write":
+            # Ask user to provide modification text
+            await query.edit_message_text(
+                "✏️ *Please type your modification request below:*\n\n"
+                "Describe the changes you want to make. Examples:\n"
+                "- Change time to March 8, 2026 at 18:00\n"
+                "- Increase threshold to 10\n"
+                "- Move location to gym\n\n"
+                "Type 'cancel' to abort.",
+                parse_mode="Markdown",
+            )
+            # Store pending modification for processing
+            context.user_data[f"pending_mod_text_{request_id}"] = {
+                "event_id": event_id,
+                "admin_id": admin_id,
+                "requester_id": modify_request.get("requester_id"),
+                "requester_username": modify_request.get("requester_username"),
+            }
+            return
+        
+        if action == "ai":
+            # Use AI to suggest modifications
+            async with get_session(settings.db_url) as session:
+                result = await session.execute(
+                    select(Event).where(Event.event_id == event_id)
+                )
+                event = result.scalar_one_or_none()
+                if not event:
+                    await query.edit_message_text("❌ Event not found.")
+                    return
+                
+                llm = LLMClient()
+                try:
+                    draft = {
+                        "description": event.description or "",
+                        "event_type": event.event_type,
+                        "scheduled_time": (
+                            event.scheduled_time.isoformat()
+                            if event and event.scheduled_time else None
+                        ),
+                        "duration_minutes": int(event.duration_minutes or 120),
+                        "threshold_attendance": int(event.threshold_attendance or 0),
+                    }
+                    change_text = "Please suggest improvements to this event draft. Return a JSON object with a 'suggestion' key containing your recommendation."
+                    patch = await llm.infer_event_draft_patch(draft, change_text)
+                    suggestion = patch
+                finally:
+                    await llm.close()
+                
+                change_text = suggestion.get("suggestion", "Please review the AI suggestions for modifications.")
+                
+                # Submit the request to admin
+                await _submit_modify_request_via_callback(
+                    update, context, request_id, event_id, admin_id, change_text,
+                    modify_request.get("requester_id"), modify_request.get("requester_username")
+                )
+                return
+        
+        await query.edit_message_text("❌ Unknown modification action.")
+        return
+
+
+async def handle_modify_message(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    """Handle text messages for modification requests."""
+    message = update.effective_message
+    if not message or not message.text:
+        return
+    
+    text = message.text.strip()
+    
+    pending_keys = [k for k in context.user_data if k.startswith("pending_mod_text_")]
+    if not pending_keys:
+        return
+    
+    request_id = pending_keys[0].replace("pending_mod_text_", "")
+    pending_data = context.user_data.pop(pending_keys[0])
+    
+    if text.lower() == "cancel":
+        await message.reply_text("✅ Modification request cancelled.")
+        return
+    
+    change_text = text
+    event_id = pending_data.get("event_id")
+    admin_id = pending_data.get("admin_id")
+    requester_id = pending_data.get("requester_id")
+    requester_username = pending_data.get("requester_username")
+    
+    await _submit_modify_request_via_message(
+        update, context, request_id, event_id, admin_id, change_text,
+        requester_id, requester_username
+    )
+
+
+async def _submit_modify_request_via_message(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    request_id: str,
+    event_id: int,
+    admin_id: int,
+    change_text: str,
+    requester_id: int | None,
+    requester_username: str | None,
+) -> None:
+    """Helper to submit modification request via message."""
+    pending_key = f"modreq_{request_id}"
+    context.bot_data.setdefault("pending_modify_requests", {})[pending_key] = {
+        "event_id": event_id,
+        "requester_id": requester_id,
+        "requester_username": requester_username,
+        "change_text": change_text,
+        "admin_id": admin_id,
+        "created_at": datetime.utcnow().isoformat(),
+    }
+    
+    keyboard = [
+        [
+            InlineKeyboardButton("✅ Approve", callback_data=f"modreq_{request_id}_approve"),
+            InlineKeyboardButton("❌ Reject", callback_data=f"modreq_{request_id}_reject"),
+        ]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await update.message.reply_text(
+        f"📩 *Modify request submitted for admin approval*\n\n"
+        f"Event ID: {event_id}\n"
+        f"Changes: {change_text}\n\n"
+        f"Waiting for admin approval...",
+        reply_markup=reply_markup,
+        parse_mode="Markdown",
+    )
+    
+    from bot.common.event_notifications import send_event_modification_request_dm
+    await send_event_modification_request_dm(
+        context=context,
+        telegram_user_id=admin_id,
+        event_data={
+            "event_id": event_id,
+            "change_text": change_text,
+        },
+        event_id=event_id,
+        deadline_info="Please review and approve the modification request",
+        request_id=request_id,
+    )
+
+
+async def _submit_modify_request_via_callback(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    request_id: str,
+    event_id: int,
+    admin_id: int,
+    change_text: str,
+    requester_id: int | None,
+    requester_username: str | None,
+) -> None:
+    """Helper to submit modification request via callback."""
+    keyboard = [
+        [
+            InlineKeyboardButton("✅ Approve", callback_data=f"modreq_{request_id}_approve"),
+            InlineKeyboardButton("❌ Reject", callback_data=f"modreq_{request_id}_reject"),
+        ]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await update.callback_query.edit_message_text(
+        f"📩 *Modify request submitted for admin approval*\n\n"
+        f"Event ID: {event_id}\n"
+        f"Changes: {change_text}\n\n"
+        f"Waiting for admin approval...",
+        reply_markup=reply_markup,
+        parse_mode="Markdown",
+    )
+    
+    from bot.common.event_notifications import send_event_modification_request_dm
+    await send_event_modification_request_dm(
+        context=context,
+        telegram_user_id=admin_id,
+        event_data={
+            "event_id": event_id,
+            "change_text": change_text,
+        },
+        event_id=event_id,
+        deadline_info="Please review and approve the modification request",
+        request_id=request_id,
+    )
 
 
 async def _resolve_mentioned_participants(

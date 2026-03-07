@@ -80,6 +80,9 @@ def format_event_details_message(
     elif event.state in {"locked", "completed", "cancelled"}:
         next_step = "Event is in a terminal/locked stage."
 
+    admin_id = getattr(event, "admin_telegram_user_id", None)
+    admin_text = str(admin_id) if admin_id else "N/A"
+    
     return (
         f"📋 *Event {event_id} Details*\n\n"
         f"Type: {event.event_type}\n"
@@ -99,6 +102,7 @@ def format_event_details_message(
         f"Created: {event.created_at}\n"
         f"Locked: {event.locked_at or 'N/A'}\n"
         f"Completed: {event.completed_at or 'N/A'}\n\n"
+        f"Admin: {admin_text}\n\n"
         f"Progress:\n"
         f"- Interested: {interested_count}\n"
         f"- Confirmed: {confirmed_count}\n"
@@ -126,6 +130,9 @@ def format_status_message(
     transport_mode = str(planning_prefs.get("transport_mode", "n/a")).replace("_", " ")
     time_window = str(planning_prefs.get("time_window", "n/a"))
     date_preset = str(planning_prefs.get("date_preset", "n/a"))
+    admin_id = getattr(event, "admin_telegram_user_id", None)
+    admin_text = str(admin_id) if admin_id else "N/A"
+    
     return (
         f"📊 *Event {event_id} Status*\n\n"
         f"Type: {event.event_type}\n"
@@ -142,6 +149,7 @@ def format_status_message(
         f"State: {event.state}\n"
         f"State Meaning: {STATE_EXPLANATIONS.get(event.state, 'Unknown state')}\n"
         f"AI Score: {event.ai_score:.2f}\n\n"
+        f"Admin: {admin_text}\n\n"
         f"Attendees: {len(event.attendance_list)}\n"
         f"Logs: {log_count}\n"
         f"Constraints: {constraint_count}\n"

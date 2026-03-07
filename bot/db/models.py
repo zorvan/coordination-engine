@@ -78,6 +78,7 @@ class Event(Base):
     event_type = Column(String(100), nullable=False)
     description = Column(Text)
     organizer_telegram_user_id = Column(BigInteger)
+    admin_telegram_user_id = Column(BigInteger)
     scheduled_time = Column(DateTime)
     commit_by = Column(DateTime)
     duration_minutes = Column(Integer, default=120)

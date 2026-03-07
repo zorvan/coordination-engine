@@ -1,4 +1,22 @@
 -- Database schema for Telegram Coordination Bot
+-- 
+-- SCHEMA DEFINITION - Single Source of Truth
+-- ============================================
+-- This file documents the complete database schema for the coordination bot.
+--
+-- IMPORTANT NOTES:
+-- - Primary: SQLAlchemy models in db/models.py define the schema
+-- - This file serves as reference documentation of the final schema
+-- - The models and this file should be kept in sync
+-- - Database is initialized from SQLAlchemy models at application startup
+--
+-- When making schema changes:
+-- 1. Update db/models.py first (primary source)
+-- 2. Update this file to match (documentation)
+-- 3. Restart application (init_db() will create/update tables)
+--
+-- For future large-scale schema migrations, consider implementing
+-- a migration system - see git history for previous migration setup.
 
 -- 1. Users: Global identity across groups
 CREATE TABLE IF NOT EXISTS users (
@@ -28,6 +46,7 @@ CREATE TABLE IF NOT EXISTS events (
     event_type VARCHAR(100) NOT NULL,
     description TEXT,
     organizer_telegram_user_id BIGINT,
+    admin_telegram_user_id BIGINT,
     scheduled_time TIMESTAMP,
     commit_by TIMESTAMP,
     duration_minutes INTEGER DEFAULT 120,
@@ -120,9 +139,26 @@ CREATE TABLE IF NOT EXISTS ailog (
     timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+-- 10. UserPreference: Private user preference profiles
+CREATE TABLE IF NOT EXISTS user_preferences (
+    preference_id SERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+    time_preference VARCHAR(50) DEFAULT 'any',
+    activity_preference VARCHAR(100) DEFAULT 'any',
+    budget_preference VARCHAR(50) DEFAULT 'any',
+    location_type_preference VARCHAR(100) DEFAULT 'any',
+    transport_preference VARCHAR(50) DEFAULT 'any',
+    privacy_settings JSONB DEFAULT '{}',
+    last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(user_id)
+);
+
 -- Indexes for performance
 CREATE INDEX IF NOT EXISTS idx_events_group ON events(group_id);
 CREATE INDEX IF NOT EXISTS idx_events_state ON events(state);
+CREATE INDEX IF NOT EXISTS idx_events_organizer_tg ON events(organizer_telegram_user_id);
+CREATE INDEX IF NOT EXISTS idx_events_admin_tg ON events(admin_telegram_user_id);
 CREATE INDEX IF NOT EXISTS idx_constraints_event ON constraints(event_id);
 CREATE INDEX IF NOT EXISTS idx_logs_event ON logs(event_id);
 CREATE INDEX IF NOT EXISTS idx_feedback_event ON feedback(event_id);
@@ -132,3 +168,7 @@ CREATE INDEX IF NOT EXISTS idx_early_feedback_source ON early_feedback(source_us
 CREATE INDEX IF NOT EXISTS idx_early_feedback_source_type ON early_feedback(source_type);
 CREATE INDEX IF NOT EXISTS idx_ailog_event ON ailog(event_id);
 CREATE INDEX IF NOT EXISTS idx_reputation_user ON reputation(user_id);
+CREATE INDEX IF NOT EXISTS idx_user_preferences_user ON user_preferences(user_id);
+CREATE INDEX IF NOT EXISTS idx_user_preferences_time ON user_preferences(time_preference);
+CREATE INDEX IF NOT EXISTS idx_user_preferences_activity ON user_preferences(activity_preference);
+CREATE INDEX IF NOT EXISTS idx_user_preferences_budget ON user_preferences(budget_preference);

@@ -95,6 +95,16 @@ async def retry_operation(
 
 
 async def init_db(engine: AsyncEngine) -> None:
-    """Create all tables."""
+    """Initialize database by creating all tables from models.
+    
+    Args:
+        engine: SQLAlchemy async engine for database operations
+    
+    Note:
+        Database schema is defined in:
+        - SQLAlchemy models (db/models.py) - Primary source
+        - Schema reference (db/schema.sql) - Documentation
+    """
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+    logger.info("Database tables initialized")

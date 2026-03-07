@@ -143,6 +143,7 @@ def main():
         (r"^mentionact_", mentions.handle_mention_callback),
         (r"^suggest_time_retry_", suggest_time.handle_callback),
         (r"^feedback_", feedback.handle_feedback_callback),
+        (r"^modreq_", modify_event.handle_modify_request_callback),
     ]
     
     for pattern, handler in callback_handlers:

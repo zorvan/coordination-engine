@@ -866,6 +866,7 @@ async def _handle_organize_event_direct(
             event_type=event_type,
             description=description,
             organizer_telegram_user_id=creator_id,
+            admin_telegram_user_id=creator_id,
             scheduled_time=scheduled_time,
             commit_by=commit_by,
             duration_minutes=duration,
@@ -885,34 +886,39 @@ async def _handle_organize_event_direct(
         await session.refresh(event)
         
         group_members = group.member_list or []
-        for telegram_user_id in group_members:
-            if telegram_user_id != creator_id and telegram_user_id:
-                await send_event_invitation_dm(
-                    context,
-                    int(telegram_user_id),
-                    {
-                        "description": description,
-                        "event_type": event_type,
-                        "scheduled_time": scheduled_time_raw,
-                        "duration_minutes": duration,
-                        "threshold_attendance": threshold,
-                        "invitees": invitees if not invite_all else [],
-                        "invite_all_members": invite_all,
-                        "location_type": location_type,
-                        "budget_level": budget_level,
-                        "transport_mode": transport_mode,
-                        "date_preset": date_preset,
-                        "time_window": time_window,
-                        "planning_notes": planning_notes,
-                    },
-                    int(event.event_id),
-                )
+        
+        group_message = (
+            f"✅ *Event created in group!*\n\n"
+            f"Event ID: {event.event_id}\n"
+            f"Type: {event_type}\n"
+            f"Description: {description}\n"
+            f"Time: {scheduled_time_raw if scheduled_time_raw else 'TBD (flexible)'}\n"
+            f"Duration: {duration} minutes\n"
+            f"Admin: {creator_id}\n\n"
+            f"Check your DMs for event details and buttons to Join/Commit/Modify/Deny."
+        )
+        
+        await update.message.reply_text(group_message)
     
-    await update.message.reply_text(
-        f"✅ Event created! Check your DMs.\n\n"
-        f"Event ID: {event.event_id}\n"
-        f"Type: {event_type}\n"
-        f"Description: {description}\n"
-        f"Time: {scheduled_time_raw if scheduled_time_raw else 'TBD (flexible)'}\n"
-        f"Duration: {duration} minutes"
-    )
+    for telegram_user_id in group_members:
+        if telegram_user_id != creator_id and telegram_user_id:
+            await send_event_invitation_dm(
+                context,
+                int(telegram_user_id),
+                {
+                    "description": description,
+                    "event_type": event_type,
+                    "scheduled_time": scheduled_time_raw,
+                    "duration_minutes": duration,
+                    "threshold_attendance": threshold,
+                    "invitees": invitees if not invite_all else [],
+                    "invite_all_members": invite_all,
+                    "location_type": location_type,
+                    "budget_level": budget_level,
+                    "transport_mode": transport_mode,
+                    "date_preset": date_preset,
+                    "time_window": time_window,
+                    "planning_notes": planning_notes,
+                },
+                int(event.event_id),
+            )

@@ -5,6 +5,7 @@ from bot.commands.event_creation import (
     handle_flexible,
     handle_callback,
     handle_message,
+    private_handle_callback,
     start_event_flow_from_prefill,
 )
 
@@ -13,5 +14,6 @@ __all__ = [
     "handle_flexible",
     "handle_callback",
     "handle_message",
+    "private_handle_callback",
     "start_event_flow_from_prefill",
 ]

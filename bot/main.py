@@ -135,10 +135,17 @@ def main():
         application.add_handler(CommandHandler(command, handler))
 
     # Register callback query handlers
+    # NOTE: Order matters! More specific patterns must come before general ones.
     callback_handlers = [
-        (r"^event_(type|threshold|duration|final|cancel|cal)_", organize_event.handle_callback),
+        # Event flow handlers (more specific, must come before general event_)
         (r"^event_(join|confirm|back|cancel|lock)_", event_flow.handle_event_flow),
         (r"^event_(details|logs|constraints|close)_", event_details.handle_callback),
+        
+        # Event creation handlers (general, comes after specific ones)
+        (r"^event_", organize_event.handle_callback),
+        (r"^private_event_", organize_event.private_handle_callback),
+        
+        # Other handlers
         (r"^constraint_nl_", constraints.handle_callback),
         (r"^mentionact_", mentions.handle_mention_callback),
         (r"^suggest_time_retry_", suggest_time.handle_callback),

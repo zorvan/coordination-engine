@@ -1,8 +1,13 @@
 """Shared event presentation helpers."""
 from typing import Any
 
+from sqlalchemy import select
+
 from bot.common.event_states import STATE_EXPLANATIONS
 from bot.common.attendance import parse_attendance_with_status
+from db.models import User
+from db.connection import get_session
+from config.settings import settings
 
 
 def summarize_description(description: str | None, max_len: int = 400) -> str:
@@ -44,7 +49,7 @@ def attendance_stats(attendance: list[Any] | None) -> tuple[int, int, str]:
     return interested_count, confirmed_count, "\n".join(lines)
 
 
-def format_event_details_message(
+async def format_event_details_message(
     event_id: int, event: Any, logs: list[Any], constraints: list[Any]
 ) -> str:
     """Build consistent detailed event info with early-stage progress."""
@@ -81,7 +86,21 @@ def format_event_details_message(
         next_step = "Event is in a terminal/locked stage."
 
     admin_id = getattr(event, "admin_telegram_user_id", None)
-    admin_text = str(admin_id) if admin_id else "N/A"
+    admin_text = "N/A"
+    if admin_id and settings.db_url:
+        try:
+            async with get_session(settings.db_url) as session:
+                admin_user = (
+                    await session.execute(
+                        select(User).where(User.telegram_user_id == int(admin_id))
+                    )
+                ).scalar_one_or_none()
+                if admin_user and getattr(admin_user, "username", None):
+                    admin_text = f"@{admin_user.username}"
+                elif admin_id:
+                    admin_text = f"[user](tg://user?id={admin_id})"
+        except Exception:
+            admin_text = str(admin_id)
     
     return (
         f"📋 *Event {event_id} Details*\n\n"
@@ -115,7 +134,7 @@ def format_event_details_message(
     )
 
 
-def format_status_message(
+async def format_status_message(
     event_id: int, event: Any, log_count: int, constraint_count: int
 ) -> str:
     """Build consistent event status message."""
@@ -131,7 +150,21 @@ def format_status_message(
     time_window = str(planning_prefs.get("time_window", "n/a"))
     date_preset = str(planning_prefs.get("date_preset", "n/a"))
     admin_id = getattr(event, "admin_telegram_user_id", None)
-    admin_text = str(admin_id) if admin_id else "N/A"
+    admin_text = "N/A"
+    if admin_id and settings.db_url:
+        try:
+            async with get_session(settings.db_url) as session:
+                admin_user = (
+                    await session.execute(
+                        select(User).where(User.telegram_user_id == int(admin_id))
+                    )
+                ).scalar_one_or_none()
+                if admin_user and getattr(admin_user, "username", None):
+                    admin_text = f"@{admin_user.username}"
+                elif admin_id:
+                    admin_text = f"[user](tg://user?id={admin_id})"
+        except Exception:
+            admin_text = str(admin_id)
     
     return (
         f"📊 *Event {event_id} Status*\n\n"

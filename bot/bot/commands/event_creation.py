@@ -2,6 +2,7 @@
 """Unified event creation command handler supporting public/group and private events."""
 from calendar import Calendar, month_name
 from datetime import date, datetime, timedelta
+import logging
 import re
 from typing import Any
 from telegram import (
@@ -12,18 +13,21 @@ from telegram import (
 )
 from telegram.ext import ContextTypes
 
+from sqlalchemy import select
+
 from ai.llm import LLMClient
 from config.settings import settings
-from bot.common.deeplinks import build_start_link
 from bot.common.event_notifications import (
     send_event_invitation_dm,
-    send_event_modification_request_dm,
 )
 from bot.common.keyboards import build_threshold_markup
 from bot.common.scheduling import find_user_event_conflict
 from db.connection import get_session
 from db.models import Event, Group, User
 from db.users import get_user_id_by_username
+
+
+logger = logging.getLogger("coord_bot.event_creation")
 
 
 CALENDAR_WEEKDAYS = ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"]
@@ -1578,6 +1582,7 @@ async def finalize_event(query: CallbackQuery, context: ContextTypes.DEFAULT_TYP
             event_type=data.get("event_type", "general"),
             description=data.get("description"),
             organizer_telegram_user_id=creator_id,
+            admin_telegram_user_id=creator_id,
             scheduled_time=candidate_time,
             commit_by=commit_by,
             duration_minutes=duration_minutes,
@@ -1598,39 +1603,87 @@ async def finalize_event(query: CallbackQuery, context: ContextTypes.DEFAULT_TYP
 
     context.user_data.pop("event_flow", None)
 
-    bot_username = context.bot.username if context.bot else None
-
     send_to_all_members = bool(data.get("invite_all_members"))
     invitees = list(data.get("invitees", []))
 
     async with get_session(settings.db_url) as session:
+        # Get organizer's username for display in invitation
+        organizer_user = (
+            await session.execute(
+                select(User).where(User.telegram_user_id == int(creator_id))
+            )
+        ).scalar_one_or_none()
+        organizer_username = organizer_user.username if organizer_user else None
+        
         group = (
             await session.execute(select(Group).where(Group.group_id == group_id))
         ).scalar_one_or_none()
+        
+        # Add organizer info to data for the invitation message
+        data["organizer_telegram_user_id"] = int(creator_id)
+        data["organizer_username"] = organizer_username
 
-    if not send_to_all_members and invitees:
-        for handle in invitees:
-            if not handle.startswith("@"):
-                continue
-            username = handle[1:]
-            user_id = await get_user_id_by_username(session, username)
-            if user_id:
-                result = await session.execute(
-                    select(User).where(User.user_id == int(user_id))
-                )
-                user = result.scalar_one_or_none()
-                if user and user.telegram_user_id:
-                    await send_event_invitation_dm(
-                        context, int(user.telegram_user_id), data, int(event.event_id)
+        # Send invitations to specific invitees
+        if not send_to_all_members and invitees:
+            for invite_handle in invitees:
+                if not invite_handle.startswith("@"):
+                    continue
+                username = invite_handle[1:]
+                try:
+                    user_id = await get_user_id_by_username(session, username)
+                    if user_id:
+                        result = await session.execute(
+                            select(User).where(User.user_id == int(user_id))
+                        )
+                        user = result.scalar_one_or_none()
+                        if user and user.telegram_user_id:
+                            sent = await send_event_invitation_dm(
+                                context,
+                                int(user.telegram_user_id),
+                                data,
+                                int(event.event_id),
+                            )
+                            if sent:
+                                logger.info(
+                                    f"DM sent to @{username} for event {event.event_id}"
+                                )
+                        else:
+                            logger.warning(
+                                f"User @{username} not found or no "
+                                f"telegram_user_id for event {event.event_id}"
+                            )
+                    else:
+                        logger.warning(
+                            f"No user_id found for handle @{username} "
+                            f"in event {event.event_id}"
+                        )
+                except Exception as e:
+                    logger.error(
+                        f"Error sending DM to @{username}: {e}", exc_info=True
                     )
 
-    if send_to_all_members and group:
-        group_members = group.member_list or []
-        for telegram_user_id in group_members:
-            if telegram_user_id != int(creator_id):
-                await send_event_invitation_dm(
-                    context, int(telegram_user_id), data, int(event.event_id)
-                )
+        # Send invitations to all group members
+        if send_to_all_members and group:
+            group_members = group.member_list or []
+            for telegram_user_id in group_members:
+                if telegram_user_id != int(creator_id):
+                    try:
+                        sent = await send_event_invitation_dm(
+                            context,
+                            int(telegram_user_id),
+                            data,
+                            int(event.event_id),
+                        )
+                        if sent:
+                            logger.info(
+                                f"DM sent to user {telegram_user_id} for event "
+                                f"{event.event_id}"
+                            )
+                    except Exception as e:
+                        logger.error(
+                            f"Error sending DM to user {telegram_user_id}: {e}",
+                            exc_info=True,
+                        )
     scheduled_time = (
         str(data.get("scheduled_time", "TBD")).replace("T", " ")
         if data.get("scheduled_time")
@@ -1656,7 +1709,7 @@ async def finalize_event(query: CallbackQuery, context: ContextTypes.DEFAULT_TYP
     time_window_text = str(data.get("time_window", "custom")).title()
 
     group_summary = (
-        f"✅ *Event Created & Locked!*\n\n"
+        f"✅ *Event Created!*\n\n"
         f"Event ID: {event.event_id}\n"
         f"Type: {data.get('event_type', 'N/A')}\n"
         f"Description: {data.get('description', 'N/A')}\n"
@@ -1678,8 +1731,8 @@ async def finalize_event(query: CallbackQuery, context: ContextTypes.DEFAULT_TYP
             if scheduling_mode == "flexible"
             else ""
         )
-        + "\n\n✅ Event locked - no further changes allowed.\n"
-        "Event Admin: @username (replace with actual admin mention)"
+        + "\n\n✅ Event ready for confirmation. Run /confirm <event_id> to lock it.\n"
+        + (f"Event Admin: @{organizer_username}" if organizer_username else "Event Admin: Unknown")
     )
 
     await query.edit_message_text(group_summary)
@@ -1783,6 +1836,54 @@ async def finalize_private_event(query: CallbackQuery, context: ContextTypes.DEF
         await session.commit()
         await session.refresh(event)
 
+    # Send invitations to invitees
+    send_to_all_members = bool(data.get("invite_all_members"))
+    invitees = list(data.get("invitees", []))
+
+    organizer_username = None  # Will be set below
+
+    async with get_session(settings.db_url) as session:
+        # Get organizer's username for display in invitation
+        organizer_user = (
+            await session.execute(
+                select(User).where(User.telegram_user_id == int(creator_id))
+            )
+        ).scalar_one_or_none()
+        organizer_username = organizer_user.username if organizer_user else None
+        
+        # Add organizer info to data for the invitation message
+        data["organizer_telegram_user_id"] = int(creator_id)
+        data["organizer_username"] = organizer_username
+
+        # Send invitations to specific invitees
+        if not send_to_all_members and invitees:
+            for handle in invitees:
+                if not handle.startswith("@"):
+                    continue
+                username = handle[1:]
+                try:
+                    user_id = await get_user_id_by_username(session, username)
+                    if user_id:
+                        result = await session.execute(
+                            select(User).where(User.user_id == int(user_id))
+                        )
+                        user = result.scalar_one_or_none()
+                        if user and user.telegram_user_id:
+                            sent = await send_event_invitation_dm(
+                                context, int(user.telegram_user_id), data, int(event.event_id)
+                            )
+                            if sent:
+                                logger.info(f"DM sent to @{username} for private event {event.event_id}")
+                        else:
+                            logger.warning(
+                                f"User @{username} not found or no "
+                                f"telegram_user_id for private event {event.event_id}"
+                            )
+                    else:
+                        logger.warning(f"No user_id found for handle @{username} in private event {event.event_id}")
+                except Exception as e:
+                    logger.error(f"Error sending DM to @{username}: {e}", exc_info=True)
+
     context.user_data.pop("private_event_flow", None)
 
     keyboard = [
@@ -1792,10 +1893,6 @@ async def finalize_private_event(query: CallbackQuery, context: ContextTypes.DEF
             )
         ],
     ]
-    
-    bot_username = context.bot.username if context.bot else None
-    avail_link = f"https://t.me/{bot_username}?start=avail_{event.event_id}" if bot_username else None
-    feedback_link = f"https://t.me/{bot_username}?start=feedback_{event.event_id}" if bot_username else None
     
     reply_markup = InlineKeyboardMarkup(keyboard)
     
@@ -1814,7 +1911,7 @@ async def finalize_private_event(query: CallbackQuery, context: ContextTypes.DEF
     invitees_summary = (
         "all group members"
         if data.get("invite_all_members")
-        else f"{len(data.get('invitees', []))} users"
+        else f"{len(invitees)} users"
     )
     
     location_text = str(data.get("location_type", "any")).replace("_", " ").title()
@@ -1827,7 +1924,7 @@ async def finalize_private_event(query: CallbackQuery, context: ContextTypes.DEF
     time_window_text = str(data.get("time_window", "custom")).title()
 
     await query.edit_message_text(
-        f"✅ *Event Created & Locked!*\n\n"
+        f"✅ *Event Created!*\n\n"
         f"Event ID: {event.event_id}\n"
         f"Type: {data.get('event_type', 'N/A')}\n"
         f"Description: {data.get('description', 'N/A')}\n"
@@ -1844,10 +1941,6 @@ async def finalize_private_event(query: CallbackQuery, context: ContextTypes.DEF
         f"Invitees: {invitees_summary}\n\n"
         f"✅ Event has been automatically locked.\n"
         f"Status: Locked - No further changes allowed.\n\n"
-        f"Event Admin: {query.from_user.mention_html() if query.from_user else 'Unknown'}",
+        + (f"Event Admin: @{organizer_username}" if organizer_username else "Event Admin: Unknown"),
         reply_markup=reply_markup,
     )
-
-
-handle_callback = handle_callback
-private_handle_callback = private_handle_callback

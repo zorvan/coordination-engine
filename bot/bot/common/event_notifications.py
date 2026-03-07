@@ -2,6 +2,7 @@
 """Private event notification helpers."""
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
@@ -9,6 +10,9 @@ from telegram.ext import ContextTypes
 
 from bot.common.deeplinks import build_start_link
 from config.settings import settings
+
+
+logger = logging.getLogger("coord_bot.event_notifications")
 
 
 def build_event_invitation_keyboard(
@@ -88,12 +92,22 @@ async def send_event_invitation_dm(
     date_preset_text = str(event_data.get("date_preset", "custom")).title()
     time_window_text = str(event_data.get("time_window", "custom")).title()
     
+    # Format organizer as clickable mention
+    organizer_text = "N/A"
+    organizer_user_id = event_data.get("organizer_telegram_user_id")
+    organizer_username = event_data.get("organizer_username")
+    if organizer_user_id and organizer_username:
+        organizer_text = f"[@{organizer_username}](tg://user?id={organizer_user_id})"
+    elif organizer_user_id:
+        organizer_text = f"[🔗 User {organizer_user_id}](tg://user?id={organizer_user_id})"
+    
     try:
         await context.bot.send_message(
             chat_id=telegram_user_id,
             text=(
                 f"✨ *Event Invitation*\n\n"
                 f"Event ID: {event_id}\n"
+                f"Organized by: {organizer_text}\n"
                 f"Type: {event_data.get('event_type', 'N/A')}\n"
                 f"Description: {event_data.get('description', 'N/A')}\n"
                 f"Time: {scheduled_time}\n"
@@ -107,9 +121,12 @@ async def send_event_invitation_dm(
                 f"Invitees: {invitees_summary}"
             ),
             reply_markup=build_event_invitation_keyboard(bot_username, event_id),
+            parse_mode="Markdown",
         )
+        logger.info(f"Event invitation DM sent to user {telegram_user_id} for event {event_id}")
         return True
-    except Exception:
+    except Exception as e:
+        logger.error(f"Failed to send event invitation DM to user {telegram_user_id}: {e}", exc_info=True)
         return False
 
 
@@ -160,6 +177,8 @@ async def send_event_modification_request_dm(
             ),
             reply_markup=build_event_modification_keyboard(bot_username, event_id),
         )
+        logger.info(f"Event modification request DM sent to user {telegram_user_id} for event {event_id}")
         return True
-    except Exception:
+    except Exception as e:
+        logger.error(f"Failed to send event modification request DM to user {telegram_user_id}: {e}", exc_info=True)
         return False

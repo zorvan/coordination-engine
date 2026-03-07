@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+import logging
 import re
 from uuid import uuid4
 from telegram import (
@@ -26,15 +27,23 @@ from bot.common.attendance import (
     mark_joined,
     remove_attendee,
 )
-from bot.common.event_notifications import send_event_invitation_dm
+from bot.common.event_notifications import (
+    send_event_invitation_dm,
+    send_event_modification_request_dm,
+)
 
 from bot.common.event_presenters import (
     format_event_details_message,
     format_status_message,
 )
+logger = logging.getLogger("coord_bot.mentions")
 from config.settings import settings
 from db.connection import get_session
 from db.models import Constraint, Event, Group, Log, User
+from bot.common.event_access import (
+    get_event_organizer_telegram_id,
+    get_event_admin_telegram_id,
+)
 from db.users import get_or_create_user_id, get_user_id_by_username
 
 HISTORY_LIMIT = 40
@@ -109,7 +118,6 @@ async def handle_mention(
     parent_text = ""
     history = context.bot_data.get("chat_history", {}).get(chat.id, [])
     if is_reply_to_bot:
-        # Give model stronger local context from the replied bot message.
         parent_text = (
             message.reply_to_message.text
             or message.reply_to_message.caption
@@ -299,6 +307,101 @@ async def handle_mention_callback(
     )
 
 
+async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle callback queries for event-related actions."""
+    query = update.callback_query
+    if not query or not query.data:
+        return
+    await query.answer()
+
+    data = query.data
+    user = query.from_user
+
+    if data.startswith("event_modify_"):
+        event_id_str = data.replace("event_modify_", "")
+        try:
+            event_id = int(event_id_str)
+        except (TypeError, ValueError):
+            await query.edit_message_text("❌ Invalid event ID.")
+            return
+
+        if not settings.db_url:
+            await query.edit_message_text("❌ Database configuration is unavailable.")
+            return
+
+        async with get_session(settings.db_url) as session:
+            result = await session.execute(
+                select(Event).where(Event.event_id == event_id)
+            )
+            event = result.scalar_one_or_none()
+            if not event:
+                await query.edit_message_text("❌ Event not found.")
+                return
+
+            admin_id = get_event_admin_telegram_id(event)
+
+        requester_id = user.id if user else None
+        requester_username = user.username if user else None
+        request_id = uuid4().hex[:8]
+
+        pending_modify_root = context.bot_data.setdefault("pending_modify_requests", {})
+        pending_modify_root[request_id] = {
+            "request_id": request_id,
+            "event_id": event_id,
+            "requester_id": requester_id,
+            "requester_username": requester_username,
+            "change_text": "",
+            "admin_id": admin_id,
+            "created_at": datetime.utcnow().isoformat(),
+        }
+
+        await query.edit_message_text(
+            "✅ *Modification request submitted!*\n\n"
+            "The event admin will review your request.",
+            parse_mode="Markdown",
+        )
+
+        if admin_id:
+            await send_event_modification_request_dm(
+                context,
+                admin_id,
+                {
+                    "event_id": event_id,
+                    "requester_id": requester_id,
+                    "requester_username": requester_username,
+                    "change_text": "",
+                    "request_id": request_id,
+                    "description": event.description if event else "",
+                    "scheduled_time": event.scheduled_time.isoformat() if event and event.scheduled_time else "",
+                    "location_type": "cafe",
+                },
+                event_id,
+                "Please review and approve this modification request.",
+            )
+
+        return
+
+    if data.startswith("event_details_"):
+        event_id_str = data.replace("event_details_", "")
+        try:
+            event_id = int(event_id_str)
+        except (TypeError, ValueError):
+            await query.edit_message_text("❌ Invalid event ID.")
+            return
+        await _send_event_details(query.message, event_id)
+        return
+
+    if data.startswith("event_status_"):
+        event_id_str = data.replace("event_status_", "")
+        try:
+            event_id = int(event_id_str)
+        except (TypeError, ValueError):
+            await query.edit_message_text("❌ Invalid event ID.")
+            return
+        await _send_status(query.message, event_id)
+        return
+
+
 async def _resolve_mentioned_participants(
     text: str, bot_username: str
 ) -> list[int]:
@@ -318,7 +421,6 @@ async def _resolve_mentioned_participants(
         for uname in mentioned:
             uid = await get_user_id_by_username(session, f"@{uname}")
             if uid is not None:
-                # get telegram id for approval checks
                 result = await session.execute(
                     select(User).where(User.user_id == uid)
                 )
@@ -430,7 +532,7 @@ async def _send_status(reply_message, event_id: int) -> None:
             ).scalar_one()
         )
     await reply_message.reply_text(
-        format_status_message(event_id, event, log_count, constraint_count)
+        await format_status_message(event_id, event, log_count, constraint_count)
     )
 
 
@@ -460,7 +562,7 @@ async def _send_event_details(reply_message, event_id: int) -> None:
             )
         ).scalars().all()
     await reply_message.reply_text(
-        format_event_details_message(event_id, event, list(logs), list(constraints))
+        await format_event_details_message(event_id, event, list(logs), list(constraints))
     )
 
 
@@ -545,7 +647,6 @@ def _is_reply_to_bot_message(message, context: ContextTypes.DEFAULT_TYPE) -> boo
     if not parent:
         return False
     if parent.from_user and parent.from_user.is_bot:
-        # Prefer strict identity when available.
         bot_id = context.bot.id if context.bot else None
         return bot_id is None or parent.from_user.id == bot_id
     return False
@@ -880,6 +981,7 @@ async def _handle_organize_event_direct(
                 "transport_mode": transport_mode,
             },
             state="proposed",
+            locked_at=None,
         )
         session.add(event)
         await session.commit()
@@ -887,38 +989,133 @@ async def _handle_organize_event_direct(
         
         group_members = group.member_list or []
         
+        async with get_session(settings.db_url) as session:
+            organizer_user = (
+                await session.execute(
+                    select(User).where(User.telegram_user_id == creator_id)
+                )
+            ).scalar_one_or_none()
+            organizer_username = organizer_user.username if organizer_user else None
+            
+            data_for_dm = {
+                "description": description,
+                "event_type": event_type,
+                "scheduled_time": scheduled_time_raw,
+                "duration_minutes": duration,
+                "threshold_attendance": threshold,
+                "invitees": invitees if not invite_all else [],
+                "invite_all_members": invite_all,
+                "location_type": location_type,
+                "budget_level": budget_level,
+                "transport_mode": transport_mode,
+                "date_preset": date_preset,
+                "time_window": time_window,
+                "planning_notes": planning_notes,
+                "organizer_telegram_user_id": creator_id,
+                "organizer_username": organizer_username,
+            }
+            
+            send_to_all_members = invite_all
+            invitees_list = invitees
+            
+            if not send_to_all_members and invitees_list:
+                for invite_handle in invitees_list:
+                    if not invite_handle.startswith("@"):
+                        continue
+                    username = invite_handle[1:]
+                    try:
+                        user_id = await get_user_id_by_username(session, username)
+                        if user_id:
+                            result = await session.execute(
+                                select(User).where(User.user_id == int(user_id))
+                            )
+                            user = result.scalar_one_or_none()
+                            if user and user.telegram_user_id:
+                                await send_event_invitation_dm(
+                                    context,
+                                    int(user.telegram_user_id),
+                                    data_for_dm,
+                                    int(event.event_id),
+                                )
+                                logger.info(
+                                    f"DM sent to @{username} for event {event.event_id}"
+                                )
+                    except Exception as e:
+                        logger.error(
+                            f"Error sending DM to @{username}: {e}", exc_info=True
+                        )
+            
+            if send_to_all_members:
+                for telegram_user_id in group_members:
+                    if telegram_user_id != creator_id and telegram_user_id:
+                        try:
+                            await send_event_invitation_dm(
+                                context,
+                                int(telegram_user_id),
+                                data_for_dm,
+                                int(event.event_id),
+                            )
+                            logger.info(
+                                f"DM sent to user {telegram_user_id} for event {event.event_id}"
+                            )
+                        except Exception as e:
+                            logger.error(
+                                f"Error sending DM to user {telegram_user_id}: {e}",
+                                exc_info=True,
+                            )
+            
+            if creator_id:
+                await context.bot.send_message(
+                    chat_id=creator_id,
+                    text=(
+                        f"✅ *Event Created Successfully!*\n\n"
+                        f"Event ID: {event.event_id}\n\n"
+                        f"All event coordination happens in private DM."
+                    ),
+                )
+                logger.info(f"Creator notification sent to user {creator_id} for event {event.event_id}")
+        
+        scheduled_time = (
+            str(scheduled_time_raw).replace("T", " ")
+            if scheduled_time_raw
+            else "TBD (flexible scheduling)"
+        )
+        commit_by_text = (
+            commit_by.isoformat(timespec="minutes").replace("T", " ")
+            if commit_by is not None
+            else "N/A"
+        )
+        invitees_summary = (
+            "all group members"
+            if invite_all else f"{len(invitees)} users"
+        )
+        location_text = location_type.replace("_", " ").title()
+        budget_text = budget_level.replace("_", " ").title()
+        transport_text = transport_mode.replace("_", " ").title()
+        date_preset_text = event_creation.DATE_PRESET_LABELS.get(
+            date_preset,
+            date_preset.title(),
+        )
+        time_window_text = time_window.title()
+        
         group_message = (
-            f"✅ *Event created in group!*\n\n"
+            f"✅ *Event Created!*\n\n"
             f"Event ID: {event.event_id}\n"
             f"Type: {event_type}\n"
             f"Description: {description}\n"
-            f"Time: {scheduled_time_raw if scheduled_time_raw else 'TBD (flexible)'}\n"
+            f"Time: {scheduled_time}\n"
+            f"Commit-By: {commit_by_text}\n"
+            f"Date Preset: {date_preset_text}\n"
+            f"Time Window: {time_window_text}\n"
             f"Duration: {duration} minutes\n"
-            f"Admin: {creator_id}\n\n"
-            f"Check your DMs for event details and buttons to Join/Commit/Modify/Deny."
+            f"Mode: {scheduling_mode}\n"
+            f"Location Type: {location_text}\n"
+            f"Budget: {budget_text}\n"
+            f"Transport: {transport_text}\n"
+            f"Threshold: {threshold}\n"
+            f"Invitees: {invitees_summary}"
+            + "\n\n✅ Event ready for confirmation. Run /confirm <event_id> to lock it.\n"
+            + (f"Event Admin: @{organizer_username}" if organizer_username else "Event Admin: Unknown")
         )
         
         await update.message.reply_text(group_message)
-    
-    for telegram_user_id in group_members:
-        if telegram_user_id != creator_id and telegram_user_id:
-            await send_event_invitation_dm(
-                context,
-                int(telegram_user_id),
-                {
-                    "description": description,
-                    "event_type": event_type,
-                    "scheduled_time": scheduled_time_raw,
-                    "duration_minutes": duration,
-                    "threshold_attendance": threshold,
-                    "invitees": invitees if not invite_all else [],
-                    "invite_all_members": invite_all,
-                    "location_type": location_type,
-                    "budget_level": budget_level,
-                    "transport_mode": transport_mode,
-                    "date_preset": date_preset,
-                    "time_window": time_window,
-                    "planning_notes": planning_notes,
-                },
-                int(event.event_id),
-            )

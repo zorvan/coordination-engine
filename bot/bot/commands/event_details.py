@@ -1,9 +1,14 @@
 #!/usr/bin/env python3
+from __future__ import annotations
+
+from typing import Any
+
 """Event details command handler."""
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from sqlalchemy import select
 from db.models import Event
+from bot.common.attendance import has_attendee
 from db.connection import get_session
 from config.settings import settings
 from bot.common.deeplinks import build_start_link
@@ -55,14 +60,14 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         constraints = await _get_event_constraints(session, event_id)
 
         bot_username = context.bot.username if context.bot else None
-        reply_markup = build_event_details_action_markup(event_id, bot_username)
+        user_id = user.id if user else None
+        reply_markup = build_event_details_action_markup(event, user_id, bot_username)
 
         await update.message.reply_text(
-            format_event_details_message(event_id, event, logs, constraints),
+            await format_event_details_message(event_id, event, logs, constraints),
             reply_markup=reply_markup
         )
         
-
 
 async def handle_callback(
     update: Update, context: ContextTypes.DEFAULT_TYPE
@@ -105,10 +110,11 @@ async def show_details(query, context: ContextTypes.DEFAULT_TYPE, event_id: int)
         constraints = await _get_event_constraints(session, event_id)
 
         bot_username = context.bot.username if context.bot else None
-        reply_markup = build_event_details_action_markup(event_id, bot_username)
+        user_id = query.from_user.id if query.from_user else None
+        reply_markup = build_event_details_action_markup(event, user_id, bot_username)
 
         await query.edit_message_text(
-            format_event_details_message(event_id, event, logs, constraints),
+            await format_event_details_message(event_id, event, logs, constraints),
             reply_markup=reply_markup
         )
 
@@ -214,29 +220,34 @@ async def _get_event_constraints(session, event_id: int) -> list:
 
 
 def build_event_details_action_markup(
-    event_id: int, bot_username: str | None
+    event: Event, user_id: int | None, bot_username: str | None
 ) -> InlineKeyboardMarkup:
     """Build standard action keyboard for event details view."""
+    attendance_list: list[Any] | None = event.attendance_list or []
+    user_joined = has_attendee(attendance_list, user_id) if user_id is not None else False
+    commit_text = "✅ Join" if not user_joined else "✅ Commit"
     keyboard = [
         [
-            InlineKeyboardButton("✅ Commit", callback_data=f"event_confirm_{event_id}"),
-            InlineKeyboardButton("↩️ Back", callback_data=f"event_back_{event_id}"),
+            InlineKeyboardButton(commit_text, callback_data=f"event_confirm_{event.event_id}"),
+            InlineKeyboardButton("↩️ Back", callback_data=f"event_back_{event.event_id}"),
         ],
         [
-            InlineKeyboardButton("❌ Cancel", callback_data=f"event_cancel_{event_id}"),
-            InlineKeyboardButton("🔒 Lock", callback_data=f"event_lock_{event_id}"),
+            InlineKeyboardButton("❌ Cancel", callback_data=f"event_cancel_{event.event_id}"),
+            InlineKeyboardButton("🔒 Lock", callback_data=f"event_lock_{event.event_id}"),
         ],
-        [InlineKeyboardButton("View Logs", callback_data=f"event_logs_{event_id}")],
+        [InlineKeyboardButton("View Logs", callback_data=f"event_logs_{event.event_id}")],
         [
             InlineKeyboardButton(
                 "Manage Constraints",
-                callback_data=f"event_constraints_{event_id}",
+                callback_data=f"event_constraints_{event.event_id}",
             )
         ],
-        [InlineKeyboardButton("Close", callback_data=f"event_close_{event_id}")],
+        [InlineKeyboardButton("Close", callback_data=f"event_close_{event.event_id}")],
     ]
-    avail_link = build_start_link(bot_username, f"avail_{event_id}")
-    feedback_link = build_start_link(bot_username, f"feedback_{event_id}")
+    if user_joined:
+        keyboard.insert(2, [InlineKeyboardButton("🛠 Modify", callback_data=f"event_modify_{event.event_id}")])
+    avail_link = build_start_link(bot_username, f"avail_{event.event_id}")
+    feedback_link = build_start_link(bot_username, f"feedback_{event.event_id}")
     if avail_link:
         keyboard.append(
             [InlineKeyboardButton("📥 Set Availability in DM", url=avail_link)]

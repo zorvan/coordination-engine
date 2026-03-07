@@ -15,7 +15,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ai.llm import LLMClient
-from bot.commands import organize_event, request_confirmations, suggest_time
+from bot.commands import event_creation, request_confirmations, suggest_time
 from bot.common.scheduling import find_user_event_conflict
 from bot.common.attendance import (
     derive_state_from_attendance,
@@ -26,6 +26,7 @@ from bot.common.attendance import (
     mark_joined,
     remove_attendee,
 )
+
 from bot.common.event_presenters import (
     format_event_details_message,
     format_status_message,
@@ -139,22 +140,19 @@ async def handle_mention(
 
     action_type = str(action.get("action_type", "opinion")).strip().lower()
     if action_type in {"organize_event", "organize_event_flexible"}:
-        scheduling_mode = (
-            "flexible" if action_type == "organize_event_flexible" else "fixed"
-        )
+        mode = "flexible" if action_type == "organize_event_flexible" else "public"
         llm = LLMClient()
         try:
             draft = await llm.infer_event_draft_from_context(
                 message_text=text,
                 history=history,
-                scheduling_mode=scheduling_mode,
             )
         finally:
             await llm.close()
-        await organize_event.start_event_flow_from_prefill(
+        await event_creation.start_event_flow_from_prefill(
             update=update,
             context=context,
-            scheduling_mode=scheduling_mode,
+            mode=mode,
             prefill=draft,
         )
         return
@@ -619,10 +617,12 @@ async def _apply_participation_action(
     event_id: int,
     action_type: str,
 ) -> None:
-    """Apply join/confirm/cancel and persist in DB."""
+    """Apply join/confirm/cancel using shared attendance functions."""
     if not settings.db_url:
         await reply_message.reply_text("❌ Database configuration is unavailable.")
         return
+
+    from bot.common.scheduling import find_user_event_conflict
 
     async with get_session(settings.db_url) as session:
         event = (
@@ -634,7 +634,19 @@ async def _apply_participation_action(
             await reply_message.reply_text("❌ Event not found.")
             return
 
-        if action_type in {"join", "confirm"}:
+        user_id = await get_or_create_user_id(
+            session,
+            telegram_user_id=requester_telegram_user_id,
+            display_name=requester_display_name,
+            username=requester_username,
+        )
+
+        if action_type == "join":
+            if event.state in {"locked", "completed"}:
+                await reply_message.reply_text(
+                    f"❌ Cannot join event {event_id} - it's {event.state}."
+                )
+                return
             conflict = await find_user_event_conflict(
                 session=session,
                 telegram_user_id=requester_telegram_user_id,
@@ -651,15 +663,7 @@ async def _apply_participation_action(
                 )
                 return
 
-        attendance = list(event.attendance_list or [])
-        has_joined = has_attendee(attendance, requester_telegram_user_id)
-
-        if action_type == "join":
-            if event.state in {"locked", "completed"}:
-                await reply_message.reply_text(
-                    f"❌ Cannot join event {event_id} - it's {event.state}."
-                )
-                return
+            attendance = list(event.attendance_list or [])
             attendance, _ = mark_joined(attendance, requester_telegram_user_id)
             event.attendance_list = attendance
             if event.state == "proposed":
@@ -671,7 +675,8 @@ async def _apply_participation_action(
                     f"❌ Cannot confirm event {event_id} - it's {event.state}."
                 )
                 return
-            if not has_joined or not has_confirmed(attendance, requester_telegram_user_id):
+            attendance = list(event.attendance_list or [])
+            if not has_attendee(attendance, requester_telegram_user_id) or not has_confirmed(attendance, requester_telegram_user_id):
                 attendance, _ = mark_confirmed(attendance, requester_telegram_user_id)
             event.attendance_list = attendance
             event.state = "confirmed"
@@ -682,10 +687,8 @@ async def _apply_participation_action(
                     f"❌ Cannot cancel event {event_id} - it's already locked."
                 )
                 return
-            filtered, changed = remove_attendee(
-                attendance,
-                requester_telegram_user_id,
-            )
+            attendance = list(event.attendance_list or [])
+            filtered, changed = remove_attendee(attendance, requester_telegram_user_id)
             if not changed:
                 await reply_message.reply_text(
                     f"❌ You haven't joined event {event_id} yet. Nothing to cancel."
@@ -695,12 +698,6 @@ async def _apply_participation_action(
             if event.state not in {"locked", "completed", "cancelled"}:
                 event.state = derive_state_from_attendance(filtered)
 
-        user_id = await get_or_create_user_id(
-            session,
-            telegram_user_id=requester_telegram_user_id,
-            display_name=requester_display_name,
-            username=requester_username,
-        )
         session.add(
             Log(
                 event_id=event_id,
@@ -724,7 +721,7 @@ async def _apply_participation_action(
 
 
 async def _apply_lock_action(reply_message, event_id: int) -> None:
-    """Lock event in DB when it is already confirmed."""
+    """Lock event using shared attendance functions."""
     if not settings.db_url:
         await reply_message.reply_text("❌ Database configuration is unavailable.")
         return

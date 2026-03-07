@@ -122,9 +122,9 @@ def main():
         "suggest_time": suggest_time.handle,
         "status": status.handle,
         "events": events.handle,
-          "event_details": event_details.handle,
-          "private_organize_event": private_organize_event.handle,
-          "check_deadlines": check_deadlines.handle,
+        "event_details": event_details.handle,
+        "private_organize_event": private_organize_event.handle,
+        "check_deadlines": check_deadlines.handle,
           "feedback": feedback.collect_feedback,
     }
     

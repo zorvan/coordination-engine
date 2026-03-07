@@ -3,9 +3,11 @@
 import pytest
 from unittest.mock import MagicMock
 from telegram import Update, Message, User, Chat, CallbackQuery
+from datetime import datetime
 from telegram.ext import ContextTypes
 
-from bot.handlers.event_flow import can_transition, handle_event_flow, EVENT_STATE_TRANSITIONS
+from bot.handlers.event_flow import handle_event_flow
+from bot.common.event_states import can_transition, EVENT_STATE_TRANSITIONS
 from bot.handlers.feedback import collect_feedback, handle_feedback_callback
 from bot.utils.nudges import (
     generate_nudge_message,
@@ -85,7 +87,8 @@ async def test_feedback_callback():
         data="feedback_123_4"
     )
     update = Update(update_id=1, callback_query=callback_query)
-    context = ContextTypes.DEFAULT_TYPE()
+    from unittest.mock import MagicMock
+    context = ContextTypes.DEFAULT_TYPE(application=MagicMock())
     
     await handle_feedback_callback(update, context)
 
@@ -97,12 +100,13 @@ async def test_feedback_collection():
         update_id=1,
         message=Message(
             message_id=1,
-            date=None,
+            date=datetime.utcnow(),
             chat=Chat(id=123, type="private"),
             from_user=User(id=456, first_name="Test", is_bot=False)
         )
     )
-    context = ContextTypes.DEFAULT_TYPE()
+    from unittest.mock import MagicMock
+    context = ContextTypes.DEFAULT_TYPE(application=MagicMock())
     context.args = ["1"]
     
     await collect_feedback(update, context)

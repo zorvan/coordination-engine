@@ -26,6 +26,7 @@ from bot.common.attendance import (
     mark_joined,
     remove_attendee,
 )
+from bot.common.event_notifications import send_event_invitation_dm
 
 from bot.common.event_presenters import (
     format_event_details_message,
@@ -33,7 +34,7 @@ from bot.common.event_presenters import (
 )
 from config.settings import settings
 from db.connection import get_session
-from db.models import Constraint, Event, Log, User
+from db.models import Constraint, Event, Group, Log, User
 from db.users import get_or_create_user_id, get_user_id_by_username
 
 HISTORY_LIMIT = 40
@@ -149,11 +150,13 @@ async def handle_mention(
             )
         finally:
             await llm.close()
-        await event_creation.start_event_flow_from_prefill(
+        await _handle_organize_event_direct(
             update=update,
             context=context,
             mode=mode,
-            prefill=draft,
+            draft=draft,
+            chat=chat,
+            user=user,
         )
         return
 
@@ -748,4 +751,168 @@ async def _apply_lock_action(reply_message, event_id: int) -> None:
 
     await reply_message.reply_text(
         f"🔒 Event {event_id} locked successfully at {datetime.utcnow().isoformat()}."
+    )
+
+
+async def _handle_organize_event_direct(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    mode: str,
+    draft: dict,
+    chat,
+    user,
+) -> None:
+    """Directly create event from LLM draft without interactive flow."""
+    if not settings.db_url:
+        await update.message.reply_text("❌ Database configuration is unavailable.")
+        return
+    
+    description = str(draft.get("description") or "Group planned event").strip()[:500]
+    event_type = str(draft.get("event_type") or "social").strip().lower()
+    if event_type not in event_creation.ALLOWED_EVENT_TYPES:
+        event_type = "social"
+    
+    try:
+        threshold = max(1, int(draft.get("threshold_attendance", 3)))
+    except (TypeError, ValueError):
+        threshold = 3
+    
+    try:
+        duration = max(30, int(draft.get("duration_minutes", 120)))
+    except (TypeError, ValueError):
+        duration = 120
+    
+    scheduled_time_raw = draft.get("scheduled_time")
+    if mode == "flexible" or not isinstance(scheduled_time_raw, str):
+        scheduling_mode = "flexible"
+        scheduled_time = None
+    else:
+        scheduling_mode = "fixed"
+        try:
+            scheduled_time = datetime.fromisoformat(scheduled_time_raw)
+        except ValueError:
+            scheduling_mode = "flexible"
+            scheduled_time = None
+    
+    invite_all = bool(draft.get("invite_all_members", True))
+    invitees_raw = draft.get("invitees", [])
+    invitees = event_creation._normalize_patch_invitees(invitees_raw)
+    
+    location_type = str(draft.get("location_type") or "cafe").strip().lower()
+    if location_type not in {value for _, value in event_creation.LOCATION_PRESETS}:
+        location_type = "cafe"
+    
+    budget_level = str(draft.get("budget_level") or "medium").strip().lower()
+    if budget_level not in {value for _, value in event_creation.BUDGET_PRESETS}:
+        budget_level = "medium"
+    
+    transport_mode = str(draft.get("transport_mode") or "any").strip().lower()
+    if transport_mode not in {value for _, value in event_creation.TRANSPORT_PRESETS}:
+        transport_mode = "any"
+    
+    date_preset = str(draft.get("date_preset") or "custom").strip().lower()
+    if date_preset not in event_creation.DATE_PRESET_LABELS and date_preset != "custom":
+        date_preset = "custom"
+    
+    time_window = str(draft.get("time_window") or "evening").strip().lower()
+    if time_window not in event_creation.TIME_WINDOWS:
+        time_window = "evening"
+    
+    notes = draft.get("planning_notes", [])
+    planning_notes = (
+        [str(x).strip()[:300] for x in notes if str(x).strip()]
+        if isinstance(notes, list) else []
+    )
+    
+    creator_id = user.id if user else None
+    
+    async with get_session(settings.db_url) as session:
+        result = await session.execute(
+            select(Group).where(Group.telegram_group_id == chat.id)
+        )
+        group = result.scalar_one_or_none()
+        
+        if not group:
+            group = Group(
+                telegram_group_id=chat.id,
+                group_name=chat.title or str(chat.id),
+                member_list=[creator_id] if creator_id else [],
+            )
+            session.add(group)
+            await session.commit()
+            await session.refresh(group)
+        
+        commit_by = None
+        if scheduled_time:
+            commit_by = event_creation.compute_commit_by_time(scheduled_time)
+        
+        conflict = await find_user_event_conflict(
+            session=session,
+            telegram_user_id=creator_id,
+            start_time=scheduled_time,
+            duration_minutes=duration,
+        )
+        if conflict:
+            await update.message.reply_text(
+                "❌ Cannot create event: creator has a conflicting event.\n"
+                f"Conflicting Event ID: {conflict.event_id}\n"
+                f"Time: {conflict.scheduled_time}\n"
+                f"Duration: {conflict.duration_minutes or 120} minutes"
+            )
+            return
+        
+        event = Event(
+            group_id=group.group_id,
+            event_type=event_type,
+            description=description,
+            organizer_telegram_user_id=creator_id,
+            scheduled_time=scheduled_time,
+            commit_by=commit_by,
+            duration_minutes=duration,
+            threshold_attendance=threshold,
+            attendance_list=[f"{creator_id}:interested"] if creator_id else [],
+            planning_prefs={
+                "date_preset": date_preset,
+                "time_window": time_window,
+                "location_type": location_type,
+                "budget_level": budget_level,
+                "transport_mode": transport_mode,
+            },
+            state="proposed",
+        )
+        session.add(event)
+        await session.commit()
+        await session.refresh(event)
+        
+        group_members = group.member_list or []
+        for telegram_user_id in group_members:
+            if telegram_user_id != creator_id and telegram_user_id:
+                await send_event_invitation_dm(
+                    context,
+                    int(telegram_user_id),
+                    {
+                        "description": description,
+                        "event_type": event_type,
+                        "scheduled_time": scheduled_time_raw,
+                        "duration_minutes": duration,
+                        "threshold_attendance": threshold,
+                        "invitees": invitees if not invite_all else [],
+                        "invite_all_members": invite_all,
+                        "location_type": location_type,
+                        "budget_level": budget_level,
+                        "transport_mode": transport_mode,
+                        "date_preset": date_preset,
+                        "time_window": time_window,
+                        "planning_notes": planning_notes,
+                    },
+                    int(event.event_id),
+                )
+    
+    await update.message.reply_text(
+        f"✅ Event created! Check your DMs.\n\n"
+        f"Event ID: {event.event_id}\n"
+        f"Type: {event_type}\n"
+        f"Description: {description}\n"
+        f"Time: {scheduled_time_raw if scheduled_time_raw else 'TBD (flexible)'}\n"
+        f"Duration: {duration} minutes"
     )

@@ -58,7 +58,10 @@ def test_all():
     
     # Test database connection
     print("\n8. Testing database connection...")
-    engine = create_engine(os.getenv("DB_URL", "postgresql+asyncpg://coord_user:coord_pass@localhost:5432/coord_db"))
+    db_url = os.getenv("DB_URL", "postgresql://coord_user:coord_pass@localhost:5432/coord_db")
+    if not db_url.startswith("postgresql+asyncpg://"):
+        db_url = db_url.replace("postgresql://", "postgresql+asyncpg://", 1)
+    engine = create_engine(db_url)
     from sqlalchemy import text
     import asyncio
     

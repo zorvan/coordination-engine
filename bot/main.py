@@ -47,10 +47,8 @@ async def check_llm_availability(logger: logging.Logger) -> None:
 
 async def check_db_availability(logger: logging.Logger, db_url: str) -> None:
     """Check database availability on startup and log status."""
-    if not db_url:
-        logger.warning("Startup DB check: DB_URL not configured, database features disabled")
-        return
-    
+    if not db_url.startswith("postgresql+asyncpg://"):
+        db_url = db_url.replace("postgresql://", "postgresql+asyncpg://", 1)
     is_available, message = await check_db_connection(db_url)
     if is_available:
         logger.info("Startup DB check: %s", message)
@@ -73,7 +71,12 @@ def main():
         asyncio.set_event_loop(loop)
     
     loop.run_until_complete(check_llm_availability(logger))
-    loop.run_until_complete(check_db_availability(logger, settings.db_url))
+    if settings.db_url:
+        if not settings.db_url.startswith("postgresql+asyncpg://"):
+            db_url = settings.db_url.replace("postgresql://", "postgresql+asyncpg://", 1)
+        else:
+            db_url = settings.db_url
+        loop.run_until_complete(check_db_availability(logger, db_url))
     
     application = ApplicationBuilder().token(settings.telegram_token).build()
 

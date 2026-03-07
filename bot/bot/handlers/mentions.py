@@ -1047,7 +1047,7 @@ async def _handle_organize_event_direct(
             
             if send_to_all_members:
                 for telegram_user_id in group_members:
-                    if telegram_user_id != creator_id and telegram_user_id:
+                    if telegram_user_id:
                         try:
                             await send_event_invitation_dm(
                                 context,

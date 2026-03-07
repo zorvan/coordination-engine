@@ -37,10 +37,10 @@ async def invalidate_confirmations_and_notify(
     event.state = "interested" if event.attendance_list else "proposed"
 
     message = (
-        f"🔁 Event {event.event_id} changed before lock.\n"
+        f"🔁 Event {event.event_id} modified.\n"
         f"Reason: {reason}\n\n"
-        "Your previous confirmation was reset. "
-        f"Please reconfirm with /confirm {event.event_id}."
+        "The event details have been updated. "
+        f"Please check the event details again."
     )
     for telegram_user_id in confirmed_ids:
         try:
@@ -49,3 +49,37 @@ async def invalidate_confirmations_and_notify(
             # User may not have started bot or blocked DM.
             continue
     return len(confirmed_ids)
+
+
+def _extract_all_active_telegram_ids(attendance_list: list[Any] | None) -> list[int]:
+    """Extract all active telegram user ids (interested, committed, confirmed) from attendance entries."""
+    active: list[int] = []
+    for telegram_user_id, status in parse_attendance_with_status(attendance_list).items():
+        if status in {"interested", "committed", "confirmed"}:
+            active.append(telegram_user_id)
+    return active
+
+
+async def notify_attendees_of_modification(
+    *,
+    context,
+    event,
+    reason: str,
+) -> int:
+    """Notify all active attendees of event modification."""
+    active_ids = _extract_all_active_telegram_ids(event.attendance_list)
+    if not active_ids:
+        return 0
+
+    message = (
+        f"📝 Event {event.event_id} has been modified.\n"
+        f"Reason: {reason}\n\n"
+        "Please review the updated event details."
+    )
+    for telegram_user_id in active_ids:
+        try:
+            await context.bot.send_message(chat_id=telegram_user_id, text=message)
+        except Exception:
+            # User may not have started bot or blocked DM.
+            continue
+    return len(active_ids)

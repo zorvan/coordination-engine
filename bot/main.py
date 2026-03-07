@@ -140,6 +140,7 @@ def main():
         # Event flow handlers (more specific, must come before general event_)
         (r"^event_(join|confirm|back|cancel|lock)_", event_flow.handle_event_flow),
         (r"^event_(details|logs|constraints|close)_", event_details.handle_callback),
+        (r"^event_modify_", mentions.handle_callback),
         
         # Event creation handlers (general, comes after specific ones)
         (r"^event_", organize_event.handle_callback),

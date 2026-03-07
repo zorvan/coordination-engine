@@ -9,7 +9,10 @@ from telegram.ext import ContextTypes
 from sqlalchemy import select
 
 from ai.llm import LLMClient
-from bot.common.confirmation import invalidate_confirmations_and_notify
+from bot.common.confirmation import (
+    invalidate_confirmations_and_notify,
+    notify_attendees_of_modification,
+)
 from bot.common.event_access import (
     get_event_organizer_telegram_id,
     get_event_admin_telegram_id,
@@ -146,7 +149,12 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             )
             return
 
-        reconfirm_needed = await invalidate_confirmations_and_notify(
+        invalidated = await invalidate_confirmations_and_notify(
+            context=context,
+            event=event,
+            reason=", ".join(reason_parts) or "event details changed",
+        )
+        notified = await notify_attendees_of_modification(
             context=context,
             event=event,
             reason=", ".join(reason_parts) or "event details changed",
@@ -156,7 +164,7 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(
         "✅ Event updated.\n"
         f"Changed fields: {', '.join(changed_fields)}\n"
-        f"Confirmations reset: {reconfirm_needed}"
+        f"Confirmations reset: {invalidated}"
     )
 
 
@@ -364,6 +372,11 @@ async def handle_modify_request_callback(
             return
         
         reconfirm_needed = await invalidate_confirmations_and_notify(
+            context=context,
+            event=event,
+            reason=", ".join(reason_parts) or "event details changed",
+        )
+        notified = await notify_attendees_of_modification(
             context=context,
             event=event,
             reason=", ".join(reason_parts) or "event details changed",

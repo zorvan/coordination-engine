@@ -18,6 +18,52 @@ def summarize_description(description: str | None, max_len: int = 400) -> str:
     return text
 
 
+async def attendance_stats_with_usernames(
+    attendance: list[Any] | None, session
+) -> tuple[int, int, str]:
+    """Return interested count, confirmed count, and formatted attendee text with usernames."""
+    status_by_user = parse_attendance_with_status(attendance)
+    interested_count = sum(
+        1 for status in status_by_user.values() if status == "interested"
+    )
+    committed_count = sum(
+        1 for status in status_by_user.values() if status == "committed"
+    )
+    confirmed_count = sum(
+        1 for status in status_by_user.values() if status == "confirmed"
+    )
+
+    if not status_by_user:
+        return interested_count, confirmed_count, "No attendees yet."
+
+    lines = []
+    user_ids = list(status_by_user.keys())
+    
+    users = {}
+    if user_ids:
+        result = await session.execute(
+            select(User).where(User.telegram_user_id.in_(user_ids))
+        )
+        for user in result.scalars().all():
+            users[user.telegram_user_id] = user
+    
+    for telegram_user_id in sorted(status_by_user.keys()):
+        status = status_by_user[telegram_user_id]
+        user = users.get(telegram_user_id)
+        username = user.username if user and getattr(user, "username", None) else None
+        user_display = f"@{username}" if username else f"[user](tg://user?id={telegram_user_id})"
+        icon = {
+            "invited": "📨",
+            "interested": "•",
+            "committed": "⏳",
+            "confirmed": "✓",
+        }.get(status, "•")
+        lines.append(f"{icon} {user_display} ({status})")
+    if committed_count:
+        lines.append(f"\nCommitted pending lock: {committed_count}")
+    return interested_count, confirmed_count, "\n".join(lines)
+
+
 def attendance_stats(attendance: list[Any] | None) -> tuple[int, int, str]:
     """Return interested count, confirmed count, and formatted attendee text."""
     status_by_user = parse_attendance_with_status(attendance)
@@ -54,7 +100,12 @@ async def format_event_details_message(
 ) -> str:
     """Build consistent detailed event info with early-stage progress."""
     attendance = event.attendance_list or []
-    interested_count, confirmed_count, attendees_text = attendance_stats(attendance)
+    
+    if settings.db_url:
+        async with get_session(settings.db_url) as session:
+            interested_count, confirmed_count, attendees_text = await attendance_stats_with_usernames(attendance, session)
+    else:
+        interested_count, confirmed_count, attendees_text = attendance_stats(attendance)
     threshold = event.threshold_attendance or 0
     needed = max(threshold - confirmed_count, 0)
     availability_count = sum(

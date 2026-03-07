@@ -46,32 +46,32 @@
 
 ### 5.Private preference profiles
 
-- [ ] Add private user preference profile (time, activity, budget, location style).
-- [ ] Add sensitivity controls: what is private vs shareable aggregate.
-- [ ] Add private preference onboarding via DM wizard.
-- [ ] Add aggregate-only recommendation outputs for group chats.
-- [ ] Add preference confidence decay/refresh logic.
-- [ ] Add “prefer not to share” mode for selected attributes.
+- [x] Add private user preference profile (time, activity, budget, location style).
+- [x] Add sensitivity controls: what is private vs shareable aggregate.
+- [x] Add private preference onboarding via DM wizard.
+- [x] Add aggregate-only recommendation outputs for group chats.
+- [x] Add preference confidence decay/refresh logic.
+- [x] Add "prefer not to share" mode for selected attributes.
 
 ### 6.Trust + accountability features
 
-- [ ] Add reliability trend chart per user.
-- [ ] Add transparent attendance history summary (per event type).
-- [ ] Add organizer moderation actions (warn, mute recommendations, block from event).
-- [ ] Add explainable reputation updates after each event.
-- [ ] Add dispute/review workflow for contested moderation actions.
-- [ ] Add anti-bias checks in trust/reputation updates.
-- [ ] Add minimum evidence rule before severe trust penalties.
+- [x] Add reliability trend chart per user.
+- [x] Add transparent attendance history summary (per event type).
+- [x] Add organizer moderation actions (warn, mute recommendations, block from event).
+- [x] Add explainable reputation updates after each event.
+- [x] Add dispute/review workflow for contested moderation actions.
+- [x] Add anti-bias checks in trust/reputation updates.
+- [x] Add minimum evidence rule before severe trust penalties.
 
 ### 7.Post-event engagement loop
 
-- [ ] Auto-post event summary (who joined, completion status, highlights).
-- [ ] Add one-tap lightweight feedback in group/DM.
-- [ ] Add “schedule next one?” prompt with reusable defaults.
-- [ ] Add attendee follow-up suggestions (time/place improvements).
-- [ ] Add streaks/badges for reliable participation.
-- [ ] Add weekly digest for active groups.
-- [ ] Add reactivation nudges for inactive groups.
+- [x] Auto-post event summary (who joined, completion status, highlights).
+- [x] Add one-tap lightweight feedback in group/DM.
+- [x] Add "schedule next one?" prompt with reusable defaults.
+- [x] Add attendee follow-up suggestions (time/place improvements).
+- [x] Add streaks/badges for reliable participation.
+- [x] Add weekly digest for active groups.
+- [x] Add reactivation nudges for inactive groups.
 
 ### 8.Real-world integrations
 

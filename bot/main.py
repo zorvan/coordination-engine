@@ -21,6 +21,7 @@ from bot.commands import (
 )
 from bot.handlers import event_flow, feedback, membership, mentions
 from ai.llm import LLMClient
+from db.connection import check_db_connection
 
 
 async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -44,6 +45,19 @@ async def check_llm_availability(logger: logging.Logger) -> None:
         await llm.close()
 
 
+async def check_db_availability(logger: logging.Logger, db_url: str) -> None:
+    """Check database availability on startup and log status."""
+    if not db_url:
+        logger.warning("Startup DB check: DB_URL not configured, database features disabled")
+        return
+    
+    is_available, message = await check_db_connection(db_url)
+    if is_available:
+        logger.info("Startup DB check: %s", message)
+    else:
+        logger.warning("Startup DB check: %s", message)
+
+
 def main():
     """Main entry point."""
     settings = Settings()
@@ -53,6 +67,7 @@ def main():
         raise ValueError("TELEGRAM_TOKEN is not set. Define it in environment or .env.")
 
     asyncio.run(check_llm_availability(logger))
+    asyncio.run(check_db_availability(logger, settings.db_url))
     
     application = ApplicationBuilder().token(settings.telegram_token).build()
 

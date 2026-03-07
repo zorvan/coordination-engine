@@ -48,6 +48,7 @@ class User(Base):
         back_populates="target_user",
         foreign_keys="[EarlyFeedback.target_user_id]",
     )
+    preferences = relationship("UserPreference", back_populates="user", uselist=False)
 
 
 class Group(Base):
@@ -107,6 +108,29 @@ class Event(Base):
         cascade="all, delete-orphan",
     )
     ailog = relationship("AILog", back_populates="event")
+
+
+class UserPreference(Base):
+    """User preferences table - private preference profiles."""
+    __tablename__ = "user_preferences"
+    
+    preference_id = Column(Integer, primary_key=True)
+    user_id = Column(
+        Integer,
+        ForeignKey("users.user_id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True
+    )
+    time_preference = Column(String(50), default="any")
+    activity_preference = Column(String(100), default="any")
+    budget_preference = Column(String(50), default="any")
+    location_type_preference = Column(String(100), default="any")
+    transport_preference = Column(String(50), default="any")
+    privacy_settings = Column(JSON, default=dict)
+    last_updated = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    user = relationship("User", back_populates="preferences")
 
 
 class Constraint(Base):

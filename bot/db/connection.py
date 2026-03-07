@@ -1,8 +1,9 @@
 """
 Database connection module for async operations.
 """
+import logging
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator
+from typing import AsyncGenerator, Callable, Any
 from sqlalchemy.ext.asyncio import (
     create_async_engine,
     async_sessionmaker,
@@ -11,6 +12,9 @@ from sqlalchemy.ext.asyncio import (
 )
 from db.models import Base
 
+
+logger = logging.getLogger("coord_bot.db")
+
 # Cache engines by URL to avoid recreating them
 _engines: dict[str, AsyncEngine] = {}
 
@@ -18,7 +22,9 @@ _engines: dict[str, AsyncEngine] = {}
 def create_engine(db_url: str) -> AsyncEngine:
     """Create or retrieve cached async database engine."""
     if db_url not in _engines:
-        _engines[db_url] = create_async_engine(db_url, echo=False)
+        _engines[db_url] = create_async_engine(
+            db_url, echo=False, pool_pre_ping=True, pool_size=10, max_overflow=20
+        )
     return _engines[db_url]
 
 
@@ -28,12 +34,61 @@ def create_session(engine: AsyncEngine) -> async_sessionmaker[AsyncSession]:
 
 
 @asynccontextmanager
-async def get_session(db_url: str) -> AsyncGenerator[AsyncSession, None]:
+async def get_session(db_url: str):
     """Get an async database session context manager."""
     engine = create_engine(db_url)
     Session = create_session(engine)
     async with Session() as session:
-        yield session
+        try:
+            yield session
+        except Exception as e:
+            logger.debug("Database session error: %s", e)
+            raise
+
+
+async def check_db_connection(db_url: str) -> tuple[bool, str]:
+    """Check if database connection is available."""
+    try:
+        engine = create_engine(db_url)
+        Session = create_session(engine)
+        async with Session() as session:
+            await session.execute("SELECT 1")
+        return True, "Database connection OK"
+    except Exception as e:
+        return False, f"Database connection failed: {type(e).__name__}: {e}"
+
+
+async def retry_operation(
+    operation: Callable,
+    max_retries: int = 3,
+    retry_delay: float = 0.5,
+    db_url: str | None = None,
+) -> Any:
+    """Retry a database operation with exponential backoff."""
+    import asyncio
+    
+    for attempt in range(max_retries):
+        try:
+            if db_url:
+                async with get_session(db_url) as session:
+                    return await operation(session)
+            return await operation()
+        except Exception as e:
+            if attempt == max_retries - 1:
+                logger.error(
+                    "Operation failed after %d attempts: %s",
+                    max_retries,
+                    type(e).__name__,
+                    exc_info=True,
+                )
+                raise
+            logger.warning(
+                "Database operation failed (attempt %d/%d): %s",
+                attempt + 1,
+                max_retries,
+                type(e).__name__,
+            )
+            await asyncio.sleep(retry_delay * (2**attempt))
 
 
 async def init_db(engine: AsyncEngine) -> None:

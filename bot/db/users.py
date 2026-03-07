@@ -1,10 +1,11 @@
 """User identity helpers for mapping Telegram IDs to internal user IDs."""
+from typing import Dict, Optional
 from sqlalchemy import select
 
 from db.models import User
 
 
-def _normalize_username(username: str | None) -> str | None:
+def _normalize_username(username: Optional[str]) -> Optional[str]:
     """Normalize username to lowercase without leading @."""
     if not username:
         return None
@@ -15,8 +16,8 @@ def _normalize_username(username: str | None) -> str | None:
 async def get_or_create_user_id(
     session,
     telegram_user_id: int,
-    display_name: str | None = None,
-    username: str | None = None,
+    display_name: Optional[str] = None,
+    username: Optional[str] = None,
 ) -> int:
     """Return internal users.user_id for a Telegram user, creating row if needed."""
     normalized_username = _normalize_username(username)
@@ -47,7 +48,7 @@ async def get_or_create_user_id(
     return int(user.user_id)
 
 
-async def get_user_id_by_username(session, username: str) -> int | None:
+async def get_user_id_by_username(session, username: str) -> Optional[int]:
     """Resolve internal users.user_id from a Telegram username."""
     normalized_username = _normalize_username(username)
     if not normalized_username:
@@ -59,3 +60,18 @@ async def get_user_id_by_username(session, username: str) -> int | None:
     if not user:
         return None
     return int(user.user_id)
+
+
+async def get_user_ids_for_telegram_ids(
+    session, telegram_user_ids: list[int]
+) -> Dict[int, int]:
+    """Map Telegram user IDs to internal user IDs."""
+    if not telegram_user_ids:
+        return {}
+
+    result = await session.execute(
+        select(User).where(User.telegram_user_id.in_(telegram_user_ids))
+    )
+    users = result.scalars().all()
+
+    return {u.telegram_user_id: u.user_id for u in users}

@@ -4,6 +4,7 @@ Database connection module for async operations.
 import logging
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator, Callable, Any
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import (
     create_async_engine,
     async_sessionmaker,
@@ -48,11 +49,13 @@ async def get_session(db_url: str):
 
 async def check_db_connection(db_url: str) -> tuple[bool, str]:
     """Check if database connection is available."""
+    from sqlalchemy import text
+    
     try:
         engine = create_engine(db_url)
         Session = create_session(engine)
         async with Session() as session:
-            await session.execute("SELECT 1")
+            await session.execute(text("SELECT 1"))
         return True, "Database connection OK"
     except Exception as e:
         return False, f"Database connection failed: {type(e).__name__}: {e}"

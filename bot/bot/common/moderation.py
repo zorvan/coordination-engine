@@ -4,10 +4,9 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from db.models import Log, EarlyFeedback
+from db.models import User, Event
 
 
 def check_minimum_evidence(evidence_count: int, action: str) -> bool:

@@ -1,130 +1,34 @@
 {
   "edges": [
     {
-      "from_file": "bot/commands/confirm.py",
-      "from_func": "handle",
-      "to_file": "db/connection.py",
-      "to_func": "get_session"
+      "from_file": "bot/commands/moderation.py",
+      "from_func": "handle_reliability",
+      "to_file": "bot/common/reputation_trends.py",
+      "to_func": "get_user_reliability_trend"
     },
     {
-      "from_file": "bot/commands/constraints.py",
-      "from_func": "view_constraints",
-      "to_file": "db/connection.py",
-      "to_func": "get_session"
+      "from_file": "bot/commands/preferences.py",
+      "from_func": "format_preference",
+      "to_file": "bot/common/user_preferences.py",
+      "to_func": "get_privacy_defaults"
     },
     {
-      "from_file": "ai/core.py",
-      "from_func": "__init__",
-      "to_file": "ai/llm.py",
-      "to_func": "LLMClient"
-    },
-    {
-      "from_file": "bot/commands/constraints.py",
-      "from_func": "add_constraint",
-      "to_file": "db/connection.py",
-      "to_func": "get_session"
-    },
-    {
-      "from_file": "bot/handlers/event_flow.py",
-      "from_func": "handle_confirm",
+      "from_file": "db/users.py",
+      "from_func": "get_or_create_user_id",
       "to_file": "db/models.py",
-      "to_func": "Log"
-    },
-    {
-      "from_file": "bot/handlers/event_flow.py",
-      "from_func": "handle_join",
-      "to_file": "db/connection.py",
-      "to_func": "get_session"
-    },
-    {
-      "from_file": "bot/commands/constraints.py",
-      "from_func": "add_availability_slots",
-      "to_file": "db/users.py",
-      "to_func": "get_or_create_user_id"
+      "to_func": "User"
     },
     {
       "from_file": "bot/commands/event_details.py",
       "from_func": "handle",
       "to_file": "bot/commands/event_details.py",
-      "to_func": "_get_event_constraints"
+      "to_func": "_get_event_logs"
     },
     {
-      "from_file": "bot/commands/status.py",
+      "from_file": "bot/commands/event_note.py",
       "from_func": "handle",
-      "to_file": "bot/commands/status.py",
-      "to_func": "_get_constraint_count"
-    },
-    {
-      "from_file": "ai/core.py",
-      "from_func": "__init__",
-      "to_file": "ai/rules.py",
-      "to_func": "RuleBasedEngine"
-    },
-    {
-      "from_file": "bot/commands/event_details.py",
-      "from_func": "show_details",
-      "to_file": "bot/commands/event_details.py",
-      "to_func": "_get_event_constraints"
-    },
-    {
-      "from_file": "tests/test_integration.py",
-      "from_func": "test_nudge_generation",
-      "to_file": "bot/utils/nudges.py",
-      "to_func": "generate_threshold_warning"
-    },
-    {
-      "from_file": "db/connection.py",
-      "from_func": "get_session",
-      "to_file": "db/connection.py",
-      "to_func": "create_session"
-    },
-    {
-      "from_file": "bot/handlers/event_flow.py",
-      "from_func": "handle_cancel",
-      "to_file": "db/users.py",
-      "to_func": "get_or_create_user_id"
-    },
-    {
-      "from_file": "bot/commands/suggest_time.py",
-      "from_func": "_send_suggestion",
-      "to_file": "bot/commands/suggest_time.py",
-      "to_func": "create_session_factory"
-    },
-    {
-      "from_file": "tests/test_setup.py",
-      "from_func": "<module>",
-      "to_file": "tests/test_setup.py",
-      "to_func": "test_all"
-    },
-    {
-      "from_file": "bot/commands/organize_event.py",
-      "from_func": "parse_invitee_input",
-      "to_file": "bot/commands/organize_event.py",
-      "to_func": "parse_invitee_handles"
-    },
-    {
-      "from_file": "bot/handlers/event_flow.py",
-      "from_func": "handle_join",
-      "to_file": "db/models.py",
-      "to_func": "Log"
-    },
-    {
-      "from_file": "bot/handlers/feedback.py",
-      "from_func": "collect_feedback",
-      "to_file": "db/connection.py",
-      "to_func": "get_session"
-    },
-    {
-      "from_file": "bot/handlers/membership.py",
-      "from_func": "track_group_members",
-      "to_file": "db/users.py",
-      "to_func": "get_or_create_user_id"
-    },
-    {
-      "from_file": "bot/commands/constraints.py",
-      "from_func": "handle",
-      "to_file": "bot/commands/constraints.py",
-      "to_func": "add_constraint"
+      "to_file": "bot/common/event_access.py",
+      "to_func": "is_attendee"
     },
     {
       "from_file": "db/users.py",
@@ -133,280 +37,40 @@
       "to_func": "_normalize_username"
     },
     {
-      "from_file": "bot/commands/event_details.py",
-      "from_func": "handle",
-      "to_file": "bot/commands/event_details.py",
-      "to_func": "_get_event_logs"
-    },
-    {
-      "from_file": "bot/commands/confirm.py",
-      "from_func": "handle",
-      "to_file": "db/models.py",
-      "to_func": "Log"
-    },
-    {
-      "from_file": "bot/commands/organize_event.py",
-      "from_func": "handle_message",
-      "to_file": "bot/commands/organize_event.py",
-      "to_func": "build_event_type_markup"
-    },
-    {
-      "from_file": "bot/handlers/event_flow.py",
-      "from_func": "handle_event_flow",
-      "to_file": "bot/handlers/event_flow.py",
-      "to_func": "handle_cancel"
-    },
-    {
-      "from_file": "bot/handlers/feedback.py",
-      "from_func": "handle_feedback_callback",
-      "to_file": "bot/handlers/feedback.py",
-      "to_func": "process_feedback"
-    },
-    {
-      "from_file": "bot/handlers/event_flow.py",
-      "from_func": "handle_event_flow",
-      "to_file": "bot/handlers/event_flow.py",
-      "to_func": "handle_join"
-    },
-    {
-      "from_file": "bot/commands/event_details.py",
-      "from_func": "show_details",
-      "to_file": "bot/commands/event_details.py",
-      "to_func": "_get_event_logs"
-    },
-    {
-      "from_file": "test_setup.py",
-      "from_func": "test_all",
-      "to_file": "config/logging.py",
-      "to_func": "setup_logging"
-    },
-    {
-      "from_file": "tests/test_integration.py",
-      "from_func": "test_nudge_generation",
-      "to_file": "bot/utils/nudges.py",
-      "to_func": "generate_fallback_warning"
+      "from_file": "ai/llm.py",
+      "from_func": "infer_early_feedback_from_text",
+      "to_file": "ai/llm.py",
+      "to_func": "_sanitize_toxic_text"
     },
     {
       "from_file": "bot/commands/suggest_time.py",
       "from_func": "_send_suggestion",
-      "to_file": "ai/core.py",
-      "to_func": "AICoordinationEngine"
-    },
-    {
-      "from_file": "bot/handlers/event_flow.py",
-      "from_func": "handle_confirm",
       "to_file": "db/connection.py",
       "to_func": "get_session"
     },
     {
-      "from_file": "bot/commands/event_details.py",
-      "from_func": "handle_callback",
-      "to_file": "bot/commands/event_details.py",
-      "to_func": "show_details"
-    },
-    {
-      "from_file": "bot/commands/event_details.py",
-      "from_func": "show_details",
+      "from_file": "bot/handlers/mentions.py",
+      "from_func": "_resolve_mentioned_participants",
       "to_file": "db/connection.py",
       "to_func": "get_session"
     },
     {
-      "from_file": "tests/test_setup.py",
-      "from_func": "test_all",
-      "to_file": "config/logging.py",
-      "to_func": "setup_logging"
-    },
-    {
-      "from_file": "main.py",
-      "from_func": "check_llm_availability",
-      "to_file": "ai/llm.py",
-      "to_func": "LLMClient"
-    },
-    {
-      "from_file": "db/connection.py",
-      "from_func": "get_session",
-      "to_file": "db/connection.py",
-      "to_func": "create_engine"
-    },
-    {
-      "from_file": "bot/commands/event_details.py",
-      "from_func": "handle_callback",
-      "to_file": "bot/commands/event_details.py",
-      "to_func": "show_constraints"
-    },
-    {
-      "from_file": "tests/test_integration.py",
-      "from_func": "test_nudge_generation",
-      "to_file": "bot/utils/nudges.py",
-      "to_func": "generate_lock_warning"
-    },
-    {
-      "from_file": "tests/test_integration.py",
-      "from_func": "test_event_flow_state_machine",
-      "to_file": "bot/handlers/event_flow.py",
-      "to_func": "can_transition"
+      "from_file": "bot/handlers/mentions.py",
+      "from_func": "_execute_inferred_action",
+      "to_file": "bot/handlers/mentions.py",
+      "to_func": "_apply_lock_action"
     },
     {
       "from_file": "main.py",
       "from_func": "main",
-      "to_file": "config/logging.py",
-      "to_func": "setup_logging"
+      "to_file": "main.py",
+      "to_func": "check_llm_availability"
     },
     {
-      "from_file": "bot/commands/status.py",
-      "from_func": "handle",
-      "to_file": "db/connection.py",
-      "to_func": "get_session"
-    },
-    {
-      "from_file": "bot/handlers/event_flow.py",
-      "from_func": "handle_lock",
-      "to_file": "db/connection.py",
-      "to_func": "get_session"
-    },
-    {
-      "from_file": "bot/commands/cancel.py",
-      "from_func": "handle",
-      "to_file": "db/models.py",
-      "to_func": "Log"
-    },
-    {
-      "from_file": "bot/commands/join.py",
-      "from_func": "handle",
-      "to_file": "db/connection.py",
-      "to_func": "get_session"
-    },
-    {
-      "from_file": "bot/commands/organize_event.py",
-      "from_func": "finalize_event",
-      "to_file": "db/connection.py",
-      "to_func": "get_session"
-    },
-    {
-      "from_file": "bot/commands/constraints.py",
-      "from_func": "add_constraint",
-      "to_file": "db/users.py",
-      "to_func": "get_user_id_by_username"
-    },
-    {
-      "from_file": "bot/handlers/event_flow.py",
-      "from_func": "handle_event_flow",
-      "to_file": "bot/handlers/event_flow.py",
-      "to_func": "handle_confirm"
-    },
-    {
-      "from_file": "bot/commands/confirm.py",
-      "from_func": "handle",
-      "to_file": "db/users.py",
-      "to_func": "get_or_create_user_id"
-    },
-    {
-      "from_file": "bot/commands/organize_event.py",
-      "from_func": "parse_invitee_handles",
-      "to_file": "bot/commands/organize_event.py",
-      "to_func": "handle"
-    },
-    {
-      "from_file": "bot/commands/constraints.py",
-      "from_func": "add_constraint",
-      "to_file": "db/users.py",
-      "to_func": "get_or_create_user_id"
-    },
-    {
-      "from_file": "bot/commands/suggest_time.py",
-      "from_func": "handle",
-      "to_file": "bot/commands/suggest_time.py",
-      "to_func": "_send_suggestion"
-    },
-    {
-      "from_file": "bot/handlers/event_flow.py",
-      "from_func": "handle_join",
-      "to_file": "db/users.py",
-      "to_func": "get_or_create_user_id"
-    },
-    {
-      "from_file": "bot/commands/event_details.py",
-      "from_func": "handle",
-      "to_file": "bot/commands/event_details.py",
-      "to_func": "_format_event_details"
-    },
-    {
-      "from_file": "tests/test_integration.py",
-      "from_func": "test_feedback_collection",
-      "to_file": "bot/handlers/feedback.py",
-      "to_func": "collect_feedback"
-    },
-    {
-      "from_file": "bot/commands/join.py",
-      "from_func": "handle",
-      "to_file": "db/models.py",
-      "to_func": "Log"
-    },
-    {
-      "from_file": "test_setup.py",
-      "from_func": "test_all",
-      "to_file": "test_setup.py",
-      "to_func": "check_db"
-    },
-    {
-      "from_file": "bot/commands/event_details.py",
-      "from_func": "handle",
-      "to_file": "db/connection.py",
-      "to_func": "get_session"
-    },
-    {
-      "from_file": "tests/test_integration.py",
-      "from_func": "test_nudge_generation",
-      "to_file": "bot/utils/nudges.py",
-      "to_func": "generate_nudge_message"
-    },
-    {
-      "from_file": "tests/test_integration.py",
-      "from_func": "test_nudge_generation",
-      "to_file": "bot/utils/nudges.py",
-      "to_func": "generate_deadline_warning"
-    },
-    {
-      "from_file": "bot/commands/constraints.py",
-      "from_func": "add_constraint",
-      "to_file": "db/models.py",
-      "to_func": "Constraint"
-    },
-    {
-      "from_file": "bot/commands/event_details.py",
-      "from_func": "handle_callback",
-      "to_file": "bot/commands/event_details.py",
-      "to_func": "show_logs"
-    },
-    {
-      "from_file": "bot/commands/event_details.py",
-      "from_func": "show_logs",
-      "to_file": "db/connection.py",
-      "to_func": "get_session"
-    },
-    {
-      "from_file": "bot/commands/organize_event.py",
-      "from_func": "handle_calendar_callback",
-      "to_file": "bot/commands/organize_event.py",
-      "to_func": "build_calendar_markup"
-    },
-    {
-      "from_file": "bot/commands/cancel.py",
-      "from_func": "handle",
-      "to_file": "bot/utils/nudges.py",
-      "to_func": "generate_nudge_message"
-    },
-    {
-      "from_file": "bot/commands/cancel.py",
-      "from_func": "handle",
-      "to_file": "db/connection.py",
-      "to_func": "get_session"
-    },
-    {
-      "from_file": "bot/commands/constraints.py",
-      "from_func": "add_availability_slots",
-      "to_file": "db/models.py",
-      "to_func": "Constraint"
+      "from_file": "bot/common/confirmation.py",
+      "from_func": "invalidate_confirmations_and_notify",
+      "to_file": "bot/common/confirmation.py",
+      "to_func": "_extract_confirmed_telegram_ids"
     },
     {
       "from_file": "bot/handlers/event_flow.py",
@@ -415,52 +79,10 @@
       "to_func": "get_or_create_user_id"
     },
     {
-      "from_file": "bot/commands/suggest_time.py",
-      "from_func": "_send_suggestion",
-      "to_file": "bot/commands/suggest_time.py",
-      "to_func": "_parse_suggested_time"
-    },
-    {
-      "from_file": "bot/commands/constraints.py",
-      "from_func": "handle",
-      "to_file": "bot/commands/constraints.py",
-      "to_func": "view_constraints"
-    },
-    {
       "from_file": "bot/handlers/event_flow.py",
-      "from_func": "handle_cancel",
+      "from_func": "handle_confirm",
       "to_file": "db/connection.py",
       "to_func": "get_session"
-    },
-    {
-      "from_file": "bot/commands/organize_event.py",
-      "from_func": "_start_event_flow",
-      "to_file": "db/models.py",
-      "to_func": "Group"
-    },
-    {
-      "from_file": "bot/commands/my_groups.py",
-      "from_func": "handle",
-      "to_file": "db/connection.py",
-      "to_func": "get_session"
-    },
-    {
-      "from_file": "bot/commands/suggest_time.py",
-      "from_func": "create_session_factory",
-      "to_file": "db/connection.py",
-      "to_func": "create_session"
-    },
-    {
-      "from_file": "bot/commands/constraints.py",
-      "from_func": "handle",
-      "to_file": "bot/commands/constraints.py",
-      "to_func": "add_availability_slots"
-    },
-    {
-      "from_file": "bot/commands/join.py",
-      "from_func": "handle",
-      "to_file": "db/users.py",
-      "to_func": "get_or_create_user_id"
     },
     {
       "from_file": "bot/handlers/event_flow.py",
@@ -475,8 +97,224 @@
       "to_func": "create_engine"
     },
     {
+      "from_file": "bot/commands/event_details.py",
+      "from_func": "handle_callback",
+      "to_file": "bot/commands/event_details.py",
+      "to_func": "show_logs"
+    },
+    {
       "from_file": "bot/commands/constraints.py",
-      "from_func": "remove_constraint",
+      "from_func": "handle_callback",
+      "to_file": "bot/commands/constraints.py",
+      "to_func": "_save_constraint_from_inputs"
+    },
+    {
+      "from_file": "bot/handlers/event_flow.py",
+      "from_func": "handle_back",
+      "to_file": "bot/common/attendance.py",
+      "to_func": "revert_confirmed_to_joined"
+    },
+    {
+      "from_file": "bot/handlers/feedback.py",
+      "from_func": "process_feedback",
+      "to_file": "bot/handlers/feedback.py",
+      "to_func": "_store_feedback_and_update_reputation"
+    },
+    {
+      "from_file": "bot/common/user_preferences.py",
+      "from_func": "delete_user_preferences",
+      "to_file": "bot/common/user_preferences.py",
+      "to_func": "get_user_preferences"
+    },
+    {
+      "from_file": "bot/common/attendance.py",
+      "from_func": "mark_joined",
+      "to_file": "bot/common/attendance.py",
+      "to_func": "_status_map_to_attendance"
+    },
+    {
+      "from_file": "bot/handlers/event_flow.py",
+      "from_func": "handle_lock",
+      "to_file": "db/connection.py",
+      "to_func": "get_session"
+    },
+    {
+      "from_file": "tests/test_integration.py",
+      "from_func": "test_nudge_generation",
+      "to_file": "bot/utils/nudges.py",
+      "to_func": "generate_deadline_warning"
+    },
+    {
+      "from_file": "tests/test_setup.py",
+      "from_func": "test_all",
+      "to_file": "tests/test_setup.py",
+      "to_func": "check_db"
+    },
+    {
+      "from_file": "bot/commands/organize_event.py",
+      "from_func": "handle_calendar_callback",
+      "to_file": "bot/commands/organize_event.py",
+      "to_func": "build_calendar_markup"
+    },
+    {
+      "from_file": "bot/commands/suggest_time.py",
+      "from_func": "handle",
+      "to_file": "bot/commands/suggest_time.py",
+      "to_func": "_send_suggestion"
+    },
+    {
+      "from_file": "bot/commands/organize_event.py",
+      "from_func": "build_date_options_markup",
+      "to_file": "bot/commands/organize_event.py",
+      "to_func": "build_compact_markup"
+    },
+    {
+      "from_file": "bot/commands/organize_event.py",
+      "from_func": "_start_event_flow",
+      "to_file": "db/models.py",
+      "to_func": "Group"
+    },
+    {
+      "from_file": "bot/commands/organize_event.py",
+      "from_func": "start_event_flow_from_prefill",
+      "to_file": "bot/commands/organize_event.py",
+      "to_func": "build_final_confirmation_markup"
+    },
+    {
+      "from_file": "bot/handlers/mentions.py",
+      "from_func": "handle_mention",
+      "to_file": "ai/llm.py",
+      "to_func": "LLMClient"
+    },
+    {
+      "from_file": "bot/commands/organize_event.py",
+      "from_func": "handle_callback",
+      "to_file": "bot/commands/organize_event.py",
+      "to_func": "build_time_window_markup"
+    },
+    {
+      "from_file": "bot/commands/back.py",
+      "from_func": "handle",
+      "to_file": "bot/common/attendance.py",
+      "to_func": "derive_state_from_attendance"
+    },
+    {
+      "from_file": "bot/handlers/mentions.py",
+      "from_func": "_apply_participation_action",
+      "to_file": "db/connection.py",
+      "to_func": "get_session"
+    },
+    {
+      "from_file": "bot/commands/organize_event.py",
+      "from_func": "build_time_window_markup",
+      "to_file": "bot/commands/organize_event.py",
+      "to_func": "build_compact_markup"
+    },
+    {
+      "from_file": "bot/handlers/mentions.py",
+      "from_func": "_send_status",
+      "to_file": "bot/common/event_presenters.py",
+      "to_func": "format_status_message"
+    },
+    {
+      "from_file": "bot/commands/status.py",
+      "from_func": "handle",
+      "to_file": "bot/common/event_presenters.py",
+      "to_func": "format_status_message"
+    },
+    {
+      "from_file": "bot/commands/cancel.py",
+      "from_func": "handle_callback",
+      "to_file": "bot/commands/cancel.py",
+      "to_func": "handle"
+    },
+    {
+      "from_file": "bot/commands/back.py",
+      "from_func": "handle",
+      "to_file": "bot/common/attendance.py",
+      "to_func": "revert_confirmed_to_joined"
+    },
+    {
+      "from_file": "bot/commands/suggest_time.py",
+      "from_func": "_send_suggestion",
+      "to_file": "bot/commands/suggest_time.py",
+      "to_func": "create_session_factory"
+    },
+    {
+      "from_file": "bot/handlers/event_flow.py",
+      "from_func": "handle_lock",
+      "to_file": "bot/common/attendance.py",
+      "to_func": "finalize_commitments"
+    },
+    {
+      "from_file": "bot/commands/organize_event.py",
+      "from_func": "handle_message",
+      "to_file": "bot/common/keyboards.py",
+      "to_func": "build_threshold_markup"
+    },
+    {
+      "from_file": "bot/commands/constraints.py",
+      "from_func": "add_availability_slots",
+      "to_file": "db/users.py",
+      "to_func": "get_or_create_user_id"
+    },
+    {
+      "from_file": "test_setup.py",
+      "from_func": "test_all",
+      "to_file": "config/logging.py",
+      "to_func": "setup_logging"
+    },
+    {
+      "from_file": "db/errors.py",
+      "from_func": "handle_database_error",
+      "to_file": "db/errors.py",
+      "to_func": "log_database_error"
+    },
+    {
+      "from_file": "bot/common/attendance.py",
+      "from_func": "finalize_commitments",
+      "to_file": "bot/common/attendance.py",
+      "to_func": "_attendance_to_status_map"
+    },
+    {
+      "from_file": "bot/handlers/mentions.py",
+      "from_func": "_execute_inferred_action",
+      "to_file": "bot/handlers/mentions.py",
+      "to_func": "_send_event_details"
+    },
+    {
+      "from_file": "bot/commands/event_details.py",
+      "from_func": "show_constraints",
+      "to_file": "db/connection.py",
+      "to_func": "get_session"
+    },
+    {
+      "from_file": "bot/commands/back.py",
+      "from_func": "handle",
+      "to_file": "db/users.py",
+      "to_func": "get_or_create_user_id"
+    },
+    {
+      "from_file": "bot/commands/back.py",
+      "from_func": "handle",
+      "to_file": "db/connection.py",
+      "to_func": "get_session"
+    },
+    {
+      "from_file": "bot/commands/constraints.py",
+      "from_func": "_save_constraint_from_inputs",
+      "to_file": "bot/common/event_access.py",
+      "to_func": "is_attendee"
+    },
+    {
+      "from_file": "bot/commands/modify_event.py",
+      "from_func": "handle",
+      "to_file": "bot/common/event_access.py",
+      "to_func": "get_event_organizer_telegram_id"
+    },
+    {
+      "from_file": "bot/commands/constraints.py",
+      "from_func": "_save_constraint_from_inputs",
       "to_file": "db/connection.py",
       "to_func": "get_session"
     },
@@ -487,34 +325,28 @@
       "to_func": "handle"
     },
     {
-      "from_file": "tests/test_integration.py",
-      "from_func": "test_feedback_callback",
-      "to_file": "bot/handlers/feedback.py",
-      "to_func": "handle_feedback_callback"
-    },
-    {
-      "from_file": "bot/handlers/feedback.py",
-      "from_func": "collect_feedback",
-      "to_file": "db/users.py",
-      "to_func": "get_or_create_user_id"
-    },
-    {
-      "from_file": "main.py",
-      "from_func": "<module>",
-      "to_file": "main.py",
-      "to_func": "main"
-    },
-    {
       "from_file": "bot/commands/event_details.py",
       "from_func": "show_details",
       "to_file": "bot/commands/event_details.py",
-      "to_func": "_format_event_details"
+      "to_func": "_get_event_constraints"
     },
     {
-      "from_file": "db/users.py",
-      "from_func": "get_or_create_user_id",
-      "to_file": "db/users.py",
-      "to_func": "_normalize_username"
+      "from_file": "bot/handlers/event_flow.py",
+      "from_func": "handle_join",
+      "to_file": "bot/common/attendance.py",
+      "to_func": "mark_joined"
+    },
+    {
+      "from_file": "bot/handlers/event_flow.py",
+      "from_func": "handle_cancel",
+      "to_file": "bot/common/attendance.py",
+      "to_func": "derive_state_from_attendance"
+    },
+    {
+      "from_file": "db/errors.py",
+      "from_func": "database_error_handler",
+      "to_file": "db/errors.py",
+      "to_func": "wrapper"
     },
     {
       "from_file": "bot/commands/organize_event.py",
@@ -523,82 +355,52 @@
       "to_func": "finalize_event"
     },
     {
-      "from_file": "bot/commands/suggest_time.py",
-      "from_func": "handle_callback",
-      "to_file": "bot/commands/suggest_time.py",
-      "to_func": "_send_suggestion"
+      "from_file": "bot/common/attendance.py",
+      "from_func": "remove_attendee",
+      "to_file": "bot/common/attendance.py",
+      "to_func": "_attendance_to_status_map"
     },
     {
-      "from_file": "bot/commands/constraints.py",
-      "from_func": "handle",
-      "to_file": "bot/commands/constraints.py",
-      "to_func": "remove_constraint"
+      "from_file": "bot/common/event_access.py",
+      "from_func": "is_attendee",
+      "to_file": "bot/common/event_access.py",
+      "to_func": "attendance_telegram_ids"
+    },
+    {
+      "from_file": "bot/handlers/mentions.py",
+      "from_func": "handle_mention",
+      "to_file": "bot/handlers/mentions.py",
+      "to_func": "_execute_inferred_action"
+    },
+    {
+      "from_file": "bot/commands/organize_event.py",
+      "from_func": "handle_callback",
+      "to_file": "bot/commands/organize_event.py",
+      "to_func": "build_location_type_markup"
+    },
+    {
+      "from_file": "bot/handlers/event_flow.py",
+      "from_func": "handle_confirm",
+      "to_file": "bot/common/attendance.py",
+      "to_func": "mark_confirmed"
+    },
+    {
+      "from_file": "bot/commands/event_details.py",
+      "from_func": "handle_callback",
+      "to_file": "bot/commands/event_details.py",
+      "to_func": "show_constraints"
+    },
+    {
+      "from_file": "tests/test_setup.py",
+      "from_func": "<module>",
+      "to_file": "tests/test_setup.py",
+      "to_func": "test_all"
     },
     {
       "from_file": "main.py",
       "from_func": "main",
-      "to_file": "config/settings.py",
-      "to_func": "Settings"
-    },
-    {
-      "from_file": "bot/commands/organize_event.py",
-      "from_func": "_start_event_flow",
-      "to_file": "db/connection.py",
-      "to_func": "get_session"
-    },
-    {
-      "from_file": "bot/commands/organize_event.py",
-      "from_func": "handle_message",
-      "to_file": "bot/commands/organize_event.py",
-      "to_func": "parse_invitee_input"
-    },
-    {
-      "from_file": "bot/commands/confirm.py",
-      "from_func": "handle_callback",
-      "to_file": "bot/commands/confirm.py",
-      "to_func": "handle"
-    },
-    {
-      "from_file": "bot/commands/organize_event.py",
-      "from_func": "handle_callback",
-      "to_file": "bot/commands/organize_event.py",
-      "to_func": "handle_calendar_callback"
-    },
-    {
-      "from_file": "bot/commands/organize_event.py",
-      "from_func": "handle_callback",
-      "to_file": "bot/commands/organize_event.py",
-      "to_func": "build_calendar_markup"
-    },
-    {
-      "from_file": "bot/commands/constraints.py",
-      "from_func": "add_availability_slots",
-      "to_file": "db/connection.py",
-      "to_func": "get_session"
-    },
-    {
-      "from_file": "bot/commands/organize_event.py",
-      "from_func": "handle_flexible",
-      "to_file": "bot/commands/organize_event.py",
-      "to_func": "_start_event_flow"
-    },
-    {
-      "from_file": "tests/test_setup.py",
-      "from_func": "test_all",
-      "to_file": "tests/test_setup.py",
-      "to_func": "check_db"
-    },
-    {
-      "from_file": "bot/commands/cancel.py",
-      "from_func": "handle",
-      "to_file": "db/users.py",
-      "to_func": "get_or_create_user_id"
-    },
-    {
-      "from_file": "bot/commands/constraints.py",
-      "from_func": "add_availability_slots",
-      "to_file": "bot/commands/constraints.py",
-      "to_func": "_parse_slot"
+      "to_file": "main.py",
+      "to_func": "check_db_availability"
     },
     {
       "from_file": "tests/test_commands.py",
@@ -607,88 +409,76 @@
       "to_func": "MockContext"
     },
     {
+      "from_file": "bot/commands/constraints.py",
+      "from_func": "add_availability_slots",
+      "to_file": "db/connection.py",
+      "to_func": "get_session"
+    },
+    {
+      "from_file": "bot/commands/suggest_time.py",
+      "from_func": "handle_callback",
+      "to_file": "bot/commands/suggest_time.py",
+      "to_func": "_send_suggestion"
+    },
+    {
+      "from_file": "bot/commands/organize_event.py",
+      "from_func": "handle_calendar_callback",
+      "to_file": "bot/commands/organize_event.py",
+      "to_func": "build_time_window_markup"
+    },
+    {
       "from_file": "bot/handlers/event_flow.py",
       "from_func": "handle_event_flow",
       "to_file": "bot/handlers/event_flow.py",
       "to_func": "handle_lock"
     },
     {
-      "from_file": "bot/handlers/feedback.py",
-      "from_func": "collect_feedback",
-      "to_file": "bot/handlers/feedback.py",
-      "to_func": "_get_existing_feedback"
-    },
-    {
-      "from_file": "db/users.py",
-      "from_func": "get_or_create_user_id",
-      "to_file": "db/models.py",
-      "to_func": "User"
+      "from_file": "bot/commands/moderation.py",
+      "from_func": "handle_attendance_history",
+      "to_file": "db/connection.py",
+      "to_func": "get_session"
     },
     {
       "from_file": "bot/commands/organize_event.py",
-      "from_func": "handle",
+      "from_func": "handle_callback",
       "to_file": "bot/commands/organize_event.py",
-      "to_func": "_start_event_flow"
-    },
-    {
-      "from_file": "bot/handlers/membership.py",
-      "from_func": "track_group_members",
-      "to_file": "db/connection.py",
-      "to_func": "get_session"
-    },
-    {
-      "from_file": "bot/commands/event_details.py",
-      "from_func": "show_constraints",
-      "to_file": "db/connection.py",
-      "to_func": "get_session"
-    },
-    {
-      "from_file": "bot/commands/suggest_time.py",
-      "from_func": "_send_suggestion",
-      "to_file": "db/connection.py",
-      "to_func": "get_session"
+      "to_func": "build_time_options_markup"
     },
     {
       "from_file": "bot/commands/organize_event.py",
-      "from_func": "finalize_event",
+      "from_func": "build_event_type_markup",
+      "to_file": "bot/commands/organize_event.py",
+      "to_func": "build_compact_markup"
+    },
+    {
+      "from_file": "bot/handlers/mentions.py",
+      "from_func": "_apply_participation_action",
+      "to_file": "bot/common/attendance.py",
+      "to_func": "has_attendee"
+    },
+    {
+      "from_file": "bot/common/user_preferences.py",
+      "from_func": "create_or_update_user_preferences",
       "to_file": "db/models.py",
-      "to_func": "Event"
+      "to_func": "UserPreference"
     },
     {
-      "from_file": "main.py",
-      "from_func": "main",
-      "to_file": "main.py",
-      "to_func": "check_llm_availability"
-    },
-    {
-      "from_file": "bot/handlers/event_flow.py",
-      "from_func": "handle_cancel",
+      "from_file": "bot/handlers/mentions.py",
+      "from_func": "_apply_participation_action",
       "to_file": "db/models.py",
       "to_func": "Log"
     },
     {
-      "from_file": "bot/handlers/feedback.py",
-      "from_func": "process_feedback",
-      "to_file": "db/connection.py",
-      "to_func": "get_session"
+      "from_file": "bot/commands/join.py",
+      "from_func": "handle",
+      "to_file": "bot/common/attendance.py",
+      "to_func": "mark_joined"
     },
     {
-      "from_file": "bot/commands/cancel.py",
-      "from_func": "handle_callback",
-      "to_file": "bot/commands/cancel.py",
-      "to_func": "handle"
-    },
-    {
-      "from_file": "bot/handlers/feedback.py",
-      "from_func": "process_feedback",
-      "to_file": "db/models.py",
-      "to_func": "Feedback"
-    },
-    {
-      "from_file": "tests/test_setup.py",
-      "from_func": "test_all",
-      "to_file": "db/connection.py",
-      "to_func": "create_engine"
+      "from_file": "bot/commands/early_feedback.py",
+      "from_func": "handle",
+      "to_file": "db/users.py",
+      "to_func": "get_user_id_by_username"
     },
     {
       "from_file": "bot/handlers/membership.py",
@@ -697,10 +487,412 @@
       "to_func": "Group"
     },
     {
+      "from_file": "bot/handlers/mentions.py",
+      "from_func": "_apply_participation_action",
+      "to_file": "bot/common/attendance.py",
+      "to_func": "mark_confirmed"
+    },
+    {
+      "from_file": "tests/test_integration.py",
+      "from_func": "test_nudge_generation",
+      "to_file": "bot/utils/nudges.py",
+      "to_func": "generate_nudge_message"
+    },
+    {
+      "from_file": "bot/handlers/mentions.py",
+      "from_func": "_save_constraint_from_inferred",
+      "to_file": "db/models.py",
+      "to_func": "Constraint"
+    },
+    {
+      "from_file": "bot/common/attendance.py",
+      "from_func": "mark_joined",
+      "to_file": "bot/common/attendance.py",
+      "to_func": "_attendance_to_status_map"
+    },
+    {
+      "from_file": "bot/handlers/event_flow.py",
+      "from_func": "handle_confirm",
+      "to_file": "db/models.py",
+      "to_func": "Log"
+    },
+    {
+      "from_file": "bot/handlers/mentions.py",
+      "from_func": "_infer_direct_action",
+      "to_file": "bot/handlers/mentions.py",
+      "to_func": "_extract_event_id"
+    },
+    {
+      "from_file": "bot/commands/cancel.py",
+      "from_func": "handle",
+      "to_file": "db/models.py",
+      "to_func": "Log"
+    },
+    {
+      "from_file": "bot/commands/event_note.py",
+      "from_func": "handle",
+      "to_file": "ai/llm.py",
+      "to_func": "LLMClient"
+    },
+    {
+      "from_file": "bot/commands/constraints.py",
+      "from_func": "handle",
+      "to_file": "bot/commands/constraints.py",
+      "to_func": "remove_constraint"
+    },
+    {
+      "from_file": "bot/commands/preferences.py",
+      "from_func": "show_reputation",
+      "to_file": "db/connection.py",
+      "to_func": "get_session"
+    },
+    {
+      "from_file": "main.py",
+      "from_func": "<module>",
+      "to_file": "main.py",
+      "to_func": "main"
+    },
+    {
+      "from_file": "bot/commands/constraints.py",
+      "from_func": "_save_constraint_from_inputs",
+      "to_file": "db/users.py",
+      "to_func": "get_user_id_by_username"
+    },
+    {
+      "from_file": "test_setup.py",
+      "from_func": "test_all",
+      "to_file": "test_setup.py",
+      "to_func": "check_db"
+    },
+    {
+      "from_file": "ai/llm.py",
+      "from_func": "infer_feedback_from_text",
+      "to_file": "ai/llm.py",
+      "to_func": "_sanitize_toxic_text"
+    },
+    {
+      "from_file": "bot/commands/request_confirmations.py",
+      "from_func": "send_confirmation_request_message",
+      "to_file": "bot/common/event_access.py",
+      "to_func": "get_event_organizer_telegram_id"
+    },
+    {
+      "from_file": "bot/common/user_preferences.py",
+      "from_func": "get_group_aggregate_preferences",
+      "to_file": "bot/common/user_preferences.py",
+      "to_func": "format_aggregate_preference"
+    },
+    {
+      "from_file": "bot/commands/suggest_time.py",
+      "from_func": "_send_suggestion",
+      "to_file": "bot/commands/suggest_time.py",
+      "to_func": "_parse_suggested_time"
+    },
+    {
+      "from_file": "db/errors.py",
+      "from_func": "database_error_handler",
+      "to_file": "db/errors.py",
+      "to_func": "DatabaseOperationError"
+    },
+    {
+      "from_file": "bot/commands/organize_event.py",
+      "from_func": "handle_message",
+      "to_file": "bot/commands/organize_event.py",
+      "to_func": "build_event_type_markup"
+    },
+    {
+      "from_file": "bot/commands/organize_event.py",
+      "from_func": "start_event_flow_from_prefill",
+      "to_file": "bot/commands/organize_event.py",
+      "to_func": "_normalize_patch_invitees"
+    },
+    {
+      "from_file": "bot/commands/status.py",
+      "from_func": "handle",
+      "to_file": "bot/commands/status.py",
+      "to_func": "_get_log_count"
+    },
+    {
+      "from_file": "tests/test_integration.py",
+      "from_func": "test_nudge_generation",
+      "to_file": "bot/utils/nudges.py",
+      "to_func": "generate_threshold_warning"
+    },
+    {
+      "from_file": "bot/commands/organize_event.py",
+      "from_func": "parse_invitee_input",
+      "to_file": "bot/commands/organize_event.py",
+      "to_func": "parse_invitee_handles"
+    },
+    {
       "from_file": "main.py",
       "from_func": "main",
       "to_file": "main.py",
       "to_func": "on_error"
+    },
+    {
+      "from_file": "bot/common/user_preferences.py",
+      "from_func": "get_group_aggregate_preferences",
+      "to_file": "bot/common/user_preferences.py",
+      "to_func": "get_telegram_id"
+    },
+    {
+      "from_file": "bot/common/event_engagement.py",
+      "from_func": "post_event_summary",
+      "to_file": "bot/common/event_engagement.py",
+      "to_func": "get_event_summary"
+    },
+    {
+      "from_file": "bot/handlers/event_flow.py",
+      "from_func": "handle_cancel",
+      "to_file": "db/users.py",
+      "to_func": "get_or_create_user_id"
+    },
+    {
+      "from_file": "bot/common/event_presenters.py",
+      "from_func": "format_status_message",
+      "to_file": "bot/common/event_presenters.py",
+      "to_func": "summarize_description"
+    },
+    {
+      "from_file": "bot/handlers/event_flow.py",
+      "from_func": "handle_cancel",
+      "to_file": "db/connection.py",
+      "to_func": "get_session"
+    },
+    {
+      "from_file": "bot/common/reputation_trends.py",
+      "from_func": "get_user_reliability_trend",
+      "to_file": "bot/common/reputation_trends.py",
+      "to_func": "calculate_reliability_score"
+    },
+    {
+      "from_file": "db/errors.py",
+      "from_func": "database_error_handler",
+      "to_file": "db/errors.py",
+      "to_func": "decorator"
+    },
+    {
+      "from_file": "bot/commands/confirm.py",
+      "from_func": "handle",
+      "to_file": "db/connection.py",
+      "to_func": "get_session"
+    },
+    {
+      "from_file": "bot/handlers/event_flow.py",
+      "from_func": "handle_event_flow",
+      "to_file": "bot/handlers/event_flow.py",
+      "to_func": "handle_cancel"
+    },
+    {
+      "from_file": "bot/handlers/feedback.py",
+      "from_func": "collect_feedback",
+      "to_file": "bot/handlers/feedback.py",
+      "to_func": "_store_feedback_and_update_reputation"
+    },
+    {
+      "from_file": "bot/commands/organize_event.py",
+      "from_func": "build_date_preset_markup",
+      "to_file": "bot/commands/organize_event.py",
+      "to_func": "build_compact_markup"
+    },
+    {
+      "from_file": "db/connection.py",
+      "from_func": "retry_operation",
+      "to_file": "db/connection.py",
+      "to_func": "get_session"
+    },
+    {
+      "from_file": "bot/commands/organize_event.py",
+      "from_func": "handle_callback",
+      "to_file": "bot/commands/organize_event.py",
+      "to_func": "handle_calendar_callback"
+    },
+    {
+      "from_file": "bot/commands/event_note.py",
+      "from_func": "handle",
+      "to_file": "bot/common/event_access.py",
+      "to_func": "get_event_organizer_telegram_id"
+    },
+    {
+      "from_file": "bot/handlers/event_flow.py",
+      "from_func": "handle_join",
+      "to_file": "bot/common/scheduling.py",
+      "to_func": "find_user_event_conflict"
+    },
+    {
+      "from_file": "bot/common/event_engagement.py",
+      "from_func": "get_event_summary",
+      "to_file": "bot/common/event_engagement.py",
+      "to_func": "get_user_id"
+    },
+    {
+      "from_file": "bot/handlers/mentions.py",
+      "from_func": "_apply_participation_action",
+      "to_file": "bot/common/attendance.py",
+      "to_func": "remove_attendee"
+    },
+    {
+      "from_file": "bot/handlers/event_flow.py",
+      "from_func": "handle_back",
+      "to_file": "bot/common/attendance.py",
+      "to_func": "derive_state_from_attendance"
+    },
+    {
+      "from_file": "bot/commands/moderation.py",
+      "from_func": "handle_warn",
+      "to_file": "db/connection.py",
+      "to_func": "get_session"
+    },
+    {
+      "from_file": "bot/commands/confirm.py",
+      "from_func": "handle",
+      "to_file": "db/users.py",
+      "to_func": "get_or_create_user_id"
+    },
+    {
+      "from_file": "db/errors.py",
+      "from_func": "decorator",
+      "to_file": "db/errors.py",
+      "to_func": "DatabaseConnectionError"
+    },
+    {
+      "from_file": "bot/common/early_feedback.py",
+      "from_func": "add_early_feedback_signal",
+      "to_file": "db/models.py",
+      "to_func": "EarlyFeedback"
+    },
+    {
+      "from_file": "db/connection.py",
+      "from_func": "get_session",
+      "to_file": "db/connection.py",
+      "to_func": "create_session"
+    },
+    {
+      "from_file": "bot/commands/constraints.py",
+      "from_func": "add_availability_slots",
+      "to_file": "bot/common/event_access.py",
+      "to_func": "is_attendee"
+    },
+    {
+      "from_file": "bot/commands/cancel.py",
+      "from_func": "handle",
+      "to_file": "bot/common/attendance.py",
+      "to_func": "remove_attendee"
+    },
+    {
+      "from_file": "bot/commands/constraints.py",
+      "from_func": "add_availability_slots",
+      "to_file": "bot/common/event_access.py",
+      "to_func": "get_event_organizer_telegram_id"
+    },
+    {
+      "from_file": "bot/handlers/event_flow.py",
+      "from_func": "handle_join",
+      "to_file": "db/users.py",
+      "to_func": "get_or_create_user_id"
+    },
+    {
+      "from_file": "bot/handlers/mentions.py",
+      "from_func": "_apply_lock_action",
+      "to_file": "db/connection.py",
+      "to_func": "get_session"
+    },
+    {
+      "from_file": "bot/commands/modify_event.py",
+      "from_func": "handle",
+      "to_file": "ai/llm.py",
+      "to_func": "LLMClient"
+    },
+    {
+      "from_file": "bot/commands/organize_event.py",
+      "from_func": "handle",
+      "to_file": "bot/commands/organize_event.py",
+      "to_func": "_start_event_flow"
+    },
+    {
+      "from_file": "bot/common/user_preferences.py",
+      "from_func": "get_preference_value",
+      "to_file": "bot/common/user_preferences.py",
+      "to_func": "get_privacy_defaults"
+    },
+    {
+      "from_file": "bot/commands/organize_event.py",
+      "from_func": "handle_message",
+      "to_file": "bot/commands/organize_event.py",
+      "to_func": "build_event_summary_text"
+    },
+    {
+      "from_file": "bot/commands/organize_event.py",
+      "from_func": "_start_event_flow",
+      "to_file": "db/connection.py",
+      "to_func": "get_session"
+    },
+    {
+      "from_file": "bot/commands/constraints.py",
+      "from_func": "add_availability_slots",
+      "to_file": "bot/commands/constraints.py",
+      "to_func": "_parse_slot"
+    },
+    {
+      "from_file": "bot/commands/organize_event.py",
+      "from_func": "build_budget_markup",
+      "to_file": "bot/commands/organize_event.py",
+      "to_func": "build_compact_markup"
+    },
+    {
+      "from_file": "bot/commands/organize_event.py",
+      "from_func": "_normalize_patch_invitees",
+      "to_file": "bot/commands/organize_event.py",
+      "to_func": "handle"
+    },
+    {
+      "from_file": "bot/commands/organize_event.py",
+      "from_func": "handle_callback",
+      "to_file": "bot/commands/organize_event.py",
+      "to_func": "build_event_summary_text"
+    },
+    {
+      "from_file": "bot/commands/status.py",
+      "from_func": "handle",
+      "to_file": "db/connection.py",
+      "to_func": "get_session"
+    },
+    {
+      "from_file": "bot/handlers/feedback.py",
+      "from_func": "_infer_feedback",
+      "to_file": "ai/llm.py",
+      "to_func": "LLMClient"
+    },
+    {
+      "from_file": "bot/commands/organize_event.py",
+      "from_func": "build_location_type_markup",
+      "to_file": "bot/commands/organize_event.py",
+      "to_func": "build_compact_markup"
+    },
+    {
+      "from_file": "bot/commands/organize_event.py",
+      "from_func": "handle_callback",
+      "to_file": "bot/commands/organize_event.py",
+      "to_func": "build_date_options_markup"
+    },
+    {
+      "from_file": "bot/handlers/feedback.py",
+      "from_func": "collect_feedback",
+      "to_file": "bot/handlers/feedback.py",
+      "to_func": "_get_existing_feedback"
+    },
+    {
+      "from_file": "bot/handlers/mentions.py",
+      "from_func": "_apply_lock_action",
+      "to_file": "bot/common/attendance.py",
+      "to_func": "finalize_commitments"
+    },
+    {
+      "from_file": "bot/commands/organize_event.py",
+      "from_func": "handle_callback",
+      "to_file": "bot/commands/organize_event.py",
+      "to_func": "build_duration_markup"
     },
     {
       "from_file": "test_setup.py",
@@ -709,16 +901,154 @@
       "to_func": "test_all"
     },
     {
-      "from_file": "bot/commands/events.py",
+      "from_file": "bot/commands/event_details.py",
+      "from_func": "show_details",
+      "to_file": "bot/commands/event_details.py",
+      "to_func": "_get_event_logs"
+    },
+    {
+      "from_file": "bot/commands/event_details.py",
+      "from_func": "handle",
+      "to_file": "bot/commands/event_details.py",
+      "to_func": "build_event_details_action_markup"
+    },
+    {
+      "from_file": "bot/commands/request_confirmations.py",
+      "from_func": "send_confirmation_request_message",
+      "to_file": "bot/common/attendance.py",
+      "to_func": "parse_attendance"
+    },
+    {
+      "from_file": "bot/common/user_preferences.py",
+      "from_func": "get_group_aggregate_preferences",
+      "to_file": "bot/common/user_preferences.py",
+      "to_func": "get_aggregate_preference_counts"
+    },
+    {
+      "from_file": "ai/core.py",
+      "from_func": "__init__",
+      "to_file": "ai/rules.py",
+      "to_func": "RuleBasedEngine"
+    },
+    {
+      "from_file": "tests/test_setup.py",
+      "from_func": "test_all",
+      "to_file": "config/logging.py",
+      "to_func": "setup_logging"
+    },
+    {
+      "from_file": "bot/commands/status.py",
+      "from_func": "handle",
+      "to_file": "bot/commands/status.py",
+      "to_func": "_get_constraint_count"
+    },
+    {
+      "from_file": "bot/common/user_preferences.py",
+      "from_func": "get_group_aggregate_preferences",
+      "to_file": "db/users.py",
+      "to_func": "get_user_ids_for_telegram_ids"
+    },
+    {
+      "from_file": "bot/commands/constraints.py",
+      "from_func": "_save_constraint_from_inputs",
+      "to_file": "bot/common/event_access.py",
+      "to_func": "get_event_organizer_telegram_id"
+    },
+    {
+      "from_file": "db/errors.py",
+      "from_func": "wrapper",
+      "to_file": "db/errors.py",
+      "to_func": "DatabaseOperationError"
+    },
+    {
+      "from_file": "ai/llm.py",
+      "from_func": "infer_early_feedback_from_text",
+      "to_file": "ai/llm.py",
+      "to_func": "_simple_sentiment_score"
+    },
+    {
+      "from_file": "bot/commands/my_groups.py",
       "from_func": "handle",
       "to_file": "db/connection.py",
       "to_func": "get_session"
     },
     {
-      "from_file": "bot/handlers/feedback.py",
-      "from_func": "process_feedback",
-      "to_file": "db/users.py",
-      "to_func": "get_or_create_user_id"
+      "from_file": "bot/handlers/event_flow.py",
+      "from_func": "handle_event_flow",
+      "to_file": "bot/handlers/event_flow.py",
+      "to_func": "handle_join"
+    },
+    {
+      "from_file": "bot/commands/organize_event.py",
+      "from_func": "handle_callback",
+      "to_file": "bot/commands/organize_event.py",
+      "to_func": "resolve_date_preset"
+    },
+    {
+      "from_file": "bot/common/attendance.py",
+      "from_func": "mark_confirmed",
+      "to_file": "bot/common/attendance.py",
+      "to_func": "_status_map_to_attendance"
+    },
+    {
+      "from_file": "db/errors.py",
+      "from_func": "wrapper",
+      "to_file": "db/errors.py",
+      "to_func": "DatabaseConnectionError"
+    },
+    {
+      "from_file": "bot/handlers/event_flow.py",
+      "from_func": "handle_back",
+      "to_file": "db/connection.py",
+      "to_func": "get_session"
+    },
+    {
+      "from_file": "bot/commands/event_details.py",
+      "from_func": "show_details",
+      "to_file": "db/connection.py",
+      "to_func": "get_session"
+    },
+    {
+      "from_file": "tests/test_integration.py",
+      "from_func": "test_feedback_callback",
+      "to_file": "bot/handlers/feedback.py",
+      "to_func": "handle_feedback_callback"
+    },
+    {
+      "from_file": "bot/commands/preferences.py",
+      "from_func": "handle",
+      "to_file": "db/connection.py",
+      "to_func": "get_session"
+    },
+    {
+      "from_file": "bot/commands/suggest_time.py",
+      "from_func": "_send_suggestion",
+      "to_file": "ai/core.py",
+      "to_func": "AICoordinationEngine"
+    },
+    {
+      "from_file": "bot/commands/event_details.py",
+      "from_func": "handle",
+      "to_file": "bot/common/event_presenters.py",
+      "to_func": "format_event_details_message"
+    },
+    {
+      "from_file": "bot/commands/constraints.py",
+      "from_func": "add_constraint",
+      "to_file": "bot/commands/constraints.py",
+      "to_func": "_infer_and_confirm_constraint"
+    },
+    {
+      "from_file": "bot/commands/organize_event.py",
+      "from_func": "handle_message",
+      "to_file": "bot/commands/organize_event.py",
+      "to_func": "build_final_confirmation_markup"
+    },
+    {
+      "from_file": "bot/commands/organize_event.py",
+      "from_func": "handle_callback",
+      "to_file": "bot/commands/organize_event.py",
+      "to_func": "build_date_preset_markup"
     },
     {
       "from_file": "tests/test_integration.py",
@@ -727,14 +1057,1034 @@
       "to_func": "generate_reliability_warning"
     },
     {
-      "from_file": "bot/commands/status.py",
+      "from_file": "bot/commands/request_confirmations.py",
+      "from_func": "send_confirmation_request_message",
+      "to_file": "bot/commands/request_confirmations.py",
+      "to_func": "_format_user_label"
+    },
+    {
+      "from_file": "bot/common/attendance.py",
+      "from_func": "revert_confirmed_to_joined",
+      "to_file": "bot/common/attendance.py",
+      "to_func": "_status_map_to_attendance"
+    },
+    {
+      "from_file": "bot/commands/suggest_time.py",
+      "from_func": "create_session_factory",
+      "to_file": "db/connection.py",
+      "to_func": "create_session"
+    },
+    {
+      "from_file": "bot/commands/events.py",
       "from_func": "handle",
-      "to_file": "bot/commands/status.py",
-      "to_func": "_get_log_count"
+      "to_file": "db/connection.py",
+      "to_func": "get_session"
+    },
+    {
+      "from_file": "db/connection.py",
+      "from_func": "get_session",
+      "to_file": "db/connection.py",
+      "to_func": "create_engine"
+    },
+    {
+      "from_file": "bot/commands/moderation.py",
+      "from_func": "handle_reliability",
+      "to_file": "db/connection.py",
+      "to_func": "get_session"
+    },
+    {
+      "from_file": "bot/handlers/event_flow.py",
+      "from_func": "handle_event_flow",
+      "to_file": "bot/handlers/event_flow.py",
+      "to_func": "handle_back"
+    },
+    {
+      "from_file": "bot/commands/organize_event.py",
+      "from_func": "finalize_event",
+      "to_file": "bot/common/deeplinks.py",
+      "to_func": "build_start_link"
+    },
+    {
+      "from_file": "bot/commands/preferences.py",
+      "from_func": "handle",
+      "to_file": "db/models.py",
+      "to_func": "User"
+    },
+    {
+      "from_file": "bot/commands/preferences.py",
+      "from_func": "handle_callback",
+      "to_file": "bot/common/user_preferences.py",
+      "to_func": "create_or_update_user_preferences"
+    },
+    {
+      "from_file": "bot/commands/preferences.py",
+      "from_func": "handle",
+      "to_file": "bot/common/user_preferences.py",
+      "to_func": "get_privacy_defaults"
+    },
+    {
+      "from_file": "bot/commands/organize_event.py",
+      "from_func": "handle_callback",
+      "to_file": "bot/common/keyboards.py",
+      "to_func": "build_threshold_markup"
+    },
+    {
+      "from_file": "bot/handlers/feedback.py",
+      "from_func": "_store_feedback_and_update_reputation",
+      "to_file": "bot/handlers/feedback.py",
+      "to_func": "_apply_reputation_updates"
+    },
+    {
+      "from_file": "bot/handlers/mentions.py",
+      "from_func": "_save_constraint_from_inferred",
+      "to_file": "db/users.py",
+      "to_func": "get_or_create_user_id"
+    },
+    {
+      "from_file": "bot/commands/organize_event.py",
+      "from_func": "handle_message",
+      "to_file": "bot/commands/organize_event.py",
+      "to_func": "build_compact_markup"
+    },
+    {
+      "from_file": "bot/handlers/mentions.py",
+      "from_func": "_save_constraint_from_inferred",
+      "to_file": "db/connection.py",
+      "to_func": "get_session"
+    },
+    {
+      "from_file": "bot/commands/lock.py",
+      "from_func": "handle",
+      "to_file": "bot/common/attendance.py",
+      "to_func": "finalize_commitments"
+    },
+    {
+      "from_file": "bot/commands/organize_event.py",
+      "from_func": "handle_callback",
+      "to_file": "bot/commands/organize_event.py",
+      "to_func": "build_final_confirmation_markup"
+    },
+    {
+      "from_file": "bot/commands/preferences.py",
+      "from_func": "handle",
+      "to_file": "bot/commands/preferences.py",
+      "to_func": "format_preference"
+    },
+    {
+      "from_file": "bot/commands/organize_event.py",
+      "from_func": "build_duration_markup",
+      "to_file": "bot/commands/organize_event.py",
+      "to_func": "build_compact_markup"
+    },
+    {
+      "from_file": "bot/commands/event_note.py",
+      "from_func": "handle",
+      "to_file": "bot/common/early_feedback.py",
+      "to_func": "add_early_feedback_signal"
+    },
+    {
+      "from_file": "bot/commands/event_details.py",
+      "from_func": "show_logs",
+      "to_file": "db/connection.py",
+      "to_func": "get_session"
+    },
+    {
+      "from_file": "tests/test_integration.py",
+      "from_func": "test_nudge_generation",
+      "to_file": "bot/utils/nudges.py",
+      "to_func": "generate_fallback_warning"
+    },
+    {
+      "from_file": "db/errors.py",
+      "from_func": "decorator",
+      "to_file": "db/errors.py",
+      "to_func": "wrapper"
+    },
+    {
+      "from_file": "bot/common/user_preferences.py",
+      "from_func": "refresh_expired_preferences",
+      "to_file": "bot/common/user_preferences.py",
+      "to_func": "apply_preference_decay"
+    },
+    {
+      "from_file": "bot/commands/organize_event.py",
+      "from_func": "build_event_summary_text",
+      "to_file": "bot/commands/organize_event.py",
+      "to_func": "compute_commit_by_time"
+    },
+    {
+      "from_file": "bot/commands/lock.py",
+      "from_func": "handle",
+      "to_file": "db/connection.py",
+      "to_func": "get_session"
+    },
+    {
+      "from_file": "bot/commands/organize_event.py",
+      "from_func": "build_transport_markup",
+      "to_file": "bot/commands/organize_event.py",
+      "to_func": "build_compact_markup"
+    },
+    {
+      "from_file": "bot/commands/organize_event.py",
+      "from_func": "handle_callback",
+      "to_file": "bot/commands/organize_event.py",
+      "to_func": "build_compact_markup"
+    },
+    {
+      "from_file": "bot/commands/preferences.py",
+      "from_func": "show_reputation",
+      "to_file": "bot/common/reputation_trends.py",
+      "to_func": "get_user_reputation_summary"
+    },
+    {
+      "from_file": "bot/commands/modify_event.py",
+      "from_func": "handle",
+      "to_file": "bot/common/confirmation.py",
+      "to_func": "invalidate_confirmations_and_notify"
+    },
+    {
+      "from_file": "bot/commands/confirm.py",
+      "from_func": "handle",
+      "to_file": "db/models.py",
+      "to_func": "Log"
+    },
+    {
+      "from_file": "bot/commands/early_feedback.py",
+      "from_func": "handle",
+      "to_file": "bot/common/early_feedback.py",
+      "to_func": "add_early_feedback_signal"
+    },
+    {
+      "from_file": "bot/handlers/mentions.py",
+      "from_func": "handle_mention_callback",
+      "to_file": "bot/handlers/mentions.py",
+      "to_func": "_execute_inferred_action"
+    },
+    {
+      "from_file": "bot/handlers/mentions.py",
+      "from_func": "_save_constraint_from_inferred",
+      "to_file": "db/users.py",
+      "to_func": "get_user_id_by_username"
+    },
+    {
+      "from_file": "bot/handlers/feedback.py",
+      "from_func": "_store_feedback_and_update_reputation",
+      "to_file": "db/models.py",
+      "to_func": "Feedback"
+    },
+    {
+      "from_file": "bot/handlers/mentions.py",
+      "from_func": "_apply_participation_action",
+      "to_file": "bot/common/attendance.py",
+      "to_func": "mark_joined"
+    },
+    {
+      "from_file": "bot/commands/organize_event.py",
+      "from_func": "build_invitee_mode_markup",
+      "to_file": "bot/commands/organize_event.py",
+      "to_func": "build_compact_markup"
+    },
+    {
+      "from_file": "bot/commands/moderation.py",
+      "from_func": "handle_moderation_actions",
+      "to_file": "db/connection.py",
+      "to_func": "get_session"
+    },
+    {
+      "from_file": "bot/common/attendance.py",
+      "from_func": "finalize_commitments",
+      "to_file": "bot/common/attendance.py",
+      "to_func": "_status_map_to_attendance"
+    },
+    {
+      "from_file": "bot/commands/join.py",
+      "from_func": "handle",
+      "to_file": "db/users.py",
+      "to_func": "get_or_create_user_id"
+    },
+    {
+      "from_file": "tests/test_setup.py",
+      "from_func": "test_all",
+      "to_file": "db/connection.py",
+      "to_func": "create_engine"
+    },
+    {
+      "from_file": "bot/commands/join.py",
+      "from_func": "handle",
+      "to_file": "db/connection.py",
+      "to_func": "get_session"
+    },
+    {
+      "from_file": "bot/handlers/membership.py",
+      "from_func": "track_group_members",
+      "to_file": "db/users.py",
+      "to_func": "get_or_create_user_id"
+    },
+    {
+      "from_file": "bot/handlers/membership.py",
+      "from_func": "track_group_members",
+      "to_file": "db/connection.py",
+      "to_func": "get_session"
+    },
+    {
+      "from_file": "bot/handlers/mentions.py",
+      "from_func": "_apply_participation_action",
+      "to_file": "bot/common/attendance.py",
+      "to_func": "derive_state_from_attendance"
+    },
+    {
+      "from_file": "bot/handlers/event_flow.py",
+      "from_func": "handle_event_flow",
+      "to_file": "bot/handlers/event_flow.py",
+      "to_func": "handle_confirm"
+    },
+    {
+      "from_file": "bot/commands/organize_event.py",
+      "from_func": "start_event_flow_from_prefill",
+      "to_file": "bot/commands/organize_event.py",
+      "to_func": "build_event_summary_text"
+    },
+    {
+      "from_file": "bot/handlers/mentions.py",
+      "from_func": "_send_event_details",
+      "to_file": "bot/common/event_presenters.py",
+      "to_func": "format_event_details_message"
+    },
+    {
+      "from_file": "bot/handlers/mentions.py",
+      "from_func": "handle_mention",
+      "to_file": "bot/handlers/mentions.py",
+      "to_func": "_resolve_mentioned_participants"
+    },
+    {
+      "from_file": "bot/handlers/event_flow.py",
+      "from_func": "handle_join",
+      "to_file": "db/connection.py",
+      "to_func": "get_session"
+    },
+    {
+      "from_file": "bot/common/attendance.py",
+      "from_func": "derive_state_from_attendance",
+      "to_file": "bot/common/attendance.py",
+      "to_func": "_attendance_to_status_map"
+    },
+    {
+      "from_file": "bot/commands/event_details.py",
+      "from_func": "handle_callback",
+      "to_file": "bot/commands/event_details.py",
+      "to_func": "show_details"
+    },
+    {
+      "from_file": "bot/commands/suggest_time.py",
+      "from_func": "_send_suggestion",
+      "to_file": "bot/commands/suggest_time.py",
+      "to_func": "SimpleContextProxy"
+    },
+    {
+      "from_file": "bot/commands/cancel.py",
+      "from_func": "handle",
+      "to_file": "bot/common/attendance.py",
+      "to_func": "derive_state_from_attendance"
+    },
+    {
+      "from_file": "bot/commands/preferences.py",
+      "from_func": "set_preference",
+      "to_file": "bot/common/user_preferences.py",
+      "to_func": "create_or_update_user_preferences"
+    },
+    {
+      "from_file": "bot/commands/organize_event.py",
+      "from_func": "start_event_flow_from_prefill",
+      "to_file": "bot/commands/organize_event.py",
+      "to_func": "_start_event_flow"
+    },
+    {
+      "from_file": "bot/commands/early_feedback.py",
+      "from_func": "handle",
+      "to_file": "ai/llm.py",
+      "to_func": "LLMClient"
+    },
+    {
+      "from_file": "bot/common/event_presenters.py",
+      "from_func": "format_event_details_message",
+      "to_file": "bot/common/event_presenters.py",
+      "to_func": "attendance_stats"
+    },
+    {
+      "from_file": "bot/common/attendance.py",
+      "from_func": "mark_confirmed",
+      "to_file": "bot/common/attendance.py",
+      "to_func": "_attendance_to_status_map"
+    },
+    {
+      "from_file": "bot/commands/join.py",
+      "from_func": "handle",
+      "to_file": "bot/common/scheduling.py",
+      "to_func": "find_user_event_conflict"
+    },
+    {
+      "from_file": "bot/handlers/mentions.py",
+      "from_func": "handle_mention",
+      "to_file": "bot/handlers/mentions.py",
+      "to_func": "_infer_direct_action"
+    },
+    {
+      "from_file": "bot/common/scheduling.py",
+      "from_func": "find_user_event_conflict",
+      "to_file": "bot/common/scheduling.py",
+      "to_func": "_user_in_attendance"
+    },
+    {
+      "from_file": "bot/commands/organize_event.py",
+      "from_func": "build_time_options_markup",
+      "to_file": "bot/commands/organize_event.py",
+      "to_func": "build_compact_markup"
+    },
+    {
+      "from_file": "db/errors.py",
+      "from_func": "decorator",
+      "to_file": "db/errors.py",
+      "to_func": "DatabaseOperationError"
+    },
+    {
+      "from_file": "bot/commands/back.py",
+      "from_func": "handle",
+      "to_file": "db/models.py",
+      "to_func": "Log"
+    },
+    {
+      "from_file": "bot/common/attendance.py",
+      "from_func": "remove_attendee",
+      "to_file": "bot/common/attendance.py",
+      "to_func": "_status_map_to_attendance"
+    },
+    {
+      "from_file": "main.py",
+      "from_func": "main",
+      "to_file": "config/settings.py",
+      "to_func": "Settings"
+    },
+    {
+      "from_file": "bot/commands/preferences.py",
+      "from_func": "set_preference",
+      "to_file": "db/connection.py",
+      "to_func": "get_session"
+    },
+    {
+      "from_file": "bot/handlers/event_flow.py",
+      "from_func": "handle_confirm",
+      "to_file": "bot/common/scheduling.py",
+      "to_func": "find_user_event_conflict"
+    },
+    {
+      "from_file": "bot/commands/constraints.py",
+      "from_func": "remove_constraint",
+      "to_file": "db/connection.py",
+      "to_func": "get_session"
+    },
+    {
+      "from_file": "bot/commands/organize_event.py",
+      "from_func": "_apply_final_stage_patch",
+      "to_file": "ai/llm.py",
+      "to_func": "LLMClient"
+    },
+    {
+      "from_file": "bot/commands/constraints.py",
+      "from_func": "_save_constraint_from_inputs",
+      "to_file": "bot/common/early_feedback.py",
+      "to_func": "add_early_feedback_signal"
+    },
+    {
+      "from_file": "bot/commands/organize_event.py",
+      "from_func": "finalize_event",
+      "to_file": "bot/commands/organize_event.py",
+      "to_func": "compute_commit_by_time"
+    },
+    {
+      "from_file": "bot/common/attendance.py",
+      "from_func": "_status_map_to_attendance",
+      "to_file": "bot/common/attendance.py",
+      "to_func": "_serialize_attendee"
+    },
+    {
+      "from_file": "bot/handlers/mentions.py",
+      "from_func": "_apply_participation_action",
+      "to_file": "db/users.py",
+      "to_func": "get_or_create_user_id"
+    },
+    {
+      "from_file": "main.py",
+      "from_func": "check_db_availability",
+      "to_file": "db/connection.py",
+      "to_func": "check_db_connection"
+    },
+    {
+      "from_file": "bot/commands/request_confirmations.py",
+      "from_func": "send_confirmation_request_message",
+      "to_file": "db/connection.py",
+      "to_func": "get_session"
+    },
+    {
+      "from_file": "bot/common/attendance.py",
+      "from_func": "revert_confirmed_to_joined",
+      "to_file": "bot/common/attendance.py",
+      "to_func": "_attendance_to_status_map"
+    },
+    {
+      "from_file": "bot/commands/constraints.py",
+      "from_func": "view_constraints",
+      "to_file": "db/connection.py",
+      "to_func": "get_session"
+    },
+    {
+      "from_file": "bot/handlers/mentions.py",
+      "from_func": "_apply_participation_action",
+      "to_file": "bot/common/attendance.py",
+      "to_func": "has_confirmed"
+    },
+    {
+      "from_file": "bot/common/attendance.py",
+      "from_func": "_attendance_to_status_map",
+      "to_file": "bot/common/attendance.py",
+      "to_func": "_parse_attendance_item"
+    },
+    {
+      "from_file": "bot/common/attendance.py",
+      "from_func": "parse_attendance",
+      "to_file": "bot/common/attendance.py",
+      "to_func": "_attendance_to_status_map"
+    },
+    {
+      "from_file": "db/connection.py",
+      "from_func": "check_db_connection",
+      "to_file": "db/connection.py",
+      "to_func": "create_session"
+    },
+    {
+      "from_file": "bot/commands/cancel.py",
+      "from_func": "handle",
+      "to_file": "db/users.py",
+      "to_func": "get_or_create_user_id"
+    },
+    {
+      "from_file": "bot/commands/preferences.py",
+      "from_func": "handle",
+      "to_file": "bot/common/user_preferences.py",
+      "to_func": "get_user_preferences"
+    },
+    {
+      "from_file": "bot/handlers/feedback.py",
+      "from_func": "_store_feedback_and_update_reputation",
+      "to_file": "bot/common/early_feedback.py",
+      "to_func": "aggregate_early_feedback_for_user"
+    },
+    {
+      "from_file": "bot/commands/event_details.py",
+      "from_func": "handle",
+      "to_file": "bot/commands/event_details.py",
+      "to_func": "_get_event_constraints"
+    },
+    {
+      "from_file": "bot/common/user_preferences.py",
+      "from_func": "refresh_expired_preferences",
+      "to_file": "bot/common/user_preferences.py",
+      "to_func": "get_user_preferences"
+    },
+    {
+      "from_file": "bot/handlers/mentions.py",
+      "from_func": "_apply_participation_action",
+      "to_file": "bot/common/scheduling.py",
+      "to_func": "find_user_event_conflict"
+    },
+    {
+      "from_file": "ai/llm.py",
+      "from_func": "infer_feedback_from_text",
+      "to_file": "ai/llm.py",
+      "to_func": "_simple_sentiment_score"
+    },
+    {
+      "from_file": "bot/commands/request_confirmations.py",
+      "from_func": "handle",
+      "to_file": "bot/commands/request_confirmations.py",
+      "to_func": "send_confirmation_request_message"
+    },
+    {
+      "from_file": "bot/commands/event_details.py",
+      "from_func": "handle",
+      "to_file": "db/connection.py",
+      "to_func": "get_session"
+    },
+    {
+      "from_file": "bot/commands/constraints.py",
+      "from_func": "handle",
+      "to_file": "bot/commands/constraints.py",
+      "to_func": "add_availability_slots"
+    },
+    {
+      "from_file": "bot/handlers/mentions.py",
+      "from_func": "_send_status",
+      "to_file": "db/connection.py",
+      "to_func": "get_session"
+    },
+    {
+      "from_file": "bot/commands/event_details.py",
+      "from_func": "build_event_details_action_markup",
+      "to_file": "bot/common/deeplinks.py",
+      "to_func": "build_start_link"
+    },
+    {
+      "from_file": "bot/common/reputation_trends.py",
+      "from_func": "get_user_reputation_summary",
+      "to_file": "bot/common/reputation_trends.py",
+      "to_func": "get_user_reliability_trend"
+    },
+    {
+      "from_file": "bot/common/event_engagement.py",
+      "from_func": "get_event_summary",
+      "to_file": "db/models.py",
+      "to_func": "User"
+    },
+    {
+      "from_file": "bot/commands/event_note.py",
+      "from_func": "handle",
+      "to_file": "db/users.py",
+      "to_func": "get_or_create_user_id"
+    },
+    {
+      "from_file": "bot/commands/event_note.py",
+      "from_func": "handle",
+      "to_file": "db/connection.py",
+      "to_func": "get_session"
+    },
+    {
+      "from_file": "bot/common/attendance.py",
+      "from_func": "parse_attendance_with_status",
+      "to_file": "bot/common/attendance.py",
+      "to_func": "_attendance_to_status_map"
+    },
+    {
+      "from_file": "bot/commands/confirm.py",
+      "from_func": "handle",
+      "to_file": "bot/common/attendance.py",
+      "to_func": "mark_confirmed"
+    },
+    {
+      "from_file": "bot/common/streaks_badges.py",
+      "from_func": "get_user_streak",
+      "to_file": "bot/common/streaks_badges.py",
+      "to_func": "calculate_streak"
+    },
+    {
+      "from_file": "bot/commands/moderation.py",
+      "from_func": "handle_warn",
+      "to_file": "bot/common/moderation.py",
+      "to_func": "apply_warning"
+    },
+    {
+      "from_file": "bot/commands/organize_event.py",
+      "from_func": "_apply_final_stage_patch",
+      "to_file": "bot/commands/organize_event.py",
+      "to_func": "handle"
+    },
+    {
+      "from_file": "bot/common/scheduling.py",
+      "from_func": "find_user_event_conflict",
+      "to_file": "bot/common/scheduling.py",
+      "to_func": "events_overlap"
+    },
+    {
+      "from_file": "bot/commands/organize_event.py",
+      "from_func": "handle_flexible",
+      "to_file": "bot/commands/organize_event.py",
+      "to_func": "_start_event_flow"
+    },
+    {
+      "from_file": "main.py",
+      "from_func": "main",
+      "to_file": "config/logging.py",
+      "to_func": "setup_logging"
+    },
+    {
+      "from_file": "bot/handlers/mentions.py",
+      "from_func": "_execute_inferred_action",
+      "to_file": "bot/handlers/mentions.py",
+      "to_func": "_send_status"
+    },
+    {
+      "from_file": "bot/commands/organize_event.py",
+      "from_func": "finalize_event",
+      "to_file": "bot/common/scheduling.py",
+      "to_func": "find_user_event_conflict"
+    },
+    {
+      "from_file": "bot/commands/organize_event.py",
+      "from_func": "_apply_final_stage_patch",
+      "to_file": "bot/commands/organize_event.py",
+      "to_func": "_normalize_patch_invitees"
+    },
+    {
+      "from_file": "bot/common/confirmation.py",
+      "from_func": "invalidate_confirmations_and_notify",
+      "to_file": "bot/common/confirmation.py",
+      "to_func": "_to_interested_attendance"
+    },
+    {
+      "from_file": "bot/common/user_preferences.py",
+      "from_func": "create_or_update_user_preferences",
+      "to_file": "bot/common/user_preferences.py",
+      "to_func": "get_user_preferences"
+    },
+    {
+      "from_file": "bot/handlers/feedback.py",
+      "from_func": "_apply_reputation_updates",
+      "to_file": "db/models.py",
+      "to_func": "Reputation"
+    },
+    {
+      "from_file": "bot/commands/constraints.py",
+      "from_func": "add_availability_slots",
+      "to_file": "db/models.py",
+      "to_func": "Constraint"
+    },
+    {
+      "from_file": "bot/handlers/event_flow.py",
+      "from_func": "handle_cancel",
+      "to_file": "db/models.py",
+      "to_func": "Log"
+    },
+    {
+      "from_file": "tests/test_integration.py",
+      "from_func": "test_nudge_generation",
+      "to_file": "bot/utils/nudges.py",
+      "to_func": "generate_lock_warning"
+    },
+    {
+      "from_file": "bot/handlers/mentions.py",
+      "from_func": "_execute_inferred_action",
+      "to_file": "bot/handlers/mentions.py",
+      "to_func": "_apply_participation_action"
+    },
+    {
+      "from_file": "bot/handlers/feedback.py",
+      "from_func": "collect_feedback",
+      "to_file": "db/users.py",
+      "to_func": "get_or_create_user_id"
+    },
+    {
+      "from_file": "bot/commands/organize_event.py",
+      "from_func": "finalize_event",
+      "to_file": "db/connection.py",
+      "to_func": "get_session"
+    },
+    {
+      "from_file": "bot/handlers/feedback.py",
+      "from_func": "collect_feedback",
+      "to_file": "db/connection.py",
+      "to_func": "get_session"
+    },
+    {
+      "from_file": "bot/commands/join.py",
+      "from_func": "handle",
+      "to_file": "db/models.py",
+      "to_func": "Log"
+    },
+    {
+      "from_file": "bot/commands/organize_event.py",
+      "from_func": "parse_invitee_handles",
+      "to_file": "bot/commands/organize_event.py",
+      "to_func": "handle"
+    },
+    {
+      "from_file": "bot/commands/organize_event.py",
+      "from_func": "handle_callback",
+      "to_file": "bot/commands/organize_event.py",
+      "to_func": "build_transport_markup"
+    },
+    {
+      "from_file": "bot/commands/organize_event.py",
+      "from_func": "finalize_event",
+      "to_file": "db/models.py",
+      "to_func": "Event"
+    },
+    {
+      "from_file": "bot/common/event_access.py",
+      "from_func": "attendance_telegram_ids",
+      "to_file": "bot/common/attendance.py",
+      "to_func": "parse_attendance"
+    },
+    {
+      "from_file": "bot/commands/early_feedback.py",
+      "from_func": "handle",
+      "to_file": "db/users.py",
+      "to_func": "get_or_create_user_id"
+    },
+    {
+      "from_file": "bot/commands/early_feedback.py",
+      "from_func": "handle",
+      "to_file": "db/connection.py",
+      "to_func": "get_session"
+    },
+    {
+      "from_file": "bot/handlers/mentions.py",
+      "from_func": "_send_event_details",
+      "to_file": "db/connection.py",
+      "to_func": "get_session"
+    },
+    {
+      "from_file": "bot/commands/preferences.py",
+      "from_func": "handle_callback",
+      "to_file": "db/connection.py",
+      "to_func": "get_session"
+    },
+    {
+      "from_file": "bot/commands/organize_event.py",
+      "from_func": "handle_callback",
+      "to_file": "bot/commands/organize_event.py",
+      "to_func": "build_invitee_mode_markup"
+    },
+    {
+      "from_file": "db/connection.py",
+      "from_func": "check_db_connection",
+      "to_file": "db/connection.py",
+      "to_func": "create_engine"
+    },
+    {
+      "from_file": "bot/common/attendance.py",
+      "from_func": "_parse_attendance_item",
+      "to_file": "bot/common/attendance.py",
+      "to_func": "_normalize_attendee_status"
+    },
+    {
+      "from_file": "bot/commands/event_details.py",
+      "from_func": "show_details",
+      "to_file": "bot/commands/event_details.py",
+      "to_func": "build_event_details_action_markup"
+    },
+    {
+      "from_file": "bot/handlers/event_flow.py",
+      "from_func": "handle_cancel",
+      "to_file": "bot/common/attendance.py",
+      "to_func": "remove_attendee"
+    },
+    {
+      "from_file": "bot/common/user_preferences.py",
+      "from_func": "get_group_aggregate_preferences",
+      "to_file": "bot/common/user_preferences.py",
+      "to_func": "get_user_preferences"
+    },
+    {
+      "from_file": "bot/commands/event_details.py",
+      "from_func": "show_details",
+      "to_file": "bot/common/event_presenters.py",
+      "to_func": "format_event_details_message"
+    },
+    {
+      "from_file": "bot/handlers/mentions.py",
+      "from_func": "handle_mention",
+      "to_file": "bot/handlers/mentions.py",
+      "to_func": "_is_reply_to_bot_message"
+    },
+    {
+      "from_file": "bot/commands/organize_event.py",
+      "from_func": "handle_callback",
+      "to_file": "bot/commands/organize_event.py",
+      "to_func": "build_budget_markup"
+    },
+    {
+      "from_file": "bot/commands/constraints.py",
+      "from_func": "_save_constraint_from_inputs",
+      "to_file": "db/users.py",
+      "to_func": "get_or_create_user_id"
+    },
+    {
+      "from_file": "bot/commands/constraints.py",
+      "from_func": "add_constraint",
+      "to_file": "bot/commands/constraints.py",
+      "to_func": "_save_constraint_from_inputs"
+    },
+    {
+      "from_file": "bot/common/event_presenters.py",
+      "from_func": "attendance_stats",
+      "to_file": "bot/common/attendance.py",
+      "to_func": "parse_attendance_with_status"
+    },
+    {
+      "from_file": "bot/commands/confirm.py",
+      "from_func": "handle_callback",
+      "to_file": "bot/commands/confirm.py",
+      "to_func": "handle"
+    },
+    {
+      "from_file": "bot/handlers/event_flow.py",
+      "from_func": "handle_join",
+      "to_file": "db/models.py",
+      "to_func": "Log"
+    },
+    {
+      "from_file": "bot/commands/organize_event.py",
+      "from_func": "handle_message",
+      "to_file": "bot/commands/organize_event.py",
+      "to_func": "parse_invitee_input"
+    },
+    {
+      "from_file": "bot/commands/constraints.py",
+      "from_func": "handle",
+      "to_file": "bot/commands/constraints.py",
+      "to_func": "add_constraint"
+    },
+    {
+      "from_file": "bot/handlers/feedback.py",
+      "from_func": "handle_feedback_callback",
+      "to_file": "bot/handlers/feedback.py",
+      "to_func": "process_feedback"
+    },
+    {
+      "from_file": "bot/commands/constraints.py",
+      "from_func": "_save_constraint_from_inputs",
+      "to_file": "db/models.py",
+      "to_func": "Constraint"
+    },
+    {
+      "from_file": "bot/common/streaks_badges.py",
+      "from_func": "award_badges",
+      "to_file": "bot/common/streaks_badges.py",
+      "to_func": "get_user_streak"
+    },
+    {
+      "from_file": "bot/common/attendance.py",
+      "from_func": "has_attendee",
+      "to_file": "bot/common/attendance.py",
+      "to_func": "_attendance_to_status_map"
+    },
+    {
+      "from_file": "bot/handlers/feedback.py",
+      "from_func": "collect_feedback",
+      "to_file": "bot/handlers/feedback.py",
+      "to_func": "_infer_feedback"
+    },
+    {
+      "from_file": "bot/commands/suggest_time.py",
+      "from_func": "_send_suggestion",
+      "to_file": "bot/common/confirmation.py",
+      "to_func": "invalidate_confirmations_and_notify"
+    },
+    {
+      "from_file": "ai/core.py",
+      "from_func": "__init__",
+      "to_file": "ai/llm.py",
+      "to_func": "LLMClient"
+    },
+    {
+      "from_file": "bot/commands/constraints.py",
+      "from_func": "_infer_and_confirm_constraint",
+      "to_file": "ai/llm.py",
+      "to_func": "LLMClient"
+    },
+    {
+      "from_file": "db/users.py",
+      "from_func": "get_or_create_user_id",
+      "to_file": "db/users.py",
+      "to_func": "_normalize_username"
+    },
+    {
+      "from_file": "bot/handlers/feedback.py",
+      "from_func": "process_feedback",
+      "to_file": "db/users.py",
+      "to_func": "get_or_create_user_id"
+    },
+    {
+      "from_file": "bot/handlers/feedback.py",
+      "from_func": "process_feedback",
+      "to_file": "db/connection.py",
+      "to_func": "get_session"
+    },
+    {
+      "from_file": "bot/common/user_preferences.py",
+      "from_func": "get_aggregate_preference_counts",
+      "to_file": "bot/common/user_preferences.py",
+      "to_func": "get_privacy_defaults"
+    },
+    {
+      "from_file": "bot/commands/organize_event.py",
+      "from_func": "handle_message",
+      "to_file": "bot/commands/organize_event.py",
+      "to_func": "_apply_final_stage_patch"
+    },
+    {
+      "from_file": "bot/commands/organize_event.py",
+      "from_func": "handle_callback",
+      "to_file": "bot/commands/organize_event.py",
+      "to_func": "build_calendar_markup"
+    },
+    {
+      "from_file": "bot/commands/cancel.py",
+      "from_func": "handle",
+      "to_file": "bot/utils/nudges.py",
+      "to_func": "generate_nudge_message"
+    },
+    {
+      "from_file": "bot/commands/constraints.py",
+      "from_func": "handle",
+      "to_file": "bot/commands/constraints.py",
+      "to_func": "view_constraints"
+    },
+    {
+      "from_file": "bot/commands/confirm.py",
+      "from_func": "handle",
+      "to_file": "bot/common/scheduling.py",
+      "to_func": "find_user_event_conflict"
+    },
+    {
+      "from_file": "tests/test_integration.py",
+      "from_func": "test_feedback_collection",
+      "to_file": "bot/handlers/feedback.py",
+      "to_func": "collect_feedback"
+    },
+    {
+      "from_file": "bot/commands/profile.py",
+      "from_func": "handle",
+      "to_file": "db/connection.py",
+      "to_func": "get_session"
+    },
+    {
+      "from_file": "main.py",
+      "from_func": "check_llm_availability",
+      "to_file": "ai/llm.py",
+      "to_func": "LLMClient"
+    },
+    {
+      "from_file": "bot/handlers/mentions.py",
+      "from_func": "_execute_inferred_action",
+      "to_file": "bot/handlers/mentions.py",
+      "to_func": "_save_constraint_from_inferred"
+    },
+    {
+      "from_file": "db/errors.py",
+      "from_func": "database_error_handler",
+      "to_file": "db/errors.py",
+      "to_func": "DatabaseConnectionError"
+    },
+    {
+      "from_file": "bot/commands/modify_event.py",
+      "from_func": "handle",
+      "to_file": "db/connection.py",
+      "to_func": "get_session"
+    },
+    {
+      "from_file": "bot/commands/cancel.py",
+      "from_func": "handle",
+      "to_file": "db/connection.py",
+      "to_func": "get_session"
+    },
+    {
+      "from_file": "bot/handlers/mentions.py",
+      "from_func": "_resolve_mentioned_participants",
+      "to_file": "db/users.py",
+      "to_func": "get_user_id_by_username"
     }
   ],
   "languages": [
     "python"
   ],
-  "timestamp": 1772740122.3035727
+  "timestamp": 1772863623.506233
 }

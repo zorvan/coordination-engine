@@ -15,9 +15,9 @@ from telegram.ext import (
 from config.settings import Settings
 from config.logging import setup_logging
 from bot.commands import (
-    start, my_groups, profile, reputation, organize_event,
+    start, my_groups, profile, reputation, organize_event, private_organize_event,
     join, confirm, back, cancel, lock, request_confirmations, early_feedback, event_note, modify_event, constraints, suggest_time, status,
-    event_details, events,
+    event_details, events, check_deadlines,
 )
 from bot.handlers import event_flow, feedback, membership, mentions
 from ai.llm import LLMClient
@@ -66,8 +66,14 @@ def main():
     if not settings.telegram_token:
         raise ValueError("TELEGRAM_TOKEN is not set. Define it in environment or .env.")
 
-    asyncio.run(check_llm_availability(logger))
-    asyncio.run(check_db_availability(logger, settings.db_url))
+    try:
+        loop = asyncio.get_event_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+    
+    loop.run_until_complete(check_llm_availability(logger))
+    loop.run_until_complete(check_db_availability(logger, settings.db_url))
     
     application = ApplicationBuilder().token(settings.telegram_token).build()
 
@@ -116,8 +122,10 @@ def main():
         "suggest_time": suggest_time.handle,
         "status": status.handle,
         "events": events.handle,
-         "event_details": event_details.handle,
-        "feedback": feedback.collect_feedback,
+          "event_details": event_details.handle,
+          "private_organize_event": private_organize_event.handle,
+          "check_deadlines": check_deadlines.handle,
+          "feedback": feedback.collect_feedback,
     }
     
     for command, handler in command_map.items():
@@ -144,7 +152,11 @@ def main():
     )
 
     application.add_error_handler(on_error)
-    
+
+    # Note: Deadline checks require python-telegram-bot[job-queue] 
+    # For now, deadline checks are triggered manually via /check_deadlines command
+    # Or can be run periodically via external scheduler (cron, systemd timer, etc.)
+
     logger.info("Bot started. Press Ctrl+C to stop.")
     application.run_polling()
 

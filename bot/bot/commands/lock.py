@@ -7,10 +7,11 @@ from telegram.ext import ContextTypes
 from sqlalchemy import select
 
 from bot.common.event_states import STATE_EXPLANATIONS
-from bot.common.attendance import finalize_commitments
+from bot.common.attendance import finalize_commitments, parse_attendance
 from config.settings import settings
 from db.connection import get_session
 from db.models import Event
+from sqlalchemy import select
 
 
 async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -52,6 +53,16 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                 f"Current state: {event.state}\n"
                 f"Meaning: {STATE_EXPLANATIONS.get(event.state, 'Unavailable')}\n"
                 "You can lock only when state is 'confirmed'."
+            )
+            return
+
+        user_id = update.effective_user.id if update.effective_user else None
+        if user_id and event.organizer_telegram_user_id != user_id:
+            await update.message.reply_text(
+                f"❌ You are not the event organizer!\n"
+                f"Event ID: {event_id}\n"
+                f"Organizer ID: {event.organizer_telegram_user_id}\n"
+                "Only the event organizer can lock this event."
             )
             return
 

@@ -107,27 +107,26 @@ def calculate_streak(logs: List[Log]) -> int:
 
 async def get_user_streak(
     session: AsyncSession,
-    telegram_user_id: int,
+    user_id: int,
 ) -> int:
     """Get current streak for a user."""
     from db.models import Log
 
-    user_id_result = await session.execute(
-        select(Log).where(Log.user_id == telegram_user_id)
+    result = await session.execute(
+        select(Log).where(Log.user_id == user_id)
     )
-    logs = user_id_result.scalars().all()
+    logs_list = result.scalars().all()
 
-    return calculate_streak(logs)
+    return calculate_streak(logs_list)  # type: ignore[arg-type]
 
 
 async def award_badges(
     session: AsyncSession,
-    telegram_user_id: int,
-    event_id: int,
+    user_id: int,
 ) -> List[Dict[str, Any]]:
     """Award badges to user based on their actions."""
     awarded = []
-    streak = await get_user_streak(session, telegram_user_id)
+    streak = await get_user_streak(session, user_id)
 
     if streak >= STREAK_DAYS_GOLD:
         awarded.append(BADGES["reliable_90"])
@@ -139,12 +138,33 @@ async def award_badges(
     return awarded
 
 
-def get_user_badges(
-    session: AsyncSession,
-    telegram_user_id: int,
-) -> List[Dict[str, Any]]:
+async def get_user_badges(session: AsyncSession, user_id: int) -> List[Dict[str, Any]]:
     """Get all badges earned by a user."""
-    return []
+    badges_earned = []
+
+    # Check for first event badge
+    result = await session.execute(
+        select(Log).where(Log.user_id == user_id).limit(1)
+    )
+    if result.scalar_one_or_none():
+        badges_earned.append(BADGES["first_event"])
+
+    # Check for confirmed attendee badge
+    result = await session.execute(
+        select(Log).where(Log.user_id == user_id, Log.action == "confirm").limit(3)
+    )
+    confirmations = result.scalars().all()
+    if len(confirmations) >= 3:
+        badges_earned.append(BADGES["confirmed_attendee"])
+
+    # Check for streak badges
+    streak = await get_user_streak(session, user_id)
+    if streak >= STREAK_DAYS_BRONZE:
+        badge = get_badge_for_streak(streak)
+        if badge:
+            badges_earned.append(badge)
+
+    return badges_earned
 
 
 def format_badge_display(badges: List[Dict[str, Any]]) -> str:

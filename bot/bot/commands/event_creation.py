@@ -35,6 +35,7 @@ TELEGRAM_HANDLE_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9_]{4,31}$")
 ALLOWED_EVENT_TYPES = {"social", "sports", "work"}
 DEFAULT_COMMIT_BY_OFFSET_HOURS = 12
 TIME_WINDOWS: dict[str, list[str]] = {
+    "early-morning": ["04:00", "05:00", "06:00", "07:00"],
     "morning": ["08:00", "09:00", "10:00", "11:00"],
     "afternoon": ["12:00", "13:00", "14:00", "15:00"],
     "evening": ["17:00", "18:00", "19:00", "20:00"],
@@ -1268,7 +1269,7 @@ async def _handle_callback_common(
         if mode == "private":
             await finalize_private_event(query, context)
         else:
-            await finalize_event(query, context)
+            await finalize_event(query, context, mode=mode)
     elif data == f"{prefix}_final_edit":
         await query.edit_message_text(
             "🛠 Send your modification in natural language.\n\n"
@@ -1524,7 +1525,7 @@ async def _handle_message_common(
             )
 
 
-async def finalize_event(query: CallbackQuery, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def finalize_event(query: CallbackQuery, context: ContextTypes.DEFAULT_TYPE, mode: str = "public") -> None:
     """Finalize and create the public/event in database."""
     if context.user_data is None:
         await query.edit_message_text("❌ User session data is unavailable.")
@@ -1623,48 +1624,10 @@ async def finalize_event(query: CallbackQuery, context: ContextTypes.DEFAULT_TYP
         data["organizer_telegram_user_id"] = int(creator_id)
         data["organizer_username"] = organizer_username
 
-        # Send invitations to specific invitees
-        if not send_to_all_members and invitees:
-            for invite_handle in invitees:
-                if not invite_handle.startswith("@"):
-                    continue
-                username = invite_handle[1:]
-                try:
-                    user_id = await get_user_id_by_username(session, username)
-                    if user_id:
-                        result = await session.execute(
-                            select(User).where(User.user_id == int(user_id))
-                        )
-                        user = result.scalar_one_or_none()
-                        if user and user.telegram_user_id:
-                            sent = await send_event_invitation_dm(
-                                context,
-                                int(user.telegram_user_id),
-                                data,
-                                int(event.event_id),
-                            )
-                            if sent:
-                                logger.info(
-                                    f"DM sent to @{username} for event {event.event_id}"
-                                )
-                        else:
-                            logger.warning(
-                                f"User @{username} not found or no "
-                                f"telegram_user_id for event {event.event_id}"
-                            )
-                    else:
-                        logger.warning(
-                            f"No user_id found for handle @{username} "
-                            f"in event {event.event_id}"
-                        )
-                except Exception as e:
-                    logger.error(
-                        f"Error sending DM to @{username}: {e}", exc_info=True
-                    )
-
-        # Send invitations to all group members
-        if send_to_all_members and group:
-            group_members = group.member_list or []
+        group_members = group.member_list or []
+        
+        # Send DMs to all group members for public events
+        if mode == "public":
             for telegram_user_id in group_members:
                 if telegram_user_id:
                     try:
@@ -1676,8 +1639,7 @@ async def finalize_event(query: CallbackQuery, context: ContextTypes.DEFAULT_TYP
                         )
                         if sent:
                             logger.info(
-                                f"DM sent to user {telegram_user_id} for event "
-                                f"{event.event_id}"
+                                f"DM sent to user {telegram_user_id} for event {event.event_id}"
                             )
                     except Exception as e:
                         logger.error(
@@ -1855,8 +1817,13 @@ async def finalize_private_event(query: CallbackQuery, context: ContextTypes.DEF
         data["organizer_telegram_user_id"] = int(creator_id)
         data["organizer_username"] = organizer_username
 
-        # Send invitations to specific invitees
-        if not send_to_all_members and invitees:
+        invitees_set = set()
+        
+        for handle in invitees:
+            if handle.startswith("@"):
+                invitees_set.add(handle.lower())
+        
+        if invitees:
             for handle in invitees:
                 if not handle.startswith("@"):
                     continue
@@ -1883,6 +1850,11 @@ async def finalize_private_event(query: CallbackQuery, context: ContextTypes.DEF
                         logger.warning(f"No user_id found for handle @{username} in private event {event.event_id}")
                 except Exception as e:
                     logger.error(f"Error sending DM to @{username}: {e}", exc_info=True)
+        elif send_to_all_members:
+            await query.edit_message_text(
+                "❌ For private events, you must specify invitees. Use @username or @all for group members."
+            )
+            return
 
     context.user_data.pop("private_event_flow", None)
 

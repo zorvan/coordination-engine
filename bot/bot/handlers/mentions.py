@@ -1143,6 +1143,11 @@ async def _handle_organize_event_direct(
             session.add(group)
             await session.commit()
             await session.refresh(group)
+        else:
+            current_members = group.member_list or []
+            if creator_id and creator_id not in current_members:
+                group.member_list = [*current_members, creator_id]
+                await session.commit()
         
         commit_by = None
         if scheduled_time:
@@ -1219,6 +1224,24 @@ async def _handle_organize_event_direct(
             send_to_all_members = invite_all
             invitees_list = invitees
             
+            for telegram_user_id in group_members:
+                if telegram_user_id:
+                    try:
+                        await send_event_invitation_dm(
+                            context,
+                            int(telegram_user_id),
+                            data_for_dm,
+                            int(event.event_id),
+                        )
+                        logger.info(
+                            f"DM sent to user {telegram_user_id} for event {event.event_id}"
+                        )
+                    except Exception as e:
+                        logger.error(
+                            f"Error sending DM to user {telegram_user_id}: {e}",
+                            exc_info=True,
+                        )
+            
             if not send_to_all_members and invitees_list:
                 for invite_handle in invitees_list:
                     if not invite_handle.startswith("@"):
@@ -1241,12 +1264,18 @@ async def _handle_organize_event_direct(
                                 logger.info(
                                     f"DM sent to @{username} for event {event.event_id}"
                                 )
+                            else:
+                                logger.warning(
+                                    f"User @{username} not found or no telegram_user_id for event {event.event_id}"
+                                )
+                        else:
+                            logger.warning(
+                                f"No user_id found for handle @{username} in event {event.event_id}"
+                            )
                     except Exception as e:
                         logger.error(
                             f"Error sending DM to @{username}: {e}", exc_info=True
                         )
-            
-            if send_to_all_members:
                 for telegram_user_id in group_members:
                     if telegram_user_id:
                         try:

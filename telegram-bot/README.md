@@ -2,7 +2,9 @@
 
 Telegram group coordination bot with hybrid AI + deterministic command flows.
 
-**Version 2.0** - Three-layer architecture with normalized participant management, automated lifecycle events, and comprehensive service integration.
+**Version 2.0** — Three-layer architecture with normalized participant management, automated lifecycle events, and comprehensive service integration.
+
+> **Phase 1 Refactoring Complete** ✅ — Service-oriented architecture, materialization layer, and memory layer fully implemented. See [IMPLEMENTATION.md](IMPLEMENTATION.md) for details.
 
 This README reflects the **current v2 implementation** with normalized database schema and service-oriented architecture.
 
@@ -14,37 +16,104 @@ The bot helps groups coordinate events with:
 - **Normalized participant management**: EventParticipant table replaces JSON attendance_list
 - **Automated lifecycle events**: Materialization announcements and memory collection triggers
 - **Service-oriented design**: Single write paths for all operations with proper validation
+- **Idempotency framework**: Prevents duplicate command execution (feature-flagged)
+- **Optimistic concurrency control**: Version-based conflict detection for state transitions
 - Structured slash-command workflows for speed and reliability
 - Mention/reply-based AI orchestration for natural language interaction
 - Organizer-controlled event edits with reconfirmation handling
 - Attendee private inputs (availability, notes, early feedback) via DM
 - Persistent PostgreSQL storage for events, constraints, logs, and reputation-related signals
 
+## Quick Start
+
+**Get running in 15 minutes:** See [docs/v2/QUICKSTART.md](docs/v2/QUICKSTART.md)
+
+```bash
+# Install dependencies
+pip install -r requirements.txt
+
+# Configure environment
+cp .env.example .env
+# Edit .env with your Telegram token and database URL
+
+# Run database migrations
+PGPASSWORD=coord_pass psql -h localhost -U coord_user -d coord_db -f db/schema.sql
+
+# Start the bot
+python main.py
+```
+
 ## Architecture Overview
 
 ### Three-Layer Architecture
 
-1. **Coordination Layer** (`EventStateTransitionService`)
+```
+┌─────────────────────────────────────────┐
+│  Layer 3: Memory (Post-Event Narratives)│
+│  - Memory collection via DM             │
+│  - Memory Weave generation              │
+│  - Event lineage                        │
+└─────────────────────────────────────────┘
+              ▲
+┌─────────────────────────────────────────┐
+│  Layer 2: Materialization (Announcements)│
+│  - Group chat announcements             │
+│  - Threshold celebrations               │
+│  - Visible momentum                     │
+└─────────────────────────────────────────┘
+              ▲
+┌─────────────────────────────────────────┐
+│  Layer 1: Coordination (State Management)│
+│  - Event state machine                  │
+│  - Participant management               │
+│  - Constraint handling                  │
+└─────────────────────────────────────────┘
+```
+
+**Layer Details:**
+
+1. **Coordination Layer** (`EventStateTransitionService`, `ParticipantService`)
    - Manages event state transitions with validation
    - Enforces business rules and preconditions
    - Provides optimistic concurrency control
+   - Single write path for all participant operations
 
-2. **Materialization Layer** (`EventMaterializationService`)
-   - Handles automated group announcements
+2. **Materialization Layer** (`EventMaterializationService`, `MaterializationOrchestrator`)
+   - Automated group announcements at state transitions
    - Milestone notifications ("We hit threshold!", "Event locked", etc.)
    - Progress updates and status broadcasts
+   - Private cancellation notices (no public shaming)
 
 3. **Memory Layer** (`EventMemoryService`)
-   - Collects post-event narratives and feedback
-   - Generates event summaries and insights
-   - Maintains historical event context
+   - Collects post-event narratives via DM
+   - Generates Memory Weaves (multi-narrative aggregation)
+   - Maintains event lineage and hashtags
+   - Preserves plurality of voices (not a summary)
 
 ### Service Integration
 
-- **EventLifecycleService**: Orchestrates transitions across all layers
-- **ParticipantService**: Single write path for all participant operations
-- **IdempotencyService**: Prevents duplicate operations
-- All services use async SQLAlchemy with proper transaction management
+**Core Services (Single Write Paths):**
+
+| Service | Purpose |
+|---------|---------|
+| `ParticipantService` | All join/confirm/cancel operations |
+| `EventStateTransitionService` | State machine with validation + concurrency |
+| `EventLifecycleService` | Orchestrates transitions across all three layers |
+| `EventMaterializationService` | Group announcements and DM notifications |
+| `EventMemoryService` | Memory collection and weave generation |
+| `IdempotencyService` | Prevents duplicate command execution |
+
+All services use async SQLAlchemy with proper transaction management.
+
+## Documentation
+
+| Document | Description |
+|----------|-------------|
+| [QUICKSTART.md](docs/v2/QUICKSTART.md) | Get running in 15 minutes |
+| [USER_FLOWS.md](docs/v2/USER_FLOWS.md) | Complete user flow specifications |
+| [PRD v2](docs/v2/coordination-engine-PRD-v2.md) | Product requirements document |
+| [IMPLEMENTATION.md](IMPLEMENTATION.md) | Architecture decisions and TODOs |
+| [REFACTORING_SUMMARY.md](REFACTORING_SUMMARY.md) | Phase 1 refactoring summary |
 
 ## Core Interaction Modes
 
@@ -75,13 +144,21 @@ The bot sends deep links for private interactions:
 
 ## Event Model and Lifecycle
 
-Event states:
+**Event States:**
 
-- `proposed` -> event created
-- `interested` -> at least one participant has joined
-- `confirmed` -> at least one participant has confirmed attendance
-- `locked` -> finalized, attendance closed, commitments finalized
-- `completed`, `cancelled` -> terminal states
+```
+proposed → interested → confirmed → locked → completed
+                                   ↘ cancelled (from any pre-locked state)
+```
+
+| State | Description |
+|-------|-------------|
+| `proposed` | Event created, waiting for participants |
+| `interested` | At least one participant has joined |
+| `confirmed` | At least one participant has confirmed attendance |
+| `locked` | Finalized, attendance closed, commitments finalized |
+| `completed` | Event finished (terminal state) |
+| `cancelled` | Event cancelled (terminal state) |
 
 **Automatic State Transitions:**
 - `proposed` → `interested`: When first participant joins
@@ -90,10 +167,26 @@ Event states:
 - `locked` → `completed`: Manual or automatic completion
 
 **Participant Statuses:**
-- `joined`: Interested in attending
-- `confirmed`: Committed to attend
-- `cancelled`: Withdrawn from event
-- `no_show`: Confirmed but didn't attend
+
+| Status | Description |
+|--------|-------------|
+| `joined` | Interested in attending |
+| `confirmed` | Committed to attend |
+| `cancelled` | Withdrawn from event |
+| `no_show` | Confirmed but didn't attend |
+
+**Materialization Announcements:**
+
+The bot automatically posts to group chat at key state transitions:
+
+| Trigger | Message |
+|---------|---------|
+| First join | "🌱 [Name] just joined. We need [N] more for it to happen." |
+| Threshold reached | "✨ We have enough. It's happening! [N] people in." |
+| Event locked | "🔒 [Event] is locked. See you [time]. [participants]" |
+| Event completed | "✅ [Event] is complete! Thanks to all [N] participants." |
+
+*Note: Cancellations are sent privately to organizer only (no public shaming).*
 
 ## Key Capabilities
 
@@ -159,85 +252,116 @@ Event states:
 
 ### Core Tables
 
-- `users`: User profiles and Telegram metadata
-- `groups`: Group information and membership
-- `events`: Event details with normalized schema
-- `event_participants`: **NEW** - Normalized participant records
-- `constraints`: Availability and constraint rules
-- `reputation`: User reputation scores
-- `logs`: Audit trail for all actions
-- `feedback`: Post-event feedback
-- `early_feedback`: Pre-event signals
-- `ailog`: AI interaction history
+| Table | Description |
+|-------|-------------|
+| `users` | User profiles and Telegram metadata |
+| `groups` | Group information and membership |
+| `events` | Event details with normalized schema |
+| `event_participants` | **NEW** - Normalized participant records |
+| `constraints` | Availability and constraint rules |
+| `reputation` | User reputation scores |
+| `logs` | Audit trail for all actions |
+| `feedback` | Post-event feedback |
+| `early_feedback` | Pre-event signals |
+| `ailog` | AI interaction history |
+| `event_state_transitions` | **NEW** - Audit trail for state changes |
+| `idempotency_keys` | **NEW** - Prevents duplicate command execution |
+| `event_memories` | **NEW** - Memory Weave storage |
 
 ### Event Fields (v2)
 
-- `description`, `event_type`
-- `organizer_telegram_user_id`, `admin_telegram_user_id`
-- `scheduled_time`, `duration_minutes`, `threshold_attendance`
-- `state`, `version` (optimistic concurrency)
-- `planning_prefs`: JSON configuration
-- **REMOVED**: `attendance_list` (migrated to event_participants)
+| Field | Description |
+|-------|-------------|
+| `description`, `event_type` | Event details |
+| `organizer_telegram_user_id`, `admin_telegram_user_id` | Ownership |
+| `scheduled_time`, `duration_minutes`, `threshold_attendance` | Timing |
+| `min_participants`, `target_participants` | **NEW** - Viability thresholds |
+| `collapse_at`, `lock_deadline` | **NEW** - Auto-cancel and lock deadlines |
+| `state`, `version` | State machine + optimistic concurrency |
+| `planning_prefs` | JSON configuration |
+
+**Deprecated:** `attendance_list` (migrated to `event_participants` table)
 
 ### EventParticipant Table
 
-- `event_id`, `telegram_user_id`
-- `status` (joined/confirmed/cancelled/no_show)
-- `role` (organizer/participant)
-- `source` (slash/callback/mention/auto)
-- `joined_at`, `confirmed_at`, `cancelled_at`
-- Proper foreign keys and indexes
+| Column | Description |
+|--------|-------------|
+| `event_id`, `telegram_user_id` | Composite primary key |
+| `status` | Enum: `joined`, `confirmed`, `cancelled`, `no_show` |
+| `role` | Enum: `organizer`, `participant`, `observer` |
+| `source` | `slash`, `callback`, `mention`, `dm` |
+| `joined_at`, `confirmed_at`, `cancelled_at` | Timestamps |
 
 ## Commands
 
 ### Core Commands
-- `/start`, `/help` - Bot introduction
-- `/my_groups` - User's group memberships
-- `/profile` - Personal reputation stats
-- `/reputation` - Group reputation rankings
+| Command | Description |
+|---------|-------------|
+| `/start`, `/help` | Bot introduction |
+| `/my_groups` | Your group memberships |
+| `/profile` | Personal reputation stats |
+| `/reputation` | Group reputation rankings |
 
 ### Event Management
-- `/organize_event` - Create structured event
-- `/organize_event_flexible` - Create flexible event
-- `/modify_event <id> <changes>` - Edit event (organizer only)
-- `/lock <id>` - Finalize event
-- `/status` - Events overview
-- `/events` - List all events
-- `/event_details <id>` - Detailed event view
+| Command | Description |
+|---------|-------------|
+| `/organize_event` | Create structured event |
+| `/organize_event_flexible` | Create flexible event (no fixed time) |
+| `/modify_event <id> <changes>` | Edit event (organizer only) |
+| `/lock <id>` | Finalize event |
+| `/status` | Events overview |
+| `/events` | List all events |
+| `/event_details <id>` | Detailed event view |
 
 ### Participation
-- `/join <id>` - Join event
-- `/confirm <id>` - Confirm attendance
-- `/cancel <id>` - Cancel participation
-- `/back <id>` - Unconfirm attendance
+| Command | Description |
+|---------|-------------|
+| `/join <id>` | Join event |
+| `/confirm <id>` | Confirm attendance |
+| `/cancel <id>` | Cancel participation |
+| `/back <id>` | Unconfirm attendance |
 
 ### Coordination
-- `/constraints <id> <action>` - Manage constraints
-- `/suggest_time <id>` - AI time suggestion
-- `/request_confirmations <id>` - Send confirmation requests
+| Command | Description |
+|---------|-------------|
+| `/constraints <id> <action>` | Manage constraints |
+| `/suggest_time <id>` | AI time suggestion |
+| `/request_confirmations <id>` | Send confirmation requests |
 
-### Feedback
-- `/feedback <id> [text]` - Post-event feedback
-- `/early_feedback <id> <@user> <text>` - Pre-event feedback
-- `/event_note <id> <note>` - Private notes
+### Feedback & Memory
+| Command | Description |
+|---------|-------------|
+| `/feedback <id> [text]` | Post-event feedback |
+| `/early_feedback <id> <@user> <text>` | Pre-event feedback |
+| `/event_note <id> <note>` | Private attendee notes |
+| `/memory <id>` | View event memory weave |
+| `/recall` | List recent group memories |
+| `/remember <id> <text>` | Add memory fragment |
 
 ## Migration from v1
 
 ### Key Changes
-- **attendance_list** JSON → **event_participants** table
-- Service-oriented architecture with single write paths
-- Automated lifecycle events and announcements
-- Improved concurrency control and validation
-- Comprehensive audit logging
+
+| Change | Impact |
+|--------|--------|
+| `attendance_list` JSON → `event_participants` table | Normalized participation tracking |
+| Service-oriented architecture | Single write paths for all operations |
+| Automated lifecycle events | Materialization announcements, memory collection |
+| Optimistic concurrency control | Version-based conflict detection |
+| Idempotency framework | Duplicate command prevention |
+| Comprehensive audit logging | State transition tracking |
 
 ### Backward Compatibility
-- Legacy attendance_list parsing maintained for read operations
-- Gradual migration of display logic to new schema
-- All v1 commands supported with improved internals
+
+- ✅ Legacy `attendance_list` parsing maintained for read operations
+- ✅ Gradual migration of display logic to new schema
+- ✅ All v1 commands supported with improved internals
+- ✅ Migration helper: `ParticipantService.migrate_from_legacy()`
 
 ## Development
 
 ### Testing
+
 ```bash
 # Run all tests
 pytest
@@ -250,135 +374,62 @@ pytest --cov=bot --cov-report=html
 ```
 
 ### Architecture Principles
-- **Single Write Paths**: All participant operations route through ParticipantService
-- **Service Integration**: EventLifecycleService coordinates state changes across layers
-- **Validation First**: All transitions validated before execution
-- **Audit Everything**: Comprehensive logging for debugging and analytics
-- **Async by Default**: All database operations use async SQLAlchemy
+
+| Principle | Implementation |
+|-----------|----------------|
+| **Single Write Paths** | All participant operations → `ParticipantService` |
+| **Service Integration** | `EventLifecycleService` coordinates state changes |
+| **Validation First** | All transitions validated before execution |
+| **Audit Everything** | Comprehensive logging for debugging |
+| **Async by Default** | All database operations use async SQLAlchemy |
+| **Idempotency** | Duplicate command prevention (feature-flagged) |
 
 ### Code Quality Standards
-- Type hints on all public APIs
-- Comprehensive docstrings
-- Async/await throughout
-- Service layer testing with mocks
-- Integration tests for end-to-end flows
 
-- in DM, only interested attendees can submit private constraints/availability
-- organizer cannot submit attendee-private constraints/availability
+- ✅ Type hints on all public APIs
+- ✅ Comprehensive docstrings
+- ✅ Async/await throughout
+- ✅ Service layer testing with mocks
+- ✅ Integration tests for end-to-end flows
 
-### Private attendee notes
-
-- `/event_note <event_id> <note>` in DM only
-- only interested attendees can submit notes
-- organizer cannot submit attendee notes
-- notes are stored as private early-feedback signals and used as planning context
-
-### Confirmation requests and DM fanout
-
-- `/request_confirmations <event_id>`
-- posts group summary of pending/confirmed participants
-- sends DM confirmation prompts to attendees
-- includes back/cancel/lock/status buttons
-- organizer receives private-note context summary if available
-
-### AI-assisted time suggestion
-
-- `/suggest_time <event_id>`
-- hybrid decision logic:
-  - rules for availability/reliability/conflict handling
-  - LLM fallback when confidence is low
-- if event has no fixed time and suggestion returns parseable datetime, suggested time can be auto-applied
-- auto-applied time change can invalidate old confirmations and trigger reconfirmation DM
-
-### Feedback, profile, and reputation pipeline
-
-- `/feedback <event_id> [free text]`
-  - inline star flow or natural-language input (LLM parsed)
-  - updates `feedback` table and user reputation/profile values
-  - blends post-event feedback with stored early-feedback signals
-- `/early_feedback <event_id> <@username|telegram_id> <text>`
-  - stores normalized pre-event signals (`discussion` in group, `private_peer` in DM)
-- `/profile`
-  - global reputation
-  - top activity reputation
-  - feedback and early-feedback stats
-
-## Access and Consistency Rules
-
-- group membership sync runs on all group activity:
-  - updates `groups.member_list`
-  - upserts users into `users` table
-- organizer control:
-  - only organizer can modify event
-- sensitive participant actions can require explicit approvals in mention-driven mode
-- slash commands are kept deterministic; mention inference does not override slash command handling
-
-## Commands
-
-Registered commands:
-
-- `/start`, `/help`
-- `/my_groups`
-- `/profile`
-- `/reputation`
-- `/organize_event`
-- `/organize_event_flexible`
-- `/join`
-- `/confirm` (alias `/interested`)
-- `/back`
-- `/cancel`
-- `/lock`
-- `/request_confirmations`
-- `/early_feedback`
-- `/event_note`
-- `/modify_event`
-- `/constraints`
-- `/suggest_time`
-- `/status`
-- `/events`
-- `/event_details`
-- `/feedback`
-
-## Data Model (PostgreSQL)
-
-Main tables:
-
-- `users`
-- `groups`
-- `events`
-- `constraints`
-- `reputation`
-- `logs`
-- `feedback`
-- `early_feedback`
-- `ailog`
-
-Notable event fields:
-
-- `description`
-- `organizer_telegram_user_id`
-- `scheduled_time`
-- `duration_minutes`
-- `threshold_attendance`
-- `attendance_list`
-- `state`
-- `locked_at`, `completed_at`
-
-## Project Structure
+### Project Structure
 
 ```text
 .
-├── ai/                 # Rule engine + LLM client + hybrid coordinator
+├── ai/                          # AI coordination engine
+│   ├── core.py                  # Hybrid decision logic
+│   ├── llm.py                   # LLM client
+│   └── rules.py                 # Rule-based engine
 ├── bot/
-│   ├── commands/       # Slash command handlers
-│   ├── handlers/       # Update/message/callback handlers
-│   ├── common/         # Shared helpers (attendance, scheduling, presenters, etc.)
+│   ├── commands/                # Slash command handlers
+│   │   ├── join.py             # ✅ Refactored (v2 pattern)
+│   │   ├── confirm.py
+│   │   ├── cancel.py
+│   │   └── ...
+│   ├── handlers/                # Update/message/callback handlers
+│   ├── services/                # Service layer (single write paths)
+│   │   ├── participant_service.py
+│   │   ├── event_state_transition_service.py
+│   │   ├── event_lifecycle_service.py
+│   │   ├── event_materialization_service.py
+│   │   ├── event_memory_service.py
+│   │   └── idempotency_service.py
+│   ├── common/                  # Shared helpers
+│   │   ├── materialization.py  # Materialization orchestrator
+│   │   ├── scheduling.py
+│   │   └── ...
 │   └── utils/
-├── config/             # Settings + logging setup
-├── db/                 # Models, connection, schema, migrations, user helpers
-├── docker/             # Container config
+├── config/                      # Settings + logging
+├── db/                          # Models, connection, schema
+├── docs/
+│   └── v2/                      # v2 documentation
+│       ├── QUICKSTART.md
+│       ├── USER_FLOWS.md
+│       └── coordination-engine-PRD-v2.md
 ├── tests/
-└── main.py             # App bootstrap and handler registration
+├── main.py                      # App bootstrap
+├── IMPLEMENTATION.md            # Architecture decisions
+└── REFACTORING_SUMMARY.md       # Phase 1 summary
 ```
 
 ## Setup
@@ -387,12 +438,13 @@ Notable event fields:
 
 - Python 3.11+
 - PostgreSQL 15+
+- Telegram Bot Token (from [@BotFather](https://t.me/BotFather))
 
 ### 1) Install dependencies
 
 ```bash
 python -m venv .venv
-source .venv/bin/activate
+source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
@@ -401,37 +453,61 @@ pip install -r requirements.txt
 Create `.env` with:
 
 ```env
-TELEGRAM_TOKEN=...
+# Required
+TELEGRAM_TOKEN=1234567890:ABCdefGHIjklMNOpqrsTUVwxyz
 DB_URL=postgresql+asyncpg://coord_user:coord_pass@localhost:5432/coord_db
+
+# Optional: LLM Configuration
 AI_ENDPOINT=http://127.0.0.1:8080/v1
 AI_MODEL=qwen/qwen3-coder-next
 AI_API_KEY=dummy-key
+
+# Optional: Feature Flags (PRD v2)
+ENABLE_MATERIALIZATION=true
+ENABLE_MEMORY_LAYER=true
+ENABLE_REPUTATION_EFFECTS=false
+ENABLE_IDEMPOTENCY=false
+
+# Optional: Logging
 LOG_LEVEL=INFO
 LOG_LEVEL_TELEGRAM=INFO
 LOG_LEVEL_HTTPX=WARNING
+JSON_LOGS=false
 ```
 
-Note: the app uses SQLAlchemy async engine, so `DB_URL` should use an async driver (`postgresql+asyncpg://...`).
+**Note:** The `DB_URL` must use an async driver (`postgresql+asyncpg://`).
 
-### 3) Initialize schema
+### 3) Initialize database
 
+**Option A: Using Docker (Recommended)**
 ```bash
+docker-compose up -d postgres
+sleep 5
+docker-compose exec postgres psql -U coord_user -d coord_db -f /app/db/schema.sql
+```
+
+**Option B: Manual PostgreSQL**
+```bash
+# Create database and user
+sudo -u postgres psql -c "CREATE USER coord_user WITH PASSWORD 'coord_pass';"
+sudo -u postgres psql -c "CREATE DATABASE coord_db OWNER coord_user;"
+
+# Apply schema
 PGPASSWORD=coord_pass psql -h localhost -U coord_user -d coord_db -f db/schema.sql
 ```
 
-### 4) Apply migrations
-
-```bash
-for f in db/migrations/*.sql; do
-  echo "Applying $f"
-  PGPASSWORD=coord_pass psql -h localhost -U coord_user -d coord_db -f "$f"
-done
-```
-
-### 5) Run bot
+### 4) Run bot
 
 ```bash
 python main.py
+```
+
+Expected output:
+```
+INFO: Startup LLM check: LLM available at http://127.0.0.1:8080/v1
+INFO: Startup DB check: Database accessible
+INFO: Database initialization complete
+INFO: Bot started. Press Ctrl+C to stop.
 ```
 
 ## AI and LLM Configuration
@@ -441,20 +517,74 @@ LLM client is OpenAI-compatible and expects:
 - `GET /models` for availability check
 - `POST /chat/completions` for inference calls
 
-Used for:
+**Used for:**
+- Mention intent inference
+- Event draft inference and modification patching
+- Natural-language constraint parsing
+- Early-feedback and post-event feedback structuring
+- Conflict-resolution fallback when rules confidence is low
 
-- mention intent inference
-- event draft inference and modification patching
-- natural-language constraint parsing
-- early-feedback and post-event feedback structuring/sanitization
-- conflict-resolution fallback when rules confidence is low
+## Current Limitations
 
-## Current Limitations / Notes
+| Limitation | Status | Workaround |
+|------------|--------|------------|
+| `/feedback` requires `completed` state | ⚠️ Known | Manual state completion via admin |
+| Test suite outdated | ⚠️ In Progress | Being updated for v2 architecture |
+| `reputation` command basic | ⚠️ Known | Use `/profile` for detailed stats |
+| Webhook support | ❌ TODO | Use polling (default) |
+| RBAC | ❌ TODO | Organizer-only checks in handlers |
 
-- `/feedback` requires event state `completed`; state completion automation is limited and may require external workflow/admin handling.
-- Existing test suite includes outdated cases and does not fully represent the latest behavior yet.
-- `reputation` command currently returns a basic placeholder text; detailed profile data is available in `/profile`.
+## Production Deployment
+
+### Docker
+
+```bash
+docker-compose up -d
+docker-compose logs -f bot
+```
+
+### Environment Variables for Production
+
+```env
+ENVIRONMENT=production
+ENABLE_IDEMPOTENCY=true
+ENABLE_REPUTATION_EFFECTS=true
+LOG_LEVEL=WARNING
+JSON_LOGS=true
+```
+
+### Webhook (Optional)
+
+For production, use webhooks instead of polling. See [QUICKSTART.md](docs/v2/QUICKSTART.md) for details.
+
+## Troubleshooting
+
+**Database connection errors:**
+```
+Error: could not connect to server
+```
+→ Check PostgreSQL is running: `docker-compose ps` or `systemctl status postgresql`  
+→ Verify credentials in `.env`  
+→ Ensure `DB_URL` uses `postgresql+asyncpg://` prefix
+
+**LLM unavailable:**
+```
+Warning: Startup LLM check: LLM unavailable
+```
+→ Check AI endpoint is accessible  
+→ Verify `AI_ENDPOINT` and `AI_API_KEY` in `.env`  
+→ AI features gracefully degrade if unavailable
+
+See [QUICKSTART.md](docs/v2/QUICKSTART.md) for more troubleshooting tips.
 
 ## License
 
 Apache-2.0
+
+## Contributing
+
+1. Read [PRD v2](docs/v2/coordination-engine-PRD-v2.md) for product philosophy
+2. Review [USER_FLOWS.md](docs/v2/USER_FLOWS.md) for interaction patterns
+3. Check [IMPLEMENTATION.md](IMPLEMENTATION.md) for architecture decisions
+4. Run tests: `pytest`
+5. Submit PR with description of changes

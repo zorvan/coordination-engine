@@ -21,7 +21,7 @@ from bot.commands import (
 )
 from bot.handlers import event_flow, feedback, membership, mentions
 from ai.llm import LLMClient
-from db.connection import check_db_connection
+from db.connection import check_db_connection, create_engine, init_db
 
 
 async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -77,6 +77,11 @@ def main():
         else:
             db_url = settings.db_url
         loop.run_until_complete(check_db_availability(logger, db_url))
+        # Initialize database schema (create tables and enum types if needed)
+        logger.info("Initializing database...")
+        engine = create_engine(db_url)
+        loop.run_until_complete(init_db(engine))
+        logger.info("Database initialization complete")
     
     application = ApplicationBuilder().token(settings.telegram_token).build()
 

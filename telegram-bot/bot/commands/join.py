@@ -1,22 +1,48 @@
 #!/usr/bin/env python3
-"""Join event command handler - mark attendance intent."""
+"""Join event command handler - mark attendance intent.
+
+PRD v2 Refactoring:
+- Uses ParticipantService as single write path
+- Integrates EventLifecycleService for state transitions
+- Includes idempotency checking (optional, feature-flagged)
+- Triggers materialization announcements via lifecycle service
+"""
 import logging
+import hashlib
+from datetime import datetime
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from sqlalchemy import select
-from db.models import Event, Log
+
+from db.models import Event, Log, User
 from db.connection import get_session
 from db.users import get_or_create_user_id
 from config.settings import settings
 from bot.common.scheduling import find_user_event_conflict
-from bot.services import ParticipantService, EventLifecycleService
-from datetime import datetime
+from bot.services import (
+    ParticipantService,
+    EventLifecycleService,
+    IdempotencyService,
+    ConcurrencyConflictError,
+    ThresholdNotMetError,
+)
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("coord_bot.commands.join")
 
 
 async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle /join command - mark attendance intent."""
+    """
+    Handle /join command - mark attendance intent.
+
+    Flow:
+    1. Validate event ID parameter
+    2. Fetch event and validate state
+    3. Check for scheduling conflicts
+    4. Generate idempotency key (if enabled)
+    5. Execute join via ParticipantService
+    6. Trigger state transition if needed via EventLifecycleService
+    7. Log action and respond
+    """
     message = update.effective_message
     if not message:
         return
@@ -44,6 +70,7 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
     async with get_session(settings.db_url) as session:
+        # Fetch event
         result = await session.execute(
             select(Event).where(Event.event_id == event_id)
         )
@@ -53,12 +80,14 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             await message.reply_text("❌ Event not found.")
             return
 
+        # Validate event state
         if event.state in ["locked", "completed"]:
             await message.reply_text(
                 f"❌ Cannot join event {event_id} - it's {event.state}."
             )
             return
 
+        # Check for scheduling conflicts
         conflict = await find_user_event_conflict(
             session=session,
             telegram_user_id=telegram_user_id,
@@ -75,73 +104,135 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             )
             return
 
-        # Use ParticipantService to join event
-        participant_service = ParticipantService(session)
-        participant, is_new_join = await participant_service.join(
-            event_id=event_id,
-            telegram_user_id=telegram_user_id,
-            source="slash",
-        )
-
-        if is_new_join:
-            # Check if we need to transition to interested state
-            counts = await participant_service.get_counts(event_id)
-            if event.state == "proposed" and counts["total"] > 0:
-                lifecycle_service = EventLifecycleService(context.bot, session)
-                try:
-                    event, _ = await lifecycle_service.transition_with_lifecycle(
-                        event_id=event_id,
-                        target_state="interested",
-                        actor_telegram_user_id=telegram_user_id,
-                        source="slash",
-                        reason="First participant joined",
-                    )
-                except Exception as e:
-                    logger.error(f"Failed to transition event {event_id} to interested: {e}")
-
-            user_id = await get_or_create_user_id(
-                session,
-                telegram_user_id=telegram_user_id,
-                display_name=display_name,
-                username=username,
+        # Idempotency check (if enabled)
+        if settings.enable_idempotency:
+            idempotency_service = IdempotencyService(session)
+            idempotency_key = IdempotencyService.generate_key(
+                "join", telegram_user_id, event_id
             )
-            log = Log(
+
+            is_dup, status, _ = await idempotency_service.check(idempotency_key)
+            if is_dup and status == "completed":
+                logger.info(
+                    "Duplicate join command detected (idempotent)",
+                    extra={"event_id": event_id, "user": telegram_user_id}
+                )
+                await message.reply_text(
+                    f"✅ Already joined event {event_id}!"
+                )
+                return
+
+            # Register idempotency key
+            await idempotency_service.register(
+                idempotency_key, "join", telegram_user_id, event_id
+            )
+
+        try:
+            # Execute join via ParticipantService
+            participant_service = ParticipantService(session)
+            participant, is_new_join = await participant_service.join(
                 event_id=event_id,
-                user_id=user_id,
-                action="join",
-                metadata_dict={"timestamp": datetime.utcnow().isoformat()}
+                telegram_user_id=telegram_user_id,
+                source="slash",
             )
-            session.add(log)
-            await session.commit()
 
-        keyboard = [
-            [
-                InlineKeyboardButton(
-                    "✅ Commit", callback_data=f"event_confirm_{event_id}"
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    "❌ Cancel", callback_data=f"event_cancel_{event_id}"
-                )
-            ],
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
+            if is_new_join:
+                # Transition state if needed (proposed → interested)
+                if event.state == "proposed":
+                    lifecycle_service = EventLifecycleService(context.bot, session)
+                    try:
+                        event, _ = await lifecycle_service.transition_with_lifecycle(
+                            event_id=event_id,
+                            target_state="interested",
+                            actor_telegram_user_id=telegram_user_id,
+                            source="slash",
+                            reason="First participant joined",
+                        )
+                    except (ConcurrencyConflictError, ThresholdNotMetError) as e:
+                        logger.error(
+                            "State transition failed: %s",
+                            e,
+                            extra={"event_id": event_id}
+                        )
+                        # Continue anyway - user successfully joined
 
-        await message.reply_text(
-            f"✅ *Joined event {event_id}!*\n\n"
-            f"Type: {event.event_type}\n"
-            f"Time: {event.scheduled_time}\n"
-            f"State: {event.state}\n\n"
-            "Please commit attendance.",
-            reply_markup=reply_markup
-        )
+                # Create user record if needed
+                user_id = await get_or_create_user_id(
+                    session,
+                    telegram_user_id=telegram_user_id,
+                    display_name=display_name,
+                    username=username,
+                )
+
+                # Log action
+                log = Log(
+                    event_id=event_id,
+                    user_id=user_id,
+                    action="join",
+                    metadata_dict={
+                        "timestamp": datetime.utcnow().isoformat(),
+                        "source": "slash",
+                        "participant_status": participant.status.value,
+                    }
+                )
+                session.add(log)
+
+                # Complete idempotency key if enabled
+                if settings.enable_idempotency:
+                    await idempotency_service.complete(idempotency_key)
+
+                await session.commit()
+
+            # Build response with action keyboard
+            keyboard = [
+                [
+                    InlineKeyboardButton(
+                        "✅ Commit", callback_data=f"event_confirm_{event_id}"
+                    )
+                ],
+                [
+                    InlineKeyboardButton(
+                        "❌ Cancel", callback_data=f"event_cancel_{event_id}"
+                    )
+                ],
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+
+            await message.reply_text(
+                f"✅ *Joined event {event_id}!*\n\n"
+                f"Type: {event.event_type}\n"
+                f"Time: {event.scheduled_time}\n"
+                f"State: {event.state}\n\n"
+                "Please commit attendance.",
+                reply_markup=reply_markup,
+                parse_mode="Markdown",
+            )
+
+        except Exception as e:
+            logger.exception(
+                "Failed to join event %s: %s",
+                event_id,
+                e,
+                extra={"user": telegram_user_id}
+            )
+
+            # Mark idempotency key as failed if enabled
+            if settings.enable_idempotency:
+                await idempotency_service.fail(idempotency_key)
+
+            await message.reply_text(
+                f"❌ Failed to join event {event_id}. Please try again."
+            )
 
 
 async def handle_callback(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> None:
-    """Handle callback queries for join buttons."""
+    """
+    Handle callback queries for join buttons.
+
+    Converts callback to command execution for reuse.
+    """
     query = update.callback_query
     if not query:
         return
@@ -152,14 +243,14 @@ async def handle_callback(
 
     if data and data.startswith("event_join_"):
         event_id = int(data.replace("event_join_", ""))
-        # Create an update object from the callback query
-        callback_update = Update(
-            update_id=update.update_id,
-            callback_query=query
-        )
+
+        # Reuse command handler
         context.args = [str(event_id)]
-        await handle(callback_update, context)
+        await handle(update, context)
+
+        # Update callback message
         await query.edit_message_text(
             f"✅ *Joined event {event_id}!*\n\n"
-            f"Use /status {event_id} to view event details."
+            f"Use /status {event_id} to view event details.",
+            parse_mode="Markdown",
         )

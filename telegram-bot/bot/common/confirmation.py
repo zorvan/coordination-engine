@@ -6,10 +6,10 @@ from typing import Any
 from bot.common.attendance import parse_attendance_with_status
 
 def _extract_confirmed_telegram_ids(attendance_list: list[Any] | None) -> list[int]:
-    """Extract committed/final-confirmed telegram user ids from attendance entries."""
+    """Extract confirmed telegram user ids from attendance entries."""
     confirmed: list[int] = []
     for telegram_user_id, status in parse_attendance_with_status(attendance_list).items():
-        if status in {"committed", "confirmed"}:
+        if status in {"confirmed"}:
             confirmed.append(telegram_user_id)
     return confirmed
 
@@ -52,10 +52,10 @@ async def invalidate_confirmations_and_notify(
 
 
 def _extract_all_active_telegram_ids(attendance_list: list[Any] | None) -> list[int]:
-    """Extract all active telegram user ids (interested, committed, confirmed) from attendance entries."""
+    """Extract all active telegram user ids (interested, confirmed) from attendance entries."""
     active: list[int] = []
     for telegram_user_id, status in parse_attendance_with_status(attendance_list).items():
-        if status in {"interested", "committed", "confirmed"}:
+        if status in {"interested", "confirmed"}:
             active.append(telegram_user_id)
     return active
 

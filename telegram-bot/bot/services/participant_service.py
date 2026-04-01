@@ -278,16 +278,24 @@ class ParticipantService:
         
         return counts
     
+    async def get_interested_count(self, event_id: int) -> int:
+        """Get count of interested participants (joined but not confirmed)."""
+        result = await self.session.execute(
+            select(func.count(EventParticipant.telegram_user_id))
+            .where(
+                EventParticipant.event_id == event_id,
+                EventParticipant.status == ParticipantStatus.joined,
+            )
+        )
+        return result.scalar() or 0
+
     async def get_confirmed_count(self, event_id: int) -> int:
         """Get count of confirmed participants (for threshold checks)."""
         result = await self.session.execute(
             select(func.count(EventParticipant.telegram_user_id))
             .where(
                 EventParticipant.event_id == event_id,
-                EventParticipant.status.in_([
-                    ParticipantStatus.confirmed,
-                    ParticipantStatus.joined,
-                ])
+                EventParticipant.status == ParticipantStatus.confirmed,
             )
         )
         return result.scalar() or 0
@@ -392,22 +400,24 @@ class ParticipantService:
         Returns count of migrated participants.
         """
         from bot.common.attendance import parse_attendance_with_status
-        
+
         if not event.attendance_list:
             return 0
-        
+
         attendance_map = parse_attendance_with_status(event.attendance_list)
         migrated_count = 0
-        
+
         for telegram_user_id, status_str in attendance_map.items():
             # Map legacy status to new enum
-            if status_str in {"committed", "confirmed"}:
+            # Legacy 'committed' and 'confirmed' → ParticipantStatus.confirmed
+            # Legacy 'interested' → ParticipantStatus.joined
+            if status_str == "confirmed":
                 status = ParticipantStatus.confirmed
             elif status_str == "interested":
                 status = ParticipantStatus.joined
             else:
-                status = ParticipantStatus.joined
-            
+                status = ParticipantStatus.joined  # Default for unknown/legacy statuses
+
             participant = EventParticipant(
                 event_id=event.event_id,
                 telegram_user_id=telegram_user_id,
@@ -416,11 +426,11 @@ class ParticipantService:
             )
             self.session.add(participant)
             migrated_count += 1
-        
+
         logger.info(
             "Migrated %d participants from legacy attendance_list",
             migrated_count,
             extra={"event_id": event.event_id}
         )
-        
+
         return migrated_count

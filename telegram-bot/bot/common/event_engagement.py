@@ -8,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.models import Event, User
+from bot.common.event_presenters import format_user_display
 
 
 async def get_event_summary(
@@ -64,6 +65,7 @@ async def get_event_summary(
         summary["attendees"] = [
             {
                 "telegram_user_id": t_id,
+                "username": user_map.get(t_id).username if user_map.get(t_id) else None,
                 "display_name": user_map.get(t_id, User(telegram_user_id=t_id)).display_name or "Unknown",
                 "joined": True,
             }
@@ -78,6 +80,7 @@ async def get_event_summary(
         if organizer:
             summary["organizer"] = {
                 "telegram_user_id": event.organizer_telegram_user_id,
+                "username": organizer.username,
                 "display_name": organizer.display_name or "Unknown",
             }
     
@@ -142,13 +145,24 @@ async def post_event_summary(
     ]
     
     if summary.get("organizer"):
-        lines.append(f"👤 Organized by: {summary['organizer']['display_name']}")
-    
+        organizer_user = summary['organizer']
+        organizer_display = format_user_display(
+            telegram_user_id=organizer_user['telegram_user_id'],
+            username=organizer_user.get('username'),
+            display_name=organizer_user.get('display_name'),
+        )
+        lines.append(f"👤 Organized by: {organizer_display}")
+
     if summary.get("attendees"):
         lines.append("")
         lines.append("👥 Attendees:")
         for attendee in summary["attendees"][:10]:
-            lines.append(f"  • {attendee['display_name']}")
+            attendee_display = format_user_display(
+                telegram_user_id=attendee['telegram_user_id'],
+                username=attendee.get('username'),
+                display_name=attendee.get('display_name'),
+            )
+            lines.append(f"  • {attendee_display}")
         if len(summary["attendees"]) > 10:
             lines.append(f"  ... and {len(summary['attendees']) - 10} more")
     

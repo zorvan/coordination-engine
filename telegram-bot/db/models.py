@@ -395,12 +395,12 @@ class EventParticipant(Base):
         nullable=False
     )
     status = Column(
-        SQLEnum(ParticipantStatus),
+        SQLEnum(ParticipantStatus, name="participant_status"),
         default=ParticipantStatus.joined,
         nullable=False
     )
     role = Column(
-        SQLEnum(ParticipantRole),
+        SQLEnum(ParticipantRole, name="participant_role"),
         default=ParticipantRole.participant,
         nullable=False
     )

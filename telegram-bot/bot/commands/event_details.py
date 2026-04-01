@@ -7,12 +7,12 @@ from typing import Any
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from sqlalchemy import select
-from db.models import Event
+from db.models import Event, User
 from bot.common.attendance import has_attendee
 from db.connection import get_session
 from config.settings import settings
 from bot.common.deeplinks import build_start_link
-from bot.common.event_presenters import format_event_details_message
+from bot.common.event_presenters import format_event_details_message, format_user_display
 
 
 async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -64,7 +64,7 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         reply_markup = await build_event_details_action_markup(event, user_id, bot_username, session)
 
         await update.message.reply_text(
-            await format_event_details_message(event_id, event, logs, constraints),
+            await format_event_details_message(event_id, event, logs, constraints, context.bot),
             reply_markup=reply_markup
         )
         
@@ -113,10 +113,17 @@ async def show_details(query, context: ContextTypes.DEFAULT_TYPE, event_id: int)
         user_id = query.from_user.id if query.from_user else None
         reply_markup = await build_event_details_action_markup(event, user_id, bot_username, session)
 
-        await query.edit_message_text(
-            await format_event_details_message(event_id, event, logs, constraints),
-            reply_markup=reply_markup
-        )
+        try:
+            await query.edit_message_text(
+                await format_event_details_message(event_id, event, logs, constraints, context.bot),
+                reply_markup=reply_markup
+            )
+        except Exception as e:
+            if "Message is not modified" in str(e):
+                # Message content hasn't changed, just answer the callback
+                await query.answer("✓ Updated")
+            else:
+                raise
 
 
 async def show_logs(query, event_id: int) -> None:
@@ -124,25 +131,47 @@ async def show_logs(query, event_id: int) -> None:
     from db.models import Log as LogModel
     async with get_session(settings.db_url) as session:
         result = await session.execute(
-            select(LogModel)
+            select(LogModel, User)
+            .join(User, LogModel.user_id == User.user_id, isouter=True)
             .where(LogModel.event_id == event_id)
             .order_by(LogModel.timestamp.desc())
         )
-        logs = result.scalars().all()
+        rows = result.all()
 
-        if not logs:
+        if not rows:
             await query.edit_message_text(
                 f"ℹ️ Event {event_id} has no logs yet."
             )
-            
+
             return
 
         msg = f"📝 *Event {event_id} Logs*\n\n"
-        for log in logs[:10]:
-            msg += f"- {log.action} by {log.user_id} at {log.timestamp}\n"
+        for log, user in rows[:10]:
+            user_info = ""
+            if user:
+                user_display = format_user_display(
+                    telegram_user_id=user.telegram_user_id,
+                    username=getattr(user, "username", None),
+                    display_name=getattr(user, "display_name", None),
+                    include_link=False,
+                )
+                user_info = f" by {user_display}"
+            
+            # Map action to readable text
+            action_text = {
+                "join": "joined",
+                "confirm": "confirmed",
+                "cancel": "cancelled",
+                "organize_event": "created the event",
+                "suggest_time": "suggested a time",
+                "nudge": "was nudged",
+                "constraint_update": "updated constraints",
+            }.get(log.action, log.action)
+            
+            msg += f"- {action_text}{user_info} at {log.timestamp}\n"
 
-        if len(logs) > 10:
-            msg += f"\n... and {len(logs) - 10} more logs"
+        if len(rows) > 10:
+            msg += f"\n... and {len(rows) - 10} more logs"
 
         keyboard = [
             [
@@ -153,8 +182,14 @@ async def show_logs(query, event_id: int) -> None:
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
 
-        await query.edit_message_text(msg, reply_markup=reply_markup)
-        
+        try:
+            await query.edit_message_text(msg, reply_markup=reply_markup)
+        except Exception as e:
+            if "Message is not modified" in str(e):
+                await query.answer("✓ Updated")
+            else:
+                raise
+
 
 
 async def show_constraints(query, event_id: int) -> None:
@@ -175,12 +210,42 @@ async def show_constraints(query, event_id: int) -> None:
             
             return
 
+        # Fetch all relevant users at once for display names
+        user_ids = set()
+        for c in constraints:
+            user_ids.add(c.user_id)
+            if c.target_user_id:
+                user_ids.add(c.target_user_id)
+        
+        users = {}
+        if user_ids:
+            result = await session.execute(
+                select(User).where(User.user_id.in_(user_ids))
+            )
+            for user in result.scalars().all():
+                users[user.user_id] = user
+
         msg = f"🔗 *Event {event_id} Constraints*\n\n"
         for c in constraints:
-            msg += f"- User {c.user_id}: "
+            user = users.get(c.user_id)
+            user_display = format_user_display(
+                telegram_user_id=user.telegram_user_id if user else c.user_id,
+                username=user.username if user and getattr(user, "username", None) else None,
+                display_name=user.display_name if user and getattr(user, "display_name", None) else None,
+                include_link=False,
+            ) if user else f"User {c.user_id}"
+            
+            msg += f"- {user_display}: "
             if c.target_user_id:
+                target_user = users.get(c.target_user_id)
+                target_display = format_user_display(
+                    telegram_user_id=target_user.telegram_user_id if target_user else c.target_user_id,
+                    username=target_user.username if target_user and getattr(target_user, "username", None) else None,
+                    display_name=target_user.display_name if target_user and getattr(target_user, "display_name", None) else None,
+                    include_link=False,
+                ) if target_user else f"User {c.target_user_id}"
                 msg += (
-                    f"Join if User {c.target_user_id} joins "
+                    f"Join if {target_display} joins "
                     f"(confidence: {c.confidence})\n"
                 )
             else:
@@ -195,8 +260,14 @@ async def show_constraints(query, event_id: int) -> None:
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
 
-        await query.edit_message_text(msg, reply_markup=reply_markup)
-        
+        try:
+            await query.edit_message_text(msg, reply_markup=reply_markup)
+        except Exception as e:
+            if "Message is not modified" in str(e):
+                await query.answer("✓ Updated")
+            else:
+                raise
+
 
 
 async def _get_event_logs(session, event_id: int) -> list:
@@ -225,38 +296,52 @@ async def build_event_details_action_markup(
     """Build standard action keyboard for event details view."""
     # Check if user has joined using ParticipantService
     user_joined = False
+    user_confirmed = False
     if user_id is not None:
         from bot.services import ParticipantService
         participant_service = ParticipantService(session)
         try:
             participant = await participant_service.get_participant(event.event_id, user_id)
-            user_joined = participant is not None and participant.status in ['joined', 'confirmed']
+            if participant:
+                user_joined = participant.status in ['joined', 'confirmed']
+                user_confirmed = participant.status == 'confirmed'
         except:
             # Fallback to old logic if service fails
             attendance_list: list[Any] | None = event.attendance_list or []
             user_joined = has_attendee(attendance_list, user_id)
-    
-    commit_text = "✅ Join" if not user_joined else "✅ Commit"
+
+    # Button text and callback change based on user status
+    if not user_joined:
+        commit_text = "✅ Join"
+        commit_callback = f"event_join_{event.event_id}"  # Join only
+    elif user_confirmed:
+        commit_text = "✓ Confirmed"
+        commit_callback = f"event_confirm_{event.event_id}"  # Already confirmed, no action needed
+    else:
+        commit_text = "✅ Confirm"
+        commit_callback = f"event_confirm_{event.event_id}"  # Confirm attendance
+
     keyboard = [
         [
-            InlineKeyboardButton(commit_text, callback_data=f"event_confirm_{event.event_id}"),
+            InlineKeyboardButton(commit_text, callback_data=commit_callback),
             InlineKeyboardButton("↩️ Back", callback_data=f"event_back_{event.event_id}"),
         ],
         [
             InlineKeyboardButton("❌ Cancel", callback_data=f"event_cancel_{event.event_id}"),
             InlineKeyboardButton("🔒 Lock", callback_data=f"event_lock_{event.event_id}"),
         ],
-        [InlineKeyboardButton("View Logs", callback_data=f"event_logs_{event.event_id}")],
+        [InlineKeyboardButton("📝 View Logs", callback_data=f"event_logs_{event.event_id}")],
         [
             InlineKeyboardButton(
-                "Manage Constraints",
+                "🔒 Manage Constraints",
                 callback_data=f"event_constraints_{event.event_id}",
             )
         ],
+        [InlineKeyboardButton("🔄 Update", callback_data=f"event_details_{event.event_id}")],
         [InlineKeyboardButton("Close", callback_data=f"event_close_{event.event_id}")],
     ]
     if user_joined:
-        keyboard.insert(2, [InlineKeyboardButton("🛠 Modify", callback_data=f"event_modify_{event.event_id}")])
+        keyboard.insert(3, [InlineKeyboardButton("🛠 Modify", callback_data=f"event_modify_{event.event_id}")])
     avail_link = build_start_link(bot_username, f"avail_{event.event_id}")
     feedback_link = build_start_link(bot_username, f"feedback_{event.event_id}")
     if avail_link:

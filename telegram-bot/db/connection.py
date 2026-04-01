@@ -118,5 +118,23 @@ async def init_db(engine: AsyncEngine) -> None:
         - Schema reference (db/schema.sql) - Documentation
     """
     async with engine.begin() as conn:
+        # Create PostgreSQL enum types first (must match SQLAlchemy SQLEnum name= parameter)
+        await conn.execute(text("""
+            DO $$ BEGIN
+                IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'participant_status') THEN
+                    CREATE TYPE participant_status AS ENUM ('joined', 'confirmed', 'cancelled', 'no_show');
+                END IF;
+            END $$;
+        """))
+
+        await conn.execute(text("""
+            DO $$ BEGIN
+                IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'participant_role') THEN
+                    CREATE TYPE participant_role AS ENUM ('organizer', 'participant', 'observer');
+                END IF;
+            END $$;
+        """))
+
+        # Then create all tables
         await conn.run_sync(Base.metadata.create_all)
     logger.info("Database tables initialized")

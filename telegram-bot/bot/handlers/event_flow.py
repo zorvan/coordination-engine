@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 """Event flow state machine handler."""
+from datetime import datetime
+import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from sqlalchemy import select
@@ -10,7 +12,11 @@ from config.settings import settings
 from bot.common.event_states import (
     STATE_EXPLANATIONS,
 )
+from bot.common.scheduling import find_user_event_conflict
+from bot.common.event_access import get_event_admin_telegram_id, get_event_organizer_telegram_id
 from bot.services import ParticipantService, EventLifecycleService
+
+logger = logging.getLogger(__name__)
 
 
 async def handle_event_flow(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -44,31 +50,47 @@ async def handle_event_flow(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
 async def handle_join(query, context: ContextTypes.DEFAULT_TYPE, event_id: int) -> None:
     """Handle joining an event - transition to interested state."""
-    del context
     telegram_user_id = query.from_user.id
     display_name = query.from_user.full_name
     username = query.from_user.username
-    
+    bot = context.bot
+
     db_url = settings.db_url or ""
     async with get_session(db_url) as session:
         result = await session.execute(
             select(Event).where(Event.event_id == event_id)
         )
         event = result.scalar_one_or_none()
-        
+
         if not event:
             await query.edit_message_text("❌ Event not found.")
-            
             return
-        
+
         if event.state in ["locked", "completed", "cancelled"]:
             await query.edit_message_text(
                 f"❌ Cannot join event {event_id}.\n"
                 f"Current state: {event.state}\n"
                 f"Meaning: {STATE_EXPLANATIONS.get(event.state, 'Unavailable')}"
             )
-            
             return
+
+        # Check if user already joined/confirmed
+        participant_service = ParticipantService(session)
+        participant = await participant_service.get_participant(event_id, telegram_user_id)
+        
+        if participant:
+            if participant.status == ParticipantStatus.confirmed:
+                await query.answer("ℹ️ You've already confirmed", show_alert=True)
+                return
+            elif participant.status == ParticipantStatus.cancelled:
+                # Allow re-joining after cancellation - continue processing
+                pass
+            # If status is 'joined', user is clicking Join button again but already joined
+            # This shouldn't happen with proper UI, but if it does, just update their join time
+            elif participant.status == ParticipantStatus.joined:
+                # Update join time and show confirm menu
+                participant.joined_at = datetime.utcnow()
+                await session.flush()
 
         conflict = await find_user_event_conflict(
             session=session,
@@ -85,9 +107,8 @@ async def handle_join(query, context: ContextTypes.DEFAULT_TYPE, event_id: int) 
                 f"Duration: {conflict.duration_minutes or 120} minutes"
             )
             return
-        
+
         # Use ParticipantService for join operation
-        participant_service = ParticipantService(session)
         participant, is_new_join = await participant_service.join(
             event_id=event_id,
             telegram_user_id=telegram_user_id,
@@ -100,11 +121,11 @@ async def handle_join(query, context: ContextTypes.DEFAULT_TYPE, event_id: int) 
             display_name=display_name,
             username=username,
         )
-        
+
         # Check if we need to transition state from proposed to interested
         confirmed_count = await participant_service.get_confirmed_count(event_id)
         if event.state == "proposed" and confirmed_count > 0:
-            lifecycle_service = EventLifecycleService(context.bot, session)
+            lifecycle_service = EventLifecycleService(bot, session)
             try:
                 event, _ = await lifecycle_service.transition_with_lifecycle(
                     event_id=event_id,
@@ -115,7 +136,7 @@ async def handle_join(query, context: ContextTypes.DEFAULT_TYPE, event_id: int) 
                 )
             except Exception as e:
                 logger.error(f"Failed to transition event {event_id} to interested: {e}")
-        
+
         log = Log(
             event_id=event_id,
             user_id=user_id,
@@ -124,42 +145,113 @@ async def handle_join(query, context: ContextTypes.DEFAULT_TYPE, event_id: int) 
         )
         session.add(log)
         await session.commit()
-        
+
+        # Refresh event to get latest state
+        result = await session.execute(
+            select(Event).where(Event.event_id == event_id)
+        )
+        event = result.scalar_one_or_none()
+
+        # Get participant status to determine button text
+        participant = await participant_service.get_participant(event_id, telegram_user_id)
+        user_confirmed = participant and participant.status == 'confirmed'
+
+        # Button text and callback change based on user status
+        if not participant:
+            commit_text = "✅ Join"
+            commit_callback = f"event_join_{event_id}"
+        elif user_confirmed:
+            commit_text = "✓ Confirmed"
+            commit_callback = f"event_confirm_{event_id}"
+        else:
+            commit_text = "✅ Confirm"
+            commit_callback = f"event_confirm_{event_id}"
+
+        # Build comprehensive event menu with all actions
         keyboard = [
-            [InlineKeyboardButton("✅ Commit", callback_data=f"event_confirm_{event_id}")],
-            [InlineKeyboardButton("❌ Cancel", callback_data=f"event_cancel_{event_id}")],
+            # Primary actions
+            [
+                InlineKeyboardButton(commit_text, callback_data=commit_callback),
+                InlineKeyboardButton("❌ Exit", callback_data=f"event_cancel_{event_id}"),
+            ],
+            # Event management
+            [
+                InlineKeyboardButton("📋 Event Details", callback_data=f"event_details_{event_id}"),
+                InlineKeyboardButton("📊 Status", callback_data=f"event_status_{event_id}"),
+            ],
+            # Planning & constraints
+            [
+                InlineKeyboardButton("📅 Set Availability", url=f"https://t.me/{bot.username}?start=avail_{event_id}"),
+                InlineKeyboardButton("🔒 Constraints", callback_data=f"event_constraints_{event_id}"),
+            ],
+            # Feedback & logs
+            [
+                InlineKeyboardButton("📝 Logs", callback_data=f"event_logs_{event_id}"),
+                InlineKeyboardButton("💬 Feedback", callback_data=f"event_feedback_{event_id}"),
+            ],
+            # Update button
+            [
+                InlineKeyboardButton("🔄 Update", callback_data=f"event_details_{event_id}"),
+            ],
         ]
+
+        # Add modify button for organizer/admin
+        admin_id = get_event_admin_telegram_id(event)
+        organizer_id = get_event_organizer_telegram_id(event)
+        if telegram_user_id in [admin_id, organizer_id]:
+            keyboard.append([
+                InlineKeyboardButton("✏️ Modify Event", callback_data=f"event_modify_{event_id}"),
+            ])
+
         reply_markup = InlineKeyboardMarkup(keyboard)
-        
+
+        # Build rich status message
+        planning_prefs = event.planning_prefs if event.planning_prefs else {}
+        time_str = event.scheduled_time.strftime("%Y-%m-%d %H:%M") if event.scheduled_time else "TBD"
+        location = planning_prefs.get("location_type", "TBD").replace("_", " ").title()
+
+        # Get attendee counts from participant service
+        interested_count = await participant_service.get_interested_count(event_id)
+        confirmed_count = await participant_service.get_confirmed_count(event_id)
+
         await query.edit_message_text(
-            f"✅ *Joined event {event_id}!*\n\n"
-            f"State: {event.state}\n"
-            f"Meaning: {STATE_EXPLANATIONS.get(event.state, 'Unknown state')}\n"
-            f"Use /confirm <event_id> to commit attendance.",
-            reply_markup=reply_markup
+            f"✅ *You joined the event!*\n\n"
+            f"📋 *Event #{event_id}*\n"
+            f"Type: {event.event_type}\n"
+            f"Time: {time_str}\n"
+            f"Location: {location}\n"
+            f"State: {event.state}\n\n"
+            f"👥 *Participants:*\n"
+            f"Interested: {interested_count}\n"
+            f"Confirmed: {confirmed_count}\n"
+            f"Threshold: {event.threshold_attendance}\n\n"
+            f"_The event is now gathering momentum!_\n"
+            f"_Set your availability, add constraints, and engage with the group._",
+            reply_markup=reply_markup,
+            parse_mode="Markdown"
         )
         
 
 
 async def handle_confirm(query, context: ContextTypes.DEFAULT_TYPE, event_id: int) -> None:
-    """Handle commit action - move participant to committed stage."""
-    del context
+    """Handle confirm action - move participant to confirmed stage."""
     telegram_user_id = query.from_user.id
     display_name = query.from_user.full_name
     username = query.from_user.username
-    
+    bot = context.bot
+
     db_url = settings.db_url or ""
     async with get_session(db_url) as session:
         result = await session.execute(
             select(Event).where(Event.event_id == event_id)
         )
         event = result.scalar_one_or_none()
-        
+
         if not event:
             await query.edit_message_text("❌ Event not found.")
-            
+
             return
-        
+
         if event.state in ["locked", "completed", "cancelled"]:
             await query.edit_message_text(
                 f"❌ Cannot confirm event {event_id}.\n"
@@ -167,7 +259,20 @@ async def handle_confirm(query, context: ContextTypes.DEFAULT_TYPE, event_id: in
                 f"Meaning: {STATE_EXPLANATIONS.get(event.state, 'Unavailable')}\n"
                 "You can confirm only before the event is locked/completed/cancelled."
             )
-            
+            return
+
+        # Check if user already confirmed or hasn't joined
+        participant_service = ParticipantService(session)
+        participant = await participant_service.get_participant(event_id, telegram_user_id)
+        
+        if not participant:
+            await query.answer("❌ Please join first", show_alert=True)
+            return
+        elif participant.status == ParticipantStatus.confirmed:
+            await query.answer("ℹ️ You've already confirmed", show_alert=True)
+            return
+        elif participant.status == ParticipantStatus.cancelled:
+            await query.answer("❌ You cancelled - contact organizer to rejoin", show_alert=True)
             return
 
         conflict = await find_user_event_conflict(
@@ -187,7 +292,6 @@ async def handle_confirm(query, context: ContextTypes.DEFAULT_TYPE, event_id: in
             return
 
         # Use ParticipantService for confirm operation
-        participant_service = ParticipantService(session)
         participant, is_new_confirm = await participant_service.confirm(
             event_id=event_id,
             telegram_user_id=telegram_user_id,
@@ -197,7 +301,7 @@ async def handle_confirm(query, context: ContextTypes.DEFAULT_TYPE, event_id: in
         # Check if we need to transition to confirmed state
         confirmed_count = await participant_service.get_confirmed_count(event_id)
         if event.state != "confirmed" and confirmed_count > 0:
-            lifecycle_service = EventLifecycleService(context.bot, session)
+            lifecycle_service = EventLifecycleService(bot, session)
             try:
                 event, _ = await lifecycle_service.transition_with_lifecycle(
                     event_id=event_id,
@@ -215,7 +319,7 @@ async def handle_confirm(query, context: ContextTypes.DEFAULT_TYPE, event_id: in
             display_name=display_name,
             username=username,
         )
-        
+
         log = Log(
             event_id=event_id,
             user_id=user_id,
@@ -224,25 +328,80 @@ async def handle_confirm(query, context: ContextTypes.DEFAULT_TYPE, event_id: in
         )
         session.add(log)
         await session.commit()
-        
+
+        # Refresh event to get latest state
+        result = await session.execute(
+            select(Event).where(Event.event_id == event_id)
+        )
+        event = result.scalar_one_or_none()
+
+        # Build comprehensive event menu with all actions
         keyboard = [
-            [InlineKeyboardButton("↩️ Back", callback_data=f"event_back_{event_id}")],
-            [InlineKeyboardButton("🔒 Lock Event", callback_data=f"event_lock_{event_id}")],
+            # Primary actions
+            [
+                InlineKeyboardButton("↩️ Back (Uncommit)", callback_data=f"event_back_{event_id}"),
+                InlineKeyboardButton("❌ Exit", callback_data=f"event_cancel_{event_id}"),
+            ],
+            # Event management
+            [
+                InlineKeyboardButton("📋 Event Details", callback_data=f"event_details_{event_id}"),
+                InlineKeyboardButton("📊 Status", callback_data=f"event_status_{event_id}"),
+            ],
+            # Planning & constraints
+            [
+                InlineKeyboardButton("📅 Set Availability", url=f"https://t.me/{bot.username}?start=avail_{event_id}"),
+                InlineKeyboardButton("🔒 Constraints", callback_data=f"event_constraints_{event_id}"),
+            ],
+            # Feedback & logs
+            [
+                InlineKeyboardButton("📝 Logs", callback_data=f"event_logs_{event_id}"),
+                InlineKeyboardButton("💬 Feedback", callback_data=f"event_feedback_{event_id}"),
+            ],
+            # Update button
+            [
+                InlineKeyboardButton("🔄 Update", callback_data=f"event_details_{event_id}"),
+            ],
         ]
+
+        # Add lock button for organizer/admin
+        admin_id = get_event_admin_telegram_id(event)
+        organizer_id = get_event_organizer_telegram_id(event)
+        if telegram_user_id in [admin_id, organizer_id] and event.state == "confirmed":
+            keyboard.append([
+                InlineKeyboardButton("🔒 Lock Event", callback_data=f"event_lock_{event_id}"),
+            ])
+
         reply_markup = InlineKeyboardMarkup(keyboard)
-        
+
+        # Build rich status message
+        planning_prefs = event.planning_prefs if event.planning_prefs else {}
+        time_str = event.scheduled_time.strftime("%Y-%m-%d %H:%M") if event.scheduled_time else "TBD"
+        location = planning_prefs.get("location_type", "TBD").replace("_", " ").title()
+
+        # Get attendee counts from participant service
+        interested_count = await participant_service.get_interested_count(event_id)
+        confirmed_count = await participant_service.get_confirmed_count(event_id)
+
         await query.edit_message_text(
-            f"✅ *Committed to event {event_id}!*\n\n"
-            f"State: confirmed\n"
-            f"Meaning: {STATE_EXPLANATIONS['confirmed']}\n"
-            f"Use /back to revert commitment or /lock to lock the event.",
-            reply_markup=reply_markup
+            f"✅ *You confirmed to the event!*\n\n"
+            f"📋 *Event #{event_id}*\n"
+            f"Type: {event.event_type}\n"
+            f"Time: {time_str}\n"
+            f"Location: {location}\n"
+            f"State: {event.state}\n\n"
+            f"👥 *Participants:*\n"
+            f"Interested: {interested_count}\n"
+            f"Confirmed: {confirmed_count}\n"
+            f"Threshold: {event.threshold_attendance}\n\n"
+            f"_Your confirmation helps the event reach critical mass!_\n"
+            f"_You can go back before the event is locked._",
+            reply_markup=reply_markup,
+            parse_mode="Markdown"
         )
 
 
 async def handle_back(query, context: ContextTypes.DEFAULT_TYPE, event_id: int) -> None:
     """Revert personal confirmation to interested before lock."""
-    del context
     telegram_user_id = query.from_user.id
     db_url = settings.db_url or ""
     async with get_session(db_url) as session:
@@ -256,47 +415,53 @@ async def handle_back(query, context: ContextTypes.DEFAULT_TYPE, event_id: int) 
             await query.edit_message_text("❌ Event is locked. Cannot go back.")
             return
 
-        attendance, had_confirmed = revert_confirmed_to_joined(
-            event.attendance_list,
-            telegram_user_id,
-        )
-        if not had_confirmed:
+        # Use ParticipantService for back operation (new system)
+        participant_service = ParticipantService(session)
+        participant = await participant_service.get_participant(event_id, telegram_user_id)
+        
+        if not participant or participant.status != ParticipantStatus.confirmed:
             await query.edit_message_text(
                 "ℹ️ You are not confirmed in this event."
             )
             return
 
-        event.attendance_list = attendance
-        event.state = derive_state_from_attendance(attendance)
+        # Revert to joined (interested)
+        participant.status = ParticipantStatus.joined
         await session.commit()
+
+        # Update event state if needed
+        confirmed_count = await participant_service.get_confirmed_count(event_id)
+        if confirmed_count == 0 and event.state == "confirmed":
+            event.state = "interested"
+            await session.commit()
 
     await query.edit_message_text(
         f"↩️ Confirmation reverted for event {event_id}.\n"
         f"State: {event.state}\n"
         "You are now in interested state."
     )
-        
+
 
 
 async def handle_cancel(query, context: ContextTypes.DEFAULT_TYPE, event_id: int) -> None:
     """Handle cancelling attendance for the clicking user."""
-    del context
     telegram_user_id = query.from_user.id
     display_name = query.from_user.full_name
     username = query.from_user.username
-    
+    bot = context.bot
+
     db_url = settings.db_url or ""
     async with get_session(db_url) as session:
         result = await session.execute(
             select(Event).where(Event.event_id == event_id)
         )
         event = result.scalar_one_or_none()
-        
+
         if not event:
             await query.edit_message_text("❌ Event not found.")
-            
+
             return
-        
+
         # Use ParticipantService for cancel operation
         participant_service = ParticipantService(session)
         try:
@@ -314,7 +479,7 @@ async def handle_cancel(query, context: ContextTypes.DEFAULT_TYPE, event_id: int
         if event.state not in {"locked", "completed", "cancelled"} and confirmed_count == 0:
             # If no one is confirmed anymore, go back to interested or proposed
             new_state = "interested" if confirmed_count > 0 else "proposed"
-            lifecycle_service = EventLifecycleService(context.bot, session)
+            lifecycle_service = EventLifecycleService(bot, session)
             try:
                 event, _ = await lifecycle_service.transition_with_lifecycle(
                     event_id=event_id,
@@ -352,20 +517,21 @@ async def handle_cancel(query, context: ContextTypes.DEFAULT_TYPE, event_id: int
 
 async def handle_lock(query, context: ContextTypes.DEFAULT_TYPE, event_id: int) -> None:
     """Handle locking an event - transition from confirmed to locked."""
-    del context
-    
+    telegram_user_id = query.from_user.id
+    bot = context.bot
+
     db_url = settings.db_url or ""
     async with get_session(db_url) as session:
         result = await session.execute(
             select(Event).where(Event.event_id == event_id)
         )
         event = result.scalar_one_or_none()
-        
+
         if not event:
             await query.edit_message_text("❌ Event not found.")
-            
+
             return
-        
+
         if event.state != "confirmed":
             await query.edit_message_text(
                 f"❌ Cannot lock event {event_id}.\n"
@@ -373,16 +539,16 @@ async def handle_lock(query, context: ContextTypes.DEFAULT_TYPE, event_id: int) 
                 f"Meaning: {STATE_EXPLANATIONS.get(event.state, 'Unavailable')}\n"
                 "You can lock only when state is 'confirmed'."
             )
-            
+
             return
-        
+
         # Use EventLifecycleService for state transition with full integration
-        lifecycle_service = EventLifecycleService(context.bot, session)
+        lifecycle_service = EventLifecycleService(bot, session)
         try:
             event, _ = await lifecycle_service.transition_with_lifecycle(
                 event_id=event_id,
                 target_state="locked",
-                actor_telegram_user_id=query.from_user.id,
+                actor_telegram_user_id=telegram_user_id,
                 source="callback",
                 reason="Manual lock via callback",
                 expected_version=event.version,
@@ -390,42 +556,44 @@ async def handle_lock(query, context: ContextTypes.DEFAULT_TYPE, event_id: int) 
         except Exception as e:
             await query.edit_message_text(f"❌ Failed to lock event: {str(e)}")
             return
-        
-        # Finalize commitments - TODO: Move to ParticipantService
-        if event.attendance_list:
-            event.attendance_list, _ = finalize_commitments(event.attendance_list)
-            await session.commit()
-        
+
+        # Finalize commitments using ParticipantService (new system)
+        participant_service = ParticipantService(session)
+        await participant_service.finalize_commitments(event_id)
+
         await query.edit_message_text(
             f"🔒 *Event {event_id} locked!*\n\n"
             f"State: locked\n"
             f"Meaning: {STATE_EXPLANATIONS['locked']}\n"
             f"Locked at: {event.locked_at}"
         )
-        
+
 
 
 async def show_event_details(query, context: ContextTypes.DEFAULT_TYPE, event_id: int) -> None:
     """Show detailed event information."""
-    del context
     db_url = settings.db_url or ""
     async with get_session(db_url) as session:
         result = await session.execute(
             select(Event).where(Event.event_id == event_id)
         )
         event = result.scalar_one_or_none()
-        
+
         if not event:
             await query.edit_message_text("❌ Event not found.")
-            
             return
-        
+
+        # Get participant count from new system
+        participant_service = ParticipantService(session)
+        counts = await participant_service.get_counts(event_id)
+        total_attendees = counts.get("total", 0)
+
         await query.edit_message_text(
             f"📋 *Event {event_id}*\n\n"
             f"Type: {event.event_type}\n"
             f"Time: {event.scheduled_time}\n"
             f"State: {event.state}\n"
             f"Threshold: {event.threshold_attendance}\n"
-            f"Attendees: {len(event.attendance_list)}"
+            f"Attendees: {total_attendees}"
         )
         

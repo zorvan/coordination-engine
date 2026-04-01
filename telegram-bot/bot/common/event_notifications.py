@@ -9,6 +9,7 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 
 from bot.common.deeplinks import build_start_link
+from bot.common.event_presenters import format_user_display
 from config.settings import settings
 
 
@@ -97,16 +98,49 @@ async def send_event_invitation_dm(
     transport_text = str(event_data.get("transport_mode", "any")).replace("_", " ").title()
     date_preset_text = str(event_data.get("date_preset", "custom")).title()
     time_window_text = str(event_data.get("time_window", "custom")).title()
-    
-    # Format organizer as clickable mention
+
+    # Escape description for Markdown (avoid parsing errors with special chars)
+    description_raw = event_data.get("description", "N/A")
+    escaped_description = (
+        str(description_raw)
+        .replace("[", "\\[")
+        .replace("]", "\\]")
+        .replace("_", "\\_")
+        .replace("*", "\\*")
+        .replace("`", "\\`")
+    )
+
+    # Format organizer as clickable mention - fetch from DB if not in event_data
     organizer_text = "N/A"
     organizer_user_id = event_data.get("organizer_telegram_user_id")
     organizer_username = event_data.get("organizer_username")
-    if organizer_user_id and organizer_username:
-        organizer_text = f"[@{organizer_username}](tg://user?id={organizer_user_id})"
-    elif organizer_user_id:
-        organizer_text = f"[🔗 User {organizer_user_id}](tg://user?id={organizer_user_id})"
+    organizer_display_name = event_data.get("organizer_display_name")
     
+    # If username not provided, try to fetch from database
+    if organizer_user_id and not organizer_username:
+        try:
+            from db.connection import get_session
+            from db.models import User
+            from sqlalchemy import select
+            async with get_session(settings.db_url) as session:
+                org_user = (
+                    await session.execute(
+                        select(User).where(User.telegram_user_id == int(organizer_user_id))
+                    )
+                ).scalar_one_or_none()
+                if org_user:
+                    organizer_username = getattr(org_user, "username", None)
+                    organizer_display_name = getattr(org_user, "display_name", None)
+        except Exception:
+            pass  # Use whatever we have
+    
+    if organizer_user_id:
+        organizer_text = format_user_display(
+            telegram_user_id=organizer_user_id,
+            username=organizer_username,
+            display_name=organizer_display_name,
+        )
+
     try:
         await context.bot.send_message(
             chat_id=telegram_user_id,
@@ -115,7 +149,7 @@ async def send_event_invitation_dm(
                 f"Event ID: {event_id}\n"
                 f"Organized by: {organizer_text}\n"
                 f"Type: {event_data.get('event_type', 'N/A')}\n"
-                f"Description: {event_data.get('description', 'N/A')}\n"
+                f"Description: {escaped_description}\n"
                 f"Time: {scheduled_time}\n"
                 f"Date Preset: {date_preset_text}\n"
                 f"Time Window: {time_window_text}\n"

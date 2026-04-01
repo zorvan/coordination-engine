@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any
 import logging
 import re
 from uuid import uuid4
@@ -21,12 +22,8 @@ from bot.commands import event_creation, request_confirmations, suggest_time
 from bot.common.scheduling import find_user_event_conflict
 from bot.common.attendance import (
     derive_state_from_attendance,
-    finalize_commitments,
     has_attendee,
     has_confirmed,
-    mark_confirmed,
-    mark_joined,
-    remove_attendee,
 )
 from bot.services import ParticipantService, EventLifecycleService
 from bot.common.event_notifications import (
@@ -147,6 +144,9 @@ async def handle_mention(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             await llm.close()
 
     action_type = str(action.get("action_type", "opinion")).strip().lower()
+    logger.debug(f"Mention inference: action_type={action_type}, event_id={action.get('event_id')}, text={text[:100]}")
+    
+    # Handle organize_event actions (these don't need event_id - they CREATE events)
     if action_type in {"organize_event", "organize_event_flexible"}:
         mode = "flexible" if action_type == "organize_event_flexible" else "public"
         llm = LLMClient()
@@ -177,6 +177,8 @@ async def handle_mention(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await message.reply_text(f"🤖 {response}")
         return
 
+    # For actions that need an event_id, check if we have one
+    # If not, ask user to clarify which event
     if action_type in {
         "join",
         "confirm",
@@ -184,9 +186,37 @@ async def handle_mention(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         "lock",
         "request_confirmations",
     } and not action.get("event_id"):
+        # Check if the message might be about organizing a new event
+        lowered_text = text.lower()
+        if any(kw in lowered_text for kw in ["organize", "organise", "create", "plan", "new event"]):
+            # User might be trying to organize - start that flow instead
+            mode = "flexible" if "flexible" in lowered_text else "public"
+            llm = LLMClient()
+            try:
+                draft = await llm.infer_event_draft_from_context(
+                    message_text=text,
+                    history=history,
+                )
+            finally:
+                await llm.close()
+            await _handle_organize_event_direct(
+                update=update,
+                context=context,
+                mode=mode,
+                draft=draft,
+                chat=chat,
+                user=user,
+            )
+            return
+        
         await message.reply_text(
-            "❌ I inferred an action, but event ID is missing.\n"
-            "Use a specific message like: `confirm event 12`."
+            f"❌ I inferred you want to **{action_type}**, but I'm not sure which event.\n\n"
+            f"Please specify the event ID or mention it in your message.\n\n"
+            f"Examples:\n"
+            f"• `confirm event 12`\n"
+            f"• `@bot join 12`\n"
+            f"• `@bot cancel event 5`",
+            parse_mode="Markdown",
         )
         return
 
@@ -693,6 +723,8 @@ async def _execute_inferred_action(
             context=context,
             reply_message=reply_message,
             requester_telegram_user_id=requester_id,
+            requester_display_name=requester_display_name,
+            requester_username=requester_username,
             event_id=event_id,
             target_username=target_username,
             constraint_type=constraint_type,
@@ -760,7 +792,7 @@ async def _send_status(reply_message, event_id: int) -> None:
             ).scalar_one()
         )
     await reply_message.reply_text(
-        await format_status_message(event_id, event, log_count, constraint_count)
+        await format_status_message(event_id, event, log_count, constraint_count, context.bot)
     )
 
 
@@ -797,7 +829,7 @@ async def _send_event_details(reply_message, event_id: int) -> None:
         )
     await reply_message.reply_text(
         await format_event_details_message(
-            event_id, event, list(logs), list(constraints)
+            event_id, event, list(logs), list(constraints), context.bot
         )
     )
 
@@ -806,6 +838,8 @@ async def _save_constraint_from_inferred(
     context: ContextTypes.DEFAULT_TYPE,
     reply_message,
     requester_telegram_user_id: int,
+    requester_display_name: str | None,
+    requester_username: str | None,
     event_id: int,
     target_username: str,
     constraint_type: str,
@@ -838,8 +872,8 @@ async def _save_constraint_from_inferred(
         source_user_id = await get_or_create_user_id(
             session,
             telegram_user_id=requester_telegram_user_id,
-            display_name=None,
-            username=None,
+            display_name=requester_display_name,
+            username=requester_username,
         )
         target_user_id = await get_user_id_by_username(session, target_input)
         if target_user_id is None:
@@ -1108,7 +1142,7 @@ async def _apply_participation_action(
         )
     elif action_type == "confirm":
         await reply_message.reply_text(
-            f"✅ Committed to event {event_id}.\nEvent state is now `confirmed`."
+            f"✅ Confirmed for event {event_id}.\nEvent state is now `confirmed`."
         )
     else:
         await reply_message.reply_text(f"❌ Attendance cancelled for event {event_id}.")
@@ -1133,14 +1167,132 @@ async def _apply_lock_action(reply_message, event_id: int) -> None:
                 "Lock is allowed only when state is `confirmed`."
             )
             return
+        
+        # Use ParticipantService to finalize commitments (new system)
+        participant_service = ParticipantService(session)
+        await participant_service.finalize_commitments(event_id)
+        
         event.state = "locked"
-        event.attendance_list, _ = finalize_commitments(event.attendance_list)
         event.locked_at = datetime.utcnow()
         await session.commit()
 
     await reply_message.reply_text(
         f"🔒 Event {event_id} locked successfully at {datetime.utcnow().isoformat()}."
     )
+
+
+async def _start_interactive_event_flow(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    mode: str,
+    draft: dict,
+    chat,
+    user,
+) -> None:
+    """
+    Start interactive event creation flow with pre-filled data from LLM draft.
+    
+    This allows the bot to ask for missing parameters while using inferred values
+    for what the LLM could extract from context.
+    """
+    from bot.commands.event_creation import start_event_flow
+    
+    creator_id = user.id if user else None
+    
+    # Start the standard event flow first
+    await start_event_flow(update, context, mode=mode)
+    
+    # Now pre-fill the flow data with inferred values from the draft
+    if context.user_data is None:
+        return
+    
+    flow_key = "private_event_flow" if mode == "private" else "event_flow"
+    event_flow_raw = context.user_data.get(flow_key)
+    if not isinstance(event_flow_raw, dict):
+        return
+    
+    event_flow: dict[str, Any] = event_flow_raw
+    flow_data = event_flow.get("data")
+    if not isinstance(flow_data, dict):
+        flow_data = {}
+        event_flow["data"] = flow_data
+    
+    # Pre-fill with inferred values (only if present in draft)
+    if draft.get("description"):
+        flow_data["description"] = str(draft.get("description")).strip()[:500]
+    if draft.get("event_type"):
+        event_type = str(draft.get("event_type")).strip().lower()
+        if event_type in event_creation.ALLOWED_EVENT_TYPES:
+            flow_data["event_type"] = event_type
+    if draft.get("threshold_attendance"):
+        try:
+            flow_data["threshold_attendance"] = max(1, int(draft.get("threshold_attendance", 3)))
+        except (TypeError, ValueError):
+            pass
+    if draft.get("duration_minutes"):
+        try:
+            flow_data["duration_minutes"] = max(30, int(draft.get("duration_minutes", 120)))
+        except (TypeError, ValueError):
+            pass
+    if draft.get("scheduled_time") and isinstance(draft.get("scheduled_time"), str):
+        try:
+            parsed = datetime.fromisoformat(draft.get("scheduled_time").strip())
+            flow_data["scheduled_time"] = parsed.isoformat(timespec="minutes")
+            if mode == "public":
+                flow_data["scheduling_mode"] = "fixed"
+        except ValueError:
+            pass
+    if draft.get("location_type"):
+        location_type = str(draft.get("location_type")).strip().lower()
+        if location_type in {value for _, value in event_creation.LOCATION_PRESETS}:
+            flow_data["location_type"] = location_type
+    if draft.get("budget_level"):
+        budget_level = str(draft.get("budget_level")).strip().lower()
+        if budget_level in {value for _, value in event_creation.BUDGET_PRESETS}:
+            flow_data["budget_level"] = budget_level
+    if draft.get("transport_mode"):
+        transport_mode = str(draft.get("transport_mode")).strip().lower()
+        if transport_mode in {value for _, value in event_creation.TRANSPORT_PRESETS}:
+            flow_data["transport_mode"] = transport_mode
+    if draft.get("date_preset"):
+        date_preset = str(draft.get("date_preset")).strip().lower()
+        if date_preset in event_creation.DATE_PRESET_LABELS:
+            flow_data["date_preset"] = date_preset
+    if draft.get("time_window"):
+        time_window = str(draft.get("time_window")).strip().lower()
+        if time_window in event_creation.TIME_WINDOWS:
+            flow_data["time_window"] = time_window
+    if draft.get("planning_notes"):
+        notes = draft.get("planning_notes", [])
+        flow_data["planning_notes"] = (
+            [str(x).strip()[:300] for x in notes if str(x).strip()]
+            if isinstance(notes, list)
+            else []
+        )
+    
+    context.user_data[flow_key] = event_flow
+    
+    # Notify user about the inferred values and continue the flow
+    inferred_msg = "🤖 I've inferred some details from your message:\n\n"
+    inferred_items = []
+    if flow_data.get("description"):
+        inferred_items.append(f"• Description: {flow_data['description']}")
+    if flow_data.get("event_type"):
+        inferred_items.append(f"• Type: {flow_data['event_type']}")
+    if flow_data.get("scheduled_time"):
+        inferred_items.append(f"• Time: {flow_data['scheduled_time']}")
+    if flow_data.get("location_type"):
+        inferred_items.append(f"• Location: {flow_data['location_type']}")
+    
+    if inferred_items:
+        inferred_msg += "\n".join(inferred_items)
+        inferred_msg += "\n\nI'll guide you through the remaining details to set up the event."
+        await update.message.reply_text(inferred_msg)
+    else:
+        await update.message.reply_text(
+            "🤖 Let me help you organize an event!\n\n"
+            "I'll guide you through the setup process."
+        )
 
 
 async def _handle_organize_event_direct(
@@ -1151,12 +1303,35 @@ async def _handle_organize_event_direct(
     chat,
     user,
 ) -> None:
-    """Directly create event from LLM draft without interactive flow."""
+    """
+    Create event from LLM draft, or start interactive flow if parameters are missing.
+    
+    If the draft has sufficient information (at minimum a description), creates the event directly.
+    Otherwise, starts the interactive event creation flow with pre-filled data from the draft.
+    """
     if not settings.db_url:
         await update.message.reply_text("❌ Database configuration is unavailable.")
         return
 
-    description = str(draft.get("description") or "Group planned event").strip()[:500]
+    # Check if we have minimum required information
+    description = draft.get("description")
+    has_description = bool(description and str(description).strip())
+    
+    # If missing critical info (description), start interactive flow instead
+    if not has_description:
+        # Start interactive flow with pre-filled data from draft
+        await _start_interactive_event_flow(
+            update=update,
+            context=context,
+            mode=mode,
+            draft=draft,
+            chat=chat,
+            user=user,
+        )
+        return
+
+    # We have a description, proceed with direct creation
+    description = str(description).strip()[:500]
     event_type = str(draft.get("event_type") or "social").strip().lower()
     if event_type not in event_creation.ALLOWED_EVENT_TYPES:
         event_type = "social"
@@ -1266,7 +1441,6 @@ async def _handle_organize_event_direct(
             commit_by=commit_by,
             duration_minutes=duration,
             threshold_attendance=threshold,
-            attendance_list=[f"{creator_id}:interested"] if creator_id else [],
             planning_prefs={
                 "date_preset": date_preset,
                 "time_window": time_window,
@@ -1281,6 +1455,15 @@ async def _handle_organize_event_direct(
         await session.commit()
         await session.refresh(event)
 
+        # Add creator as participant using new system
+        participant_service = ParticipantService(session)
+        await participant_service.join(
+            event_id=event.event_id,
+            telegram_user_id=creator_id,
+            source="mention",
+            role="organizer"
+        )
+
         group_members = group.member_list or []
 
         async with get_session(settings.db_url) as session:
@@ -1290,6 +1473,7 @@ async def _handle_organize_event_direct(
                 )
             ).scalar_one_or_none()
             organizer_username = organizer_user.username if organizer_user else None
+            organizer_display_name = organizer_user.display_name if organizer_user else None
 
             data_for_dm = {
                 "description": description,
@@ -1307,6 +1491,7 @@ async def _handle_organize_event_direct(
                 "planning_notes": planning_notes,
                 "organizer_telegram_user_id": creator_id,
                 "organizer_username": organizer_username,
+                "organizer_display_name": organizer_display_name,
             }
 
             # Send invitations
@@ -1314,12 +1499,12 @@ async def _handle_organize_event_direct(
             dm_failed = 0
 
             if invite_all:
-                # Public event: DM all group members
+                # Public event: DM all group members (excluding creator who gets admin DM)
                 logger.info(
                     f"Public event {event.event_id}: Sending DMs to all {len(group_members)} group members"
                 )
                 for telegram_user_id in group_members:
-                    if telegram_user_id:
+                    if telegram_user_id and telegram_user_id != creator_id:
                         try:
                             await send_event_invitation_dm(
                                 context,
@@ -1406,6 +1591,32 @@ async def _handle_organize_event_direct(
                 f"Event {event.event_id} DM distribution complete: {dm_count} sent, {dm_failed} failed"
             )
 
+            # Prepare display texts for admin summary
+            scheduled_time_display = (
+                str(scheduled_time_raw).replace("T", " ")
+                if scheduled_time_raw
+                else "TBD (flexible scheduling)"
+            )
+            commit_by_text = (
+                commit_by.isoformat(timespec="minutes").replace("T", " ")
+                if commit_by is not None
+                else "N/A"
+            )
+            invitees_summary = (
+                "all group members" if invite_all else f"{len(invitees)} users"
+            )
+            location_text = location_type.replace("_", " ").title()
+            budget_text = budget_level.replace("_", " ").title()
+            transport_text = transport_mode.replace("_", " ").title()
+            date_preset_text = event_creation.DATE_PRESET_LABELS.get(
+                date_preset,
+                date_preset.title(),
+            )
+            time_window_text = time_window.title()
+
+            # Escape description for Markdown (avoid parsing errors with special chars)
+            escaped_description = description.replace("[", "\\[").replace("]", "\\]").replace("_", "\\_").replace("*", "\\*").replace("`", "\\`")
+
             if creator_id:
                 # Send full details to admin via DM
                 full_admin_summary = (
@@ -1413,8 +1624,8 @@ async def _handle_organize_event_direct(
                     f"Event ID: `{event.event_id}`\n"
                     f"State: proposed (awaiting confirmations)\n\n"
                     f"Type: {event_type}\n"
-                    f"Description: {description}\n"
-                    f"Time: {scheduled_time}\n"
+                    f"Description: {escaped_description}\n"
+                    f"Time: {scheduled_time_display}\n"
                     f"Commit-By: {commit_by_text}\n"
                     f"Date Preset: {date_preset_text}\n"
                     f"Time Window: {time_window_text}\n"
@@ -1461,49 +1672,53 @@ async def _handle_organize_event_direct(
                     f"Full event details sent to admin {creator_id} via DM for event {event.event_id}"
                 )
 
-        scheduled_time = (
+        # Prepare group message display texts
+        scheduled_time_group = (
             str(scheduled_time_raw).replace("T", " ")
             if scheduled_time_raw
             else "TBD (flexible scheduling)"
         )
-        commit_by_text = (
+        commit_by_group = (
             commit_by.isoformat(timespec="minutes").replace("T", " ")
             if commit_by is not None
             else "N/A"
         )
-        invitees_summary = (
+        invitees_group = (
             "all group members" if invite_all else f"{len(invitees)} users"
         )
-        location_text = location_type.replace("_", " ").title()
-        budget_text = budget_level.replace("_", " ").title()
-        transport_text = transport_mode.replace("_", " ").title()
-        date_preset_text = event_creation.DATE_PRESET_LABELS.get(
+        location_group = location_type.replace("_", " ").title()
+        budget_group = budget_level.replace("_", " ").title()
+        transport_group = transport_mode.replace("_", " ").title()
+        date_preset_group = event_creation.DATE_PRESET_LABELS.get(
             date_preset,
             date_preset.title(),
         )
-        time_window_text = time_window.title()
+        time_window_group = time_window.title()
+
+        # Escape description for Markdown in group message too
+        escaped_desc_group = description.replace("[", "\\[").replace("]", "\\]").replace("_", "\\_").replace("*", "\\*").replace("`", "\\`")
 
         group_message = (
             f"✅ *Event Created!*\n\n"
             f"Event ID: {event.event_id}\n"
             f"Type: {event_type}\n"
-            f"Description: {description}\n"
-            f"Time: {scheduled_time}\n"
-            f"Commit-By: {commit_by_text}\n"
-            f"Date Preset: {date_preset_text}\n"
-            f"Time Window: {time_window_text}\n"
+            f"Description: {escaped_desc_group}\n"
+            f"Time: {scheduled_time_group}\n"
+            f"Commit-By: {commit_by_group}\n"
+            f"Date Preset: {date_preset_group}\n"
+            f"Time Window: {time_window_group}\n"
             f"Duration: {duration} minutes\n"
             f"Mode: {scheduling_mode}\n"
-            f"Location Type: {location_text}\n"
-            f"Budget: {budget_text}\n"
-            f"Transport: {transport_text}\n"
+            f"Location Type: {location_group}\n"
+            f"Budget: {budget_group}\n"
+            f"Transport: {transport_group}\n"
             f"Threshold: {threshold}\n"
-            f"Invitees: {invitees_summary}"
+            f"Invitees: {invitees_group}"
             + "\n\n✅ Event ready for confirmation. Run /confirm <event_id> to lock it.\n"
             + (
-                f"Event Admin: @{organizer_username}"
+                f"Event Admin: {organizer_username}"
                 if organizer_username
-                else "Event Admin: Unknown"
+                else f"Event Admin: {creator_id}"
             )
         )
 

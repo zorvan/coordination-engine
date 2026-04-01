@@ -22,6 +22,7 @@ from bot.common.moderation import (
 )
 from bot.common.user_preferences import get_group_aggregate_preferences
 from bot.common.reputation_trends import get_user_reliability_trend
+from bot.common.event_presenters import format_user_display
 from bot.common.attendance import parse_attendance_with_status
 
 
@@ -167,6 +168,19 @@ async def handle_reliability(update: Update, context: ContextTypes.DEFAULT_TYPE)
             await update.message.reply_text("❌ Could not resolve user.")
             return
         
+        # Fetch user information for display
+        result = await session.execute(
+            select(User).where(User.telegram_user_id == target_telegram_id)
+        )
+        target_user = result.scalar_one_or_none()
+        
+        user_display = format_user_display(
+            telegram_user_id=target_telegram_id,
+            username=target_user.username if target_user and getattr(target_user, "username", None) else None,
+            display_name=target_user.display_name if target_user and getattr(target_user, "display_name", None) else None,
+            include_link=False,
+        )
+        
         # Get reliability trend
         trend = await get_user_reliability_trend(session, target_telegram_id)
         
@@ -175,7 +189,7 @@ async def handle_reliability(update: Update, context: ContextTypes.DEFAULT_TYPE)
             return
         
         lines = [
-            f"📊 *Reliability Trend for User {target_telegram_id}*",
+            f"📊 *Reliability Trend for {user_display}*",
             "",
             f"Current Score: {trend.get('current_score', 0):.2f}",
             f"Events Participated: {trend.get('total_events', 0)}",
@@ -307,6 +321,19 @@ async def handle_moderation_actions(update: Update, context: ContextTypes.DEFAUL
             await update.message.reply_text("❌ Could not resolve user.")
             return
         
+        # Fetch user information for display
+        result = await session.execute(
+            select(User).where(User.telegram_user_id == target_telegram_id)
+        )
+        target_user = result.scalar_one_or_none()
+        
+        user_display = format_user_display(
+            telegram_user_id=target_telegram_id,
+            username=target_user.username if target_user and getattr(target_user, "username", None) else None,
+            display_name=target_user.display_name if target_user and getattr(target_user, "display_name", None) else None,
+            include_link=False,
+        )
+        
         # Get moderation logs
         result = await session.execute(
             select(Log).where(
@@ -330,7 +357,7 @@ async def handle_moderation_actions(update: Update, context: ContextTypes.DEFAUL
             return
         
         lines = [
-            f"👮 *Moderation Actions for User {target_telegram_id}*",
+            f"👮 *Moderation Actions for {user_display}*",
             "",
             f"Logs: {len(logs)}",
             f"Feedback: {len(feedbacks)}",

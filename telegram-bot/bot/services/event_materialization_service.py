@@ -124,19 +124,19 @@ class EventMaterializationService:
     ) -> None:
         """
         Subtle signal amplification for high-reliability participants.
-        
-        Message: "[Name] just committed." (Signal only - no explicit score)
-        
+
+        Message: "[Name] just confirmed." (Signal only - no explicit score)
+
         PRD Design rule: Never show reliability score publicly.
         """
         name = self._get_display_name(user)
-        
+
         # Use reliability signal (e.g., "been to every session", "always confirms early")
-        message = f"🌟 {name} just committed{reliability_signal}."
-        
+        message = f"🌟 {name} just confirmed{reliability_signal}."
+
         await self._send_to_group(group_chat_id, message)
         logger.info(
-            "Announced high-reliability join",
+            "Announced high-reliability confirmation",
             extra={"event_id": event.event_id, "user": user.user_id}
         )
     
@@ -158,7 +158,7 @@ class EventMaterializationService:
         for p in participants:
             if p.status in {ParticipantStatus.confirmed, ParticipantStatus.joined}:
                 user_result = await self.session.execute(
-                    sqlalchemy.select(User).where(User.user_id == p.user_id)
+                    sqlalchemy.select(User).where(User.telegram_user_id == p.telegram_user_id)
                 )
                 user = user_result.scalar_one_or_none()
                 if user:

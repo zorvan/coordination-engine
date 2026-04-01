@@ -760,6 +760,7 @@ async def start_event_flow(
             "budget_level": "medium",
             "transport_mode": "any",
             "planning_notes": [],
+            "invite_all_members": True,  # Default to inviting all group members for public events
         },
     }
 
@@ -1638,17 +1639,20 @@ async def finalize_event(
 
     context.user_data.pop("event_flow", None)
 
-    send_to_all_members = bool(data.get("invite_all_members"))
+    send_to_all_members = bool(data.get("invite_all_members", True))  # Default to True for public events
     invitees = list(data.get("invitees", []))
+    
+    logger.info(f"Event {event.event_id}: send_to_all_members={send_to_all_members}, invitees={invitees}")
 
     async with get_session(settings.db_url) as session:
-        # Get organizer's username for display in invitation
+        # Get organizer's username and display_name for display in invitation
         organizer_user = (
             await session.execute(
                 select(User).where(User.telegram_user_id == int(creator_id))
             )
         ).scalar_one_or_none()
         organizer_username = organizer_user.username if organizer_user else None
+        organizer_display_name = organizer_user.display_name if organizer_user else None
 
         group = (
             await session.execute(select(Group).where(Group.group_id == group_id))
@@ -1657,6 +1661,7 @@ async def finalize_event(
         # Add organizer info to data for the invitation message
         data["organizer_telegram_user_id"] = int(creator_id)
         data["organizer_username"] = organizer_username
+        data["organizer_display_name"] = organizer_display_name
 
         group_members = group.member_list or []
 
@@ -1665,12 +1670,12 @@ async def finalize_event(
         dm_failed = 0
 
         if send_to_all_members:
-            # Public event: DM all group members
+            # Public event: DM all group members (excluding creator who gets admin DM)
             logger.info(
                 f"Public event {event.event_id}: Sending DMs to all {len(group_members)} group members"
             )
             for telegram_user_id in group_members:
-                if telegram_user_id:
+                if telegram_user_id and telegram_user_id != creator_id:
                     try:
                         sent = await send_event_invitation_dm(
                             context,
@@ -1789,9 +1794,7 @@ async def finalize_event(
         f"Event ID: `{event.event_id}`\n"
         f"Type: {data.get('event_type', 'N/A')}\n"
         f"Invitees: {invitees_summary}\n"
-        f"Admin: @{organizer_username}"
-        if organizer_username
-        else "Event Admin: Unknown"
+        f"Admin: {organizer_username if organizer_username else creator_id}"
     )
 
     await query.edit_message_text(group_summary)
@@ -2087,9 +2090,9 @@ async def finalize_private_event(
         f"✅ Event has been automatically locked.\n"
         f"Status: Locked - No further changes allowed.\n\n"
         + (
-            f"Event Admin: @{organizer_username}"
+            f"Event Admin: {organizer_username if organizer_username else creator_id}"
             if organizer_username
-            else "Event Admin: Unknown"
+            else f"Event Admin: {creator_id}"
         ),
         reply_markup=reply_markup,
     )

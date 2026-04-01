@@ -5,20 +5,26 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from db.models import Event
+from db.models import Event, EventParticipant, ParticipantStatus
 
 
 DEFAULT_DURATION_MINUTES = 120
 ACTIVE_STATES = {"proposed", "interested", "confirmed", "locked"}
 
 
-def _user_in_attendance(attendance_list: list[Any] | None, telegram_user_id: int) -> bool:
-    """Check whether a user is listed in attendance."""
-    for item in attendance_list or []:
-        text = str(item)
-        if text == str(telegram_user_id) or text.startswith(f"{telegram_user_id}:"):
-            return True
-    return False
+async def _user_in_event(session: AsyncSession, event_id: int, telegram_user_id: int) -> bool:
+    """Check whether a user is participant in event (new system)."""
+    result = await session.execute(
+        select(EventParticipant).where(
+            EventParticipant.event_id == event_id,
+            EventParticipant.telegram_user_id == telegram_user_id,
+            EventParticipant.status.in_([
+                ParticipantStatus.joined,
+                ParticipantStatus.confirmed,
+            ])
+        )
+    )
+    return result.scalar_one_or_none() is not None
 
 
 def events_overlap(
@@ -55,7 +61,8 @@ async def find_user_event_conflict(
     for event in events:
         if ignore_event_id is not None and event.event_id == ignore_event_id:
             continue
-        if not _user_in_attendance(event.attendance_list, telegram_user_id):
+        # Check if user is participant using new system
+        if not await _user_in_event(session, event.event_id, telegram_user_id):
             continue
         if events_overlap(
             start_time,

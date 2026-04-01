@@ -1,11 +1,18 @@
-"""Shared attendance/state transition helpers."""
+"""Shared attendance/state transition helpers.
+
+NOTE: This module handles the LEGACY attendance_list JSON column.
+The current system uses the event_participants table with ParticipantStatus enum.
+Legacy status 'committed' is mapped to 'confirmed' for consistency.
+"""
 from __future__ import annotations
 
 from typing import Any
 
-ATTENDEE_STATUSES = ("invited", "interested", "committed", "confirmed")
-ACTIVE_ATTENDEE_STATUSES = {"interested", "committed", "confirmed"}
-PRE_LOCK_CONFIRMED_STATUSES = {"committed", "confirmed"}
+# Legacy statuses (for attendance_list JSON column)
+# 'committed' is legacy - mapped to 'confirmed' in new system
+ATTENDEE_STATUSES = ("invited", "interested", "confirmed")
+ACTIVE_ATTENDEE_STATUSES = {"interested", "confirmed"}
+PRE_LOCK_CONFIRMED_STATUSES = {"confirmed"}
 
 
 def _normalize_attendee_status(raw_status: str | None) -> str | None:
@@ -13,6 +20,9 @@ def _normalize_attendee_status(raw_status: str | None) -> str | None:
     if raw_status is None:
         return "interested"
     status = str(raw_status).strip().lower()
+    # Map legacy 'committed' to 'confirmed'
+    if status == "committed":
+        status = "confirmed"
     if status in ATTENDEE_STATUSES:
         return status
     return None
@@ -79,7 +89,7 @@ def has_attendee(attendance_list: list[Any] | None, telegram_user_id: int) -> bo
 
 
 def has_confirmed(attendance_list: list[Any] | None, telegram_user_id: int) -> bool:
-    """Check whether user has committed/final-confirmed marker."""
+    """Check whether user has confirmed marker."""
     status = _attendance_to_status_map(attendance_list).get(int(telegram_user_id))
     return status in PRE_LOCK_CONFIRMED_STATUSES
 
@@ -89,29 +99,29 @@ def mark_joined(attendance_list: list[Any] | None, telegram_user_id: int) -> tup
     status_by_user = _attendance_to_status_map(attendance_list)
     telegram_user_id = int(telegram_user_id)
     current = status_by_user.get(telegram_user_id)
-    if current in {"interested", "committed", "confirmed"}:
+    if current in {"interested", "confirmed"}:
         return _status_map_to_attendance(status_by_user), False
     status_by_user[telegram_user_id] = "interested"
     return _status_map_to_attendance(status_by_user), True
 
 
 def mark_confirmed(attendance_list: list[Any] | None, telegram_user_id: int) -> tuple[list[Any], bool]:
-    """Ensure user is in committed stage; return (new_attendance, changed)."""
+    """Ensure user is confirmed; return (new_attendance, changed)."""
     status_by_user = _attendance_to_status_map(attendance_list)
     telegram_user_id = int(telegram_user_id)
     current = status_by_user.get(telegram_user_id)
     if current in PRE_LOCK_CONFIRMED_STATUSES:
         return _status_map_to_attendance(status_by_user), False
-    status_by_user[telegram_user_id] = "committed"
+    status_by_user[telegram_user_id] = "confirmed"
     return _status_map_to_attendance(status_by_user), True
 
 
 def finalize_commitments(attendance_list: list[Any] | None) -> tuple[list[Any], bool]:
-    """Promote committed attendees to final confirmed on lock."""
+    """Promote interested/joined attendees to confirmed on lock."""
     status_by_user = _attendance_to_status_map(attendance_list)
     changed = False
     for telegram_user_id, status in list(status_by_user.items()):
-        if status == "committed":
+        if status == "interested":
             status_by_user[telegram_user_id] = "confirmed"
             changed = True
     return _status_map_to_attendance(status_by_user), changed
@@ -121,7 +131,7 @@ def revert_confirmed_to_joined(
     attendance_list: list[Any] | None,
     telegram_user_id: int,
 ) -> tuple[list[Any], bool]:
-    """Revert committed/final-confirmed marker to interested."""
+    """Revert confirmed marker to interested."""
     status_by_user = _attendance_to_status_map(attendance_list)
     telegram_user_id = int(telegram_user_id)
     current = status_by_user.get(telegram_user_id)

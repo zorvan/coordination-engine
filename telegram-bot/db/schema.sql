@@ -57,7 +57,14 @@ CREATE TABLE IF NOT EXISTS events (
     state VARCHAR(20) DEFAULT 'proposed' CHECK (state IN ('proposed', 'interested', 'confirmed', 'locked', 'completed', 'cancelled')),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     locked_at TIMESTAMP,
-    completed_at TIMESTAMP
+    completed_at TIMESTAMP,
+    -- PRD v2: Threshold enforcement fields
+    min_participants INTEGER DEFAULT 2,
+    target_participants INTEGER DEFAULT 6,
+    collapse_at TIMESTAMP,
+    lock_deadline TIMESTAMP,
+    -- PRD v2: Optimistic concurrency control
+    version INTEGER DEFAULT 0 NOT NULL
 );
 
 -- 4. Constraints: Conditional participation
@@ -154,6 +161,83 @@ CREATE TABLE IF NOT EXISTS user_preferences (
     UNIQUE(user_id)
 );
 
+-- ============================================================================
+-- PRD v2: Enum Types
+-- ============================================================================
+
+-- Participant status enum
+DO $$ BEGIN
+    CREATE TYPE participant_status AS ENUM ('joined', 'confirmed', 'cancelled', 'no_show');
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
+
+-- Participant role enum
+DO $$ BEGIN
+    CREATE TYPE participant_role AS ENUM ('organizer', 'participant', 'observer');
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
+
+-- ============================================================================
+-- PRD v2: New Tables for Priority 1 - Structural Foundations
+-- ============================================================================
+
+-- 11. EventParticipant: Normalized participation tracking (replaces attendance_list JSON)
+CREATE TABLE IF NOT EXISTS event_participants (
+    event_id INTEGER NOT NULL REFERENCES events(event_id) ON DELETE CASCADE,
+    telegram_user_id BIGINT NOT NULL,
+    status participant_status NOT NULL DEFAULT 'joined',
+    role participant_role NOT NULL DEFAULT 'participant',
+    joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    confirmed_at TIMESTAMP,
+    cancelled_at TIMESTAMP,
+    source VARCHAR(50),
+    PRIMARY KEY (event_id, telegram_user_id)
+);
+
+-- 12. IdempotencyKey: Prevents duplicate command execution
+CREATE TABLE IF NOT EXISTS idempotency_keys (
+    idempotency_key VARCHAR(255) PRIMARY KEY,
+    command_type VARCHAR(100) NOT NULL,
+    user_id INTEGER REFERENCES users(user_id),
+    event_id INTEGER REFERENCES events(event_id),
+    status VARCHAR(50) DEFAULT 'pending' CHECK (status IN ('pending', 'completed', 'failed')),
+    response_hash VARCHAR(255),
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    completed_at TIMESTAMP,
+    expires_at TIMESTAMP NOT NULL
+);
+
+-- 13. EventStateTransition: Audit trail for state changes
+CREATE TABLE IF NOT EXISTS event_state_transitions (
+    transition_id SERIAL PRIMARY KEY,
+    event_id INTEGER NOT NULL REFERENCES events(event_id) ON DELETE CASCADE,
+    from_state VARCHAR(20) NOT NULL,
+    to_state VARCHAR(20) NOT NULL,
+    actor_telegram_user_id BIGINT,
+    timestamp TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    reason TEXT,
+    source VARCHAR(50) NOT NULL
+);
+
+-- ============================================================================
+-- PRD v2: New Tables for Priority 3 - Layer 3 Memory
+-- ============================================================================
+
+-- 14. EventMemory: Memory Weave storage
+CREATE TABLE IF NOT EXISTS event_memories (
+    memory_id SERIAL PRIMARY KEY,
+    event_id INTEGER NOT NULL REFERENCES events(event_id) ON DELETE CASCADE UNIQUE,
+    fragments JSONB DEFAULT '[]',
+    hashtags JSONB DEFAULT '[]',
+    outcome_markers JSONB DEFAULT '[]',
+    weave_text TEXT,
+    lineage_event_ids JSONB DEFAULT '[]',
+    tone_palette JSONB DEFAULT '[]',
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 -- Indexes for performance
 CREATE INDEX IF NOT EXISTS idx_events_group ON events(group_id);
 CREATE INDEX IF NOT EXISTS idx_events_state ON events(state);
@@ -172,3 +256,10 @@ CREATE INDEX IF NOT EXISTS idx_user_preferences_user ON user_preferences(user_id
 CREATE INDEX IF NOT EXISTS idx_user_preferences_time ON user_preferences(time_preference);
 CREATE INDEX IF NOT EXISTS idx_user_preferences_activity ON user_preferences(activity_preference);
 CREATE INDEX IF NOT EXISTS idx_user_preferences_budget ON user_preferences(budget_preference);
+
+-- PRD v2: Indexes for new tables
+CREATE INDEX IF NOT EXISTS idx_event_participants_event_id ON event_participants(event_id);
+CREATE INDEX IF NOT EXISTS idx_event_participants_user_id ON event_participants(telegram_user_id);
+CREATE INDEX IF NOT EXISTS idx_event_participants_status ON event_participants(status);
+CREATE INDEX IF NOT EXISTS idx_event_state_transitions_event_id ON event_state_transitions(event_id);
+CREATE INDEX IF NOT EXISTS idx_idempotency_keys_expires ON idempotency_keys(expires_at);

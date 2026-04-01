@@ -46,7 +46,7 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         log_count = await _get_log_count(session, event_id)
         constraint_count = await _get_constraint_count(session, event_id)
         await update.message.reply_text(
-            format_status_message(event_id, event, log_count, constraint_count)
+            await format_status_message(event_id, event, log_count, constraint_count, context.bot)
         )
         
 

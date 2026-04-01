@@ -189,7 +189,7 @@ def generate_post_event_thanks(
 ) -> str:
     """
     Generate post-event thanks message.
-    
+
     Recognition framing: celebrate showing up, not just completing.
     """
     base_message = (
@@ -197,8 +197,100 @@ def generate_post_event_thanks(
         f"Thanks to all {participant_count} who joined.\n"
         f"Showing up is what makes these events happen!"
     )
-    
+
     if highlight:
         base_message += f"\n\n✨ Highlight: {highlight}"
-    
+
     return base_message
+
+
+def generate_nudge_message(event_id: int, user_id: int, event_type: str) -> str:
+    """
+    Generate a nudge message for event participation.
+
+    Args:
+        event_id: The event ID
+        user_id: The user's Telegram ID
+        event_type: The type of event
+
+    Returns:
+        A nudge message string
+    """
+    messages = [
+        f"Remember, event {event_id} ({event_type}) is coming up!\n"
+        f"Your participation matters to the group.",
+
+        f"Hey! Just a reminder about event {event_id}.\n"
+        f"We're counting on you for the {event_type}!",
+
+        f"Event {event_id} won't be the same without you.\n"
+        f"Looking forward to seeing you there!",
+    ]
+
+    return random.choice(messages)
+
+
+def generate_fallback_warning(event_id: int) -> str:
+    """Generate fallback warning when AI is unavailable."""
+    return (
+        f"⚠️ Event {event_id}: AI scheduling is temporarily unavailable.\n"
+        f"Using standard scheduling rules."
+    )
+
+
+def generate_reliability_warning(user_id: int, reliability_score: float) -> str:
+    """
+    Generate reliability warning message.
+
+    Args:
+        user_id: The user's Telegram ID
+        reliability_score: The user's reliability score (0.0-1.0)
+    """
+    return (
+        f"📊 User {user_id}, your reliability score is {reliability_score:.1f}.\n\n"
+        f"Consistent participation helps the group plan better events."
+    )
+
+
+def generate_deadline_warning(event_id: int, deadline_str: str) -> str:
+    """
+    Generate deadline warning message.
+
+    Args:
+        event_id: The event ID
+        deadline_str: Human-readable deadline string
+    """
+    return (
+        f"⏰ Event {event_id}: Deadline approaching!\n"
+        f"Time remaining: {deadline_str}\n\n"
+        f"Please confirm your attendance soon."
+    )
+
+
+def generate_lock_warning(event_id: int) -> str:
+    """
+    Generate lock warning message.
+
+    Args:
+        event_id: The event ID
+    """
+    return (
+        f"🔒 Event {event_id} is now locked.\n\n"
+        f"No more changes can be made at this point."
+    )
+
+
+def generate_threshold_warning(event_id: int, current: int, required: int) -> str:
+    """
+    Generate threshold warning message.
+
+    Args:
+        event_id: The event ID
+        current: Current number of participants
+        required: Required number of participants
+    """
+    return (
+        f"⚠️ Event {event_id} is below threshold.\n\n"
+        f"Current: {current}/{required} participants.\n"
+        f"We need more confirmations to make this happen!"
+    )

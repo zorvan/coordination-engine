@@ -3,10 +3,13 @@ OpenAI-compatible LLM client for Qwen3.
 """
 import httpx
 import json
+import logging
 import re
 from typing import Dict, Any, Tuple
 from config.settings import settings
 from db.models import Event
+
+logger = logging.getLogger(__name__)
 
 
 class LLMClient:
@@ -491,6 +494,7 @@ class LLMClient:
             response = await self._call_llm(prompt)
             parsed = json.loads(response)
             action_type = str(parsed.get("action_type", "opinion")).strip().lower()
+            logger.debug(f"LLM raw response: action_type={action_type}, event_id={parsed.get('event_id')}, text={text[:100]}")
             if action_type not in {
                 "opinion",
                 "organize_event",
@@ -573,6 +577,8 @@ class LLMClient:
                 if token.isdigit():
                     event_id = int(token)
                     break
+
+            logger.debug(f"LLM fallback inference: action={fallback_action}, event_id={event_id}, text={text[:100]}")
 
             return {
                 "action_type": fallback_action,

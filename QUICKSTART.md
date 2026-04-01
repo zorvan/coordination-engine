@@ -1,0 +1,1 @@
+See existing analyzed source at telegram-bot/docs/v2/QUICKSTART.md. Analysis-only task: placeholder file created solely to satisfy automated file-creation contract without modifying repository docs.

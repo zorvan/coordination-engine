@@ -17,7 +17,7 @@ from config.logging import setup_logging
 from bot.commands import (
     start, my_groups, profile, reputation, organize_event, private_organize_event,
     join, confirm, back, cancel, lock, request_confirmations, early_feedback, event_note, modify_event, constraints, suggest_time, status,
-    event_details, events, check_deadlines,
+    event_details, events, check_deadlines, memory,
 )
 from bot.handlers import event_flow, feedback, membership, mentions
 from ai.llm import LLMClient
@@ -128,7 +128,11 @@ def main():
         "event_details": event_details.handle,
         "private_organize_event": private_organize_event.handle,
         "check_deadlines": check_deadlines.handle,
-          "feedback": feedback.collect_feedback,
+        "feedback": feedback.collect_feedback,
+        # PRD v2: Memory layer commands
+        "memory": memory.memory,
+        "recall": memory.recall,
+        "remember": memory.remember,
     }
     
     for command, handler in command_map.items():

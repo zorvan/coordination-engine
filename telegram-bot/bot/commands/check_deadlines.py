@@ -16,7 +16,7 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text("❌ Database configuration is unavailable.")
         return
 
-    results = await check_and_lock_expired_events()
+    results = await check_and_lock_expired_events(context.bot)
 
     if not results:
         await update.message.reply_text("✅ No expired events to process.")
@@ -52,7 +52,7 @@ async def run_scheduled_check(context: ContextTypes.DEFAULT_TYPE) -> None:
     if not settings.db_url:
         return
 
-    results = await check_and_lock_expired_events()
+    results = await check_and_lock_expired_events(context.bot)
 
     if not results:
         return

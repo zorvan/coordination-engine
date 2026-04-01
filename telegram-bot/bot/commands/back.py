@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Back/unconfirm command handler."""
+import logging
 from telegram import Update
 from telegram.ext import ContextTypes
 from sqlalchemy import select
@@ -8,11 +9,10 @@ from config.settings import settings
 from db.connection import get_session
 from db.models import Event, Log
 from db.users import get_or_create_user_id
-from bot.common.attendance import (
-    derive_state_from_attendance,
-    revert_confirmed_to_joined,
-)
+from bot.services import ParticipantService
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 
 async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -42,18 +42,19 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             await message.reply_text("❌ Event is locked. Cannot go back.")
             return
 
-        attendance, had_confirmed = revert_confirmed_to_joined(
-            event.attendance_list,
-            telegram_user_id,
-        )
-        if not had_confirmed:
+        # Use ParticipantService to unconfirm attendance
+        participant_service = ParticipantService(session)
+        try:
+            participant, is_new_unconfirm = await participant_service.unconfirm(
+                event_id=event_id,
+                telegram_user_id=telegram_user_id,
+                source="slash",
+            )
+        except Exception as e:
             await message.reply_text(
-                "ℹ️ You are not confirmed in this event."
+                f"ℹ️ You are not confirmed in this event."
             )
             return
-
-        event.attendance_list = attendance
-        event.state = derive_state_from_attendance(attendance)
 
         user_id = await get_or_create_user_id(
             session,
@@ -65,7 +66,7 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             Log(
                 event_id=event_id,
                 user_id=user_id,
-                action="cancel",
+                action="unconfirm",
                 metadata_dict={
                     "timestamp": datetime.utcnow().isoformat(),
                     "sub_action": "back_unconfirm",

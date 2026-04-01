@@ -15,6 +15,7 @@ from bot.services.participant_service import (
 )
 from bot.services.event_materialization_service import EventMaterializationService
 from bot.services.event_memory_service import EventMemoryService
+from bot.services.event_lifecycle_service import EventLifecycleService
 
 __all__ = [
     "EventStateTransitionService",
@@ -28,4 +29,5 @@ __all__ = [
     "ParticipantNotFoundError",
     "EventMaterializationService",
     "EventMemoryService",
+    "EventLifecycleService",
 ]

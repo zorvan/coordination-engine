@@ -10,7 +10,7 @@ from config.settings import settings
 from db.connection import get_session
 from db.models import Event, User, EarlyFeedback
 from bot.common.event_access import get_event_organizer_telegram_id
-from bot.common.attendance import parse_attendance
+from bot.services import ParticipantService
 
 
 def _format_user_label(user: User | None, telegram_user_id: int) -> str:
@@ -40,7 +40,17 @@ async def send_confirmation_request_message(
             await reply_message.reply_text("❌ Event not found.")
             return
 
-        participants, confirmed = parse_attendance(event.attendance_list or [])
+        # Get participants using ParticipantService
+        participant_service = ParticipantService(session)
+        all_participants = await participant_service.get_all_participants(event_id)
+        
+        participants = set()
+        confirmed = set()
+        for p in all_participants:
+            participants.add(p.telegram_user_id)
+            if p.status == 'confirmed':
+                confirmed.add(p.telegram_user_id)
+        
         pending = sorted(participants - confirmed)
 
         users_by_tid: dict[int, User] = {}

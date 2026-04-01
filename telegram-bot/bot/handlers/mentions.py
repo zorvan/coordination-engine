@@ -28,6 +28,7 @@ from bot.common.attendance import (
     mark_joined,
     remove_attendee,
 )
+from bot.services import ParticipantService, EventLifecycleService
 from bot.common.event_notifications import (
     send_event_invitation_dm,
     send_event_modification_request_dm,
@@ -1003,11 +1004,28 @@ async def _apply_participation_action(
                 )
                 return
 
-            attendance = list(event.attendance_list or [])
-            attendance, _ = mark_joined(attendance, requester_telegram_user_id)
-            event.attendance_list = attendance
-            if event.state == "proposed":
-                event.state = "interested"
+            # Use ParticipantService for join operation
+            participant_service = ParticipantService(session)
+            participant, is_new_join = await participant_service.join(
+                event_id=event_id,
+                telegram_user_id=requester_telegram_user_id,
+                source="mention",
+            )
+
+            # Check if we need to transition state from proposed to interested
+            confirmed_count = await participant_service.get_confirmed_count(event_id)
+            if event.state == "proposed" and confirmed_count > 0:
+                lifecycle_service = EventLifecycleService(context.bot, session)
+                try:
+                    event, _ = await lifecycle_service.transition_with_lifecycle(
+                        event_id=event_id,
+                        target_state="interested",
+                        actor_telegram_user_id=requester_telegram_user_id,
+                        source="mention",
+                        reason="Participant joined via mention",
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to transition event {event_id} to interested: {e}")
 
         elif action_type == "confirm":
             if event.state in {"locked", "completed", "cancelled"}:
@@ -1015,13 +1033,29 @@ async def _apply_participation_action(
                     f"❌ Cannot confirm event {event_id} - it's {event.state}."
                 )
                 return
-            attendance = list(event.attendance_list or [])
-            if not has_attendee(
-                attendance, requester_telegram_user_id
-            ) or not has_confirmed(attendance, requester_telegram_user_id):
-                attendance, _ = mark_confirmed(attendance, requester_telegram_user_id)
-            event.attendance_list = attendance
-            event.state = "confirmed"
+            
+            # Use ParticipantService for confirm operation
+            participant_service = ParticipantService(session)
+            participant, is_new_confirm = await participant_service.confirm(
+                event_id=event_id,
+                telegram_user_id=requester_telegram_user_id,
+                source="mention",
+            )
+
+            # Check if we need to transition to confirmed state
+            confirmed_count = await participant_service.get_confirmed_count(event_id)
+            if event.state != "confirmed" and confirmed_count > 0:
+                lifecycle_service = EventLifecycleService(context.bot, session)
+                try:
+                    event, _ = await lifecycle_service.transition_with_lifecycle(
+                        event_id=event_id,
+                        target_state="confirmed",
+                        actor_telegram_user_id=requester_telegram_user_id,
+                        source="mention",
+                        reason="Participant confirmed via mention",
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to transition event {event_id} to confirmed: {e}")
 
         elif action_type == "cancel":
             if event.state == "locked":
@@ -1029,16 +1063,34 @@ async def _apply_participation_action(
                     f"❌ Cannot cancel event {event_id} - it's already locked."
                 )
                 return
-            attendance = list(event.attendance_list or [])
-            filtered, changed = remove_attendee(attendance, requester_telegram_user_id)
-            if not changed:
-                await reply_message.reply_text(
-                    f"❌ You haven't joined event {event_id} yet. Nothing to cancel."
+            
+            # Use ParticipantService for cancel operation
+            participant_service = ParticipantService(session)
+            try:
+                participant, is_new_cancel = await participant_service.cancel(
+                    event_id=event_id,
+                    telegram_user_id=requester_telegram_user_id,
+                    source="mention",
                 )
+            except Exception as e:
+                await reply_message.reply_text(f"❌ Failed to cancel attendance: {str(e)}")
                 return
-            event.attendance_list = filtered
-            if event.state not in {"locked", "completed", "cancelled"}:
-                event.state = derive_state_from_attendance(filtered)
+
+            # Update event state if needed
+            confirmed_count = await participant_service.get_confirmed_count(event_id)
+            if event.state not in {"locked", "completed", "cancelled"} and confirmed_count == 0:
+                new_state = "interested" if confirmed_count > 0 else "proposed"
+                lifecycle_service = EventLifecycleService(context.bot, session)
+                try:
+                    event, _ = await lifecycle_service.transition_with_lifecycle(
+                        event_id=event_id,
+                        target_state=new_state,
+                        actor_telegram_user_id=requester_telegram_user_id,
+                        source="mention",
+                        reason="Last participant cancelled",
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to transition event {event_id} to {new_state}: {e}")
 
         session.add(
             Log(

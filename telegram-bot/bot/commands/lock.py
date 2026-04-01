@@ -7,10 +7,10 @@ from telegram.ext import ContextTypes
 from sqlalchemy import select
 
 from bot.common.event_states import STATE_EXPLANATIONS
-from bot.common.attendance import finalize_commitments, parse_attendance
 from config.settings import settings
 from db.connection import get_session
 from db.models import Event
+from bot.services import EventLifecycleService, ParticipantService
 from sqlalchemy import select
 
 
@@ -66,10 +66,29 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             )
             return
 
-        event.state = "locked"
-        event.attendance_list, _ = finalize_commitments(event.attendance_list)
-        event.locked_at = datetime.utcnow()
-        await session.commit()
+        # Use EventLifecycleService for state changes with full integration
+        lifecycle_service = EventLifecycleService(context.bot, session)
+        try:
+            event, transitioned = await lifecycle_service.transition_with_lifecycle(
+                event_id=event_id,
+                target_state="locked",
+                actor_telegram_user_id=user_id,
+                source="slash",
+                reason="Manual lock command",
+                expected_version=event.version,
+            )
+        except Exception as e:
+            await update.message.reply_text(f"❌ Failed to lock event: {str(e)}")
+            return
+
+        # Finalize commitments - mark all joined participants as confirmed
+        participant_service = ParticipantService(session)
+        finalized_count = await participant_service.finalize_commitments(event_id)
+        
+        # Legacy cleanup - remove old attendance_list if it exists
+        if event.attendance_list:
+            event.attendance_list = None
+            await session.commit()
 
     await update.message.reply_text(
         f"🔒 Event {event_id} locked.\n"

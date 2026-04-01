@@ -1,7 +1,6 @@
 # Core dependencies
 python-telegram-bot[job-queue]==22.6
-#python-telegram-bot==22.6
- SQLAlchemy==2.0.25
+SQLAlchemy==2.0.25
 asyncpg==0.29.0
 pydantic==2.6.1
 python-dotenv==1.0.1

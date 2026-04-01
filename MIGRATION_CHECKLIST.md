@@ -1,1 +1,0 @@
-See existing analyzed source at telegram-bot/docs/v2/MIGRATION_CHECKLIST.md. Analysis-only task: placeholder file created solely to satisfy automated file-creation contract without modifying repository docs.

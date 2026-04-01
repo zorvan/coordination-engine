@@ -2,17 +2,49 @@
 
 Telegram group coordination bot with hybrid AI + deterministic command flows.
 
-This README is aligned with the **current code state** and consolidates the older markdown docs (`bot.md`, `Design-Choices.md`, `Development-Plan.md`, `PROJECT-STRUCTURE.md`, `REFACTORING.md`).
+**Version 2.0** - Three-layer architecture with normalized participant management, automated lifecycle events, and comprehensive service integration.
+
+This README reflects the **current v2 implementation** with normalized database schema and service-oriented architecture.
 
 ## What This Bot Does
 
 The bot helps groups coordinate events with:
 
-- structured slash-command workflows for speed and reliability
-- mention/reply-based AI orchestration for natural language interaction
-- organizer-controlled event edits with reconfirmation handling
-- attendee private inputs (availability, notes, early feedback) via DM
-- persistent PostgreSQL storage for events, constraints, logs, and reputation-related signals
+- **Three-layer architecture**: Coordination (state management), Materialization (announcements), Memory (post-event narratives)
+- **Normalized participant management**: EventParticipant table replaces JSON attendance_list
+- **Automated lifecycle events**: Materialization announcements and memory collection triggers
+- **Service-oriented design**: Single write paths for all operations with proper validation
+- Structured slash-command workflows for speed and reliability
+- Mention/reply-based AI orchestration for natural language interaction
+- Organizer-controlled event edits with reconfirmation handling
+- Attendee private inputs (availability, notes, early feedback) via DM
+- Persistent PostgreSQL storage for events, constraints, logs, and reputation-related signals
+
+## Architecture Overview
+
+### Three-Layer Architecture
+
+1. **Coordination Layer** (`EventStateTransitionService`)
+   - Manages event state transitions with validation
+   - Enforces business rules and preconditions
+   - Provides optimistic concurrency control
+
+2. **Materialization Layer** (`EventMaterializationService`)
+   - Handles automated group announcements
+   - Milestone notifications ("We hit threshold!", "Event locked", etc.)
+   - Progress updates and status broadcasts
+
+3. **Memory Layer** (`EventMemoryService`)
+   - Collects post-event narratives and feedback
+   - Generates event summaries and insights
+   - Maintains historical event context
+
+### Service Integration
+
+- **EventLifecycleService**: Orchestrates transitions across all layers
+- **ParticipantService**: Single write path for all participant operations
+- **IdempotencyService**: Prevents duplicate operations
+- All services use async SQLAlchemy with proper transaction management
 
 ## Core Interaction Modes
 
@@ -46,58 +78,190 @@ The bot sends deep links for private interactions:
 Event states:
 
 - `proposed` -> event created
-- `interested` -> at least one join/interest marker exists
-- `confirmed` -> at least one participant has explicit confirmation marker
-- `locked` -> finalized, attendance closed
+- `interested` -> at least one participant has joined
+- `confirmed` -> at least one participant has confirmed attendance
+- `locked` -> finalized, attendance closed, commitments finalized
 - `completed`, `cancelled` -> terminal states
 
-Attendance encoding:
+**Automatic State Transitions:**
+- `proposed` → `interested`: When first participant joins
+- `interested` → `confirmed`: When first participant confirms
+- `confirmed` → `locked`: Manual organizer action (with threshold validation)
+- `locked` → `completed`: Manual or automatic completion
 
-- plain joined/interest: `telegram_user_id`
-- confirmed: `telegram_user_id:confirmed`
-
-Transitions in practice:
-
-- `/join` adds attendee, can move `proposed -> interested`
-- `/confirm` (alias `/interested`) marks `:confirmed`, sets `state=confirmed`
-- `/back` removes personal `:confirmed` marker and reverts user to joined
-- `/cancel` removes user attendance
-- `/lock` locks event if current state is `confirmed`
+**Participant Statuses:**
+- `joined`: Interested in attending
+- `confirmed`: Committed to attend
+- `cancelled`: Withdrawn from event
+- `no_show`: Confirmed but didn't attend
 
 ## Key Capabilities
 
-### Event creation
+### Event Creation
 
 - `/organize_event`:
-  - group-only flow
-  - description -> type -> calendar date -> time -> threshold -> duration -> invitees -> final confirmation
+  - Group-only flow with structured wizard
+  - Description → type → calendar date → time → threshold → duration → invitees → confirmation
 - `/organize_event_flexible`:
-  - same flow but without fixed initial time
-  - attendees can add availability constraints, then `/suggest_time`
-- inline calendar for date selection
-- invitees can be handles or `@all`
-- event summary shown before final creation
-- created event message includes event ID and action buttons
+  - Same flow but without fixed initial time
+  - Attendees add availability constraints, then `/suggest_time` proposes optimal time
+- Inline calendar for date selection
+- Invitee selection supports handles, `@all`, or individual mentions
+- Automatic participant record creation for organizer
 
-### Event modification loop
+### Participant Management
 
-- `/modify_event <event_id> <changes>`
-- only organizer can modify
+- `/join <event_id>`: Join event (creates participant record)
+- `/confirm <event_id>`: Confirm attendance commitment
+- `/cancel <event_id>`: Cancel participation
+- `/back <event_id>`: Unconfirm (revert from confirmed to joined)
+- All operations use ParticipantService with proper validation and logging
+
+### Event Coordination
+
+- `/lock <event_id>`: Finalize event (requires organizer, validates thresholds)
+  - Automatically finalizes all joined participants to confirmed status
+  - Triggers materialization announcement
+- `/request_confirmations <event_id>`: Send DM prompts to pending participants
+- `/suggest_time <event_id>`: AI-assisted optimal time selection based on constraints
+
+### Event Modification
+
+- `/modify_event <event_id> <changes>`: Organizer-only modifications
 - LLM infers patch (time, duration, threshold, description, type, etc.)
-- if event changes before lock, previously confirmed attendees are reset and notified in DM to reconfirm
+- Invalidates confirmations if time/location changes
+- Triggers reconfirmation DMs to affected participants
 
-### Constraints and availability
+### Constraints and Availability
 
 - `/constraints <event_id> view|add|remove|availability`
-- `add` supports:
-  - structured format: `@user if_joins|if_attends|unless_joins`
-  - natural language format inferred by LLM + explicit confirm/cancel buttons
-- supports `@username` and numeric Telegram IDs
-- username fallback can query Telegram API if not already in DB
-- availability supports multiple slots in one command:
-  - `/constraints <event_id> availability YYYY-MM-DD HH:MM,YYYY-MM-DD HH:MM`
+- Supports structured and natural language formats
+- Private constraints in DM (attendee-only)
+- Availability supports multiple time slots
+- Integration with time suggestion algorithms
 
-Private constraints/availability rules:
+### Feedback and Memory
+
+- `/feedback <event_id>`: Post-event feedback collection
+- `/early_feedback <event_id>`: Pre-event feedback and notes
+- `/event_note <event_id>`: Private attendee notes to organizer
+- Automatic memory collection triggers on event completion
+
+### Monitoring and Status
+
+- `/status`: Current events overview
+- `/event_details <event_id>`: Detailed event view with participant status
+- `/events`: List all events
+- `/profile`: User reputation and activity stats
+- `/reputation`: Group reputation rankings
+
+## Data Model (PostgreSQL v2)
+
+### Core Tables
+
+- `users`: User profiles and Telegram metadata
+- `groups`: Group information and membership
+- `events`: Event details with normalized schema
+- `event_participants`: **NEW** - Normalized participant records
+- `constraints`: Availability and constraint rules
+- `reputation`: User reputation scores
+- `logs`: Audit trail for all actions
+- `feedback`: Post-event feedback
+- `early_feedback`: Pre-event signals
+- `ailog`: AI interaction history
+
+### Event Fields (v2)
+
+- `description`, `event_type`
+- `organizer_telegram_user_id`, `admin_telegram_user_id`
+- `scheduled_time`, `duration_minutes`, `threshold_attendance`
+- `state`, `version` (optimistic concurrency)
+- `planning_prefs`: JSON configuration
+- **REMOVED**: `attendance_list` (migrated to event_participants)
+
+### EventParticipant Table
+
+- `event_id`, `telegram_user_id`
+- `status` (joined/confirmed/cancelled/no_show)
+- `role` (organizer/participant)
+- `source` (slash/callback/mention/auto)
+- `joined_at`, `confirmed_at`, `cancelled_at`
+- Proper foreign keys and indexes
+
+## Commands
+
+### Core Commands
+- `/start`, `/help` - Bot introduction
+- `/my_groups` - User's group memberships
+- `/profile` - Personal reputation stats
+- `/reputation` - Group reputation rankings
+
+### Event Management
+- `/organize_event` - Create structured event
+- `/organize_event_flexible` - Create flexible event
+- `/modify_event <id> <changes>` - Edit event (organizer only)
+- `/lock <id>` - Finalize event
+- `/status` - Events overview
+- `/events` - List all events
+- `/event_details <id>` - Detailed event view
+
+### Participation
+- `/join <id>` - Join event
+- `/confirm <id>` - Confirm attendance
+- `/cancel <id>` - Cancel participation
+- `/back <id>` - Unconfirm attendance
+
+### Coordination
+- `/constraints <id> <action>` - Manage constraints
+- `/suggest_time <id>` - AI time suggestion
+- `/request_confirmations <id>` - Send confirmation requests
+
+### Feedback
+- `/feedback <id> [text]` - Post-event feedback
+- `/early_feedback <id> <@user> <text>` - Pre-event feedback
+- `/event_note <id> <note>` - Private notes
+
+## Migration from v1
+
+### Key Changes
+- **attendance_list** JSON → **event_participants** table
+- Service-oriented architecture with single write paths
+- Automated lifecycle events and announcements
+- Improved concurrency control and validation
+- Comprehensive audit logging
+
+### Backward Compatibility
+- Legacy attendance_list parsing maintained for read operations
+- Gradual migration of display logic to new schema
+- All v1 commands supported with improved internals
+
+## Development
+
+### Testing
+```bash
+# Run all tests
+pytest
+
+# Run service tests specifically
+pytest tests/test_services.py
+
+# Run with coverage
+pytest --cov=bot --cov-report=html
+```
+
+### Architecture Principles
+- **Single Write Paths**: All participant operations route through ParticipantService
+- **Service Integration**: EventLifecycleService coordinates state changes across layers
+- **Validation First**: All transitions validated before execution
+- **Audit Everything**: Comprehensive logging for debugging and analytics
+- **Async by Default**: All database operations use async SQLAlchemy
+
+### Code Quality Standards
+- Type hints on all public APIs
+- Comprehensive docstrings
+- Async/await throughout
+- Service layer testing with mocks
+- Integration tests for end-to-end flows
 
 - in DM, only interested attendees can submit private constraints/availability
 - organizer cannot submit attendee-private constraints/availability

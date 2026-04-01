@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Confirm event command handler."""
+import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from sqlalchemy import select
@@ -8,8 +9,10 @@ from db.connection import get_session
 from db.users import get_or_create_user_id
 from config.settings import settings
 from bot.common.scheduling import find_user_event_conflict
-from bot.common.attendance import mark_confirmed
+from bot.services import ParticipantService, EventLifecycleService
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 
 async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -78,12 +81,29 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             )
             return
 
-        new_attendance, _ = mark_confirmed(
-            event.attendance_list,
-            telegram_user_id,
+        # Use ParticipantService to confirm attendance
+        participant_service = ParticipantService(session)
+        participant, is_new_confirm = await participant_service.confirm(
+            event_id=event_id,
+            telegram_user_id=telegram_user_id,
+            source="slash",
         )
-        event.attendance_list = new_attendance
-        event.state = "confirmed"
+
+        # Check if we need to transition to confirmed state
+        confirmed_count = await participant_service.get_confirmed_count(event_id)
+        if event.state != "confirmed" and confirmed_count > 0:
+            lifecycle_service = EventLifecycleService(context.bot, session)
+            try:
+                event, _ = await lifecycle_service.transition_with_lifecycle(
+                    event_id=event_id,
+                    target_state="confirmed",
+                    actor_telegram_user_id=telegram_user_id,
+                    source="slash",
+                    reason="Participant confirmed via slash command",
+                )
+            except Exception as e:
+                logger.error(f"Failed to transition event {event_id} to confirmed: {e}")
+
         user_id = await get_or_create_user_id(
             session,
             telegram_user_id=telegram_user_id,

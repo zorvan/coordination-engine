@@ -292,6 +292,78 @@ class ParticipantService:
         )
         return result.scalar() or 0
     
+    async def finalize_commitments(self, event_id: int) -> int:
+        """
+        Finalize commitments by marking all joined participants as confirmed.
+        
+        Returns the number of participants that were finalized.
+        """
+        result = await self.session.execute(
+            update(EventParticipant)
+            .where(
+                EventParticipant.event_id == event_id,
+                EventParticipant.status == ParticipantStatus.joined,
+            )
+            .values(
+                status=ParticipantStatus.confirmed,
+                confirmed_at=datetime.utcnow(),
+            )
+        )
+        
+        finalized_count = result.rowcount
+        if finalized_count > 0:
+            logger.info(
+                "Finalized commitments for event",
+                extra={
+                    "event_id": event_id,
+                    "finalized_count": finalized_count,
+                }
+            )
+        
+        return finalized_count
+    
+    async def unconfirm(
+        self,
+        event_id: int,
+        telegram_user_id: int,
+        source: str = "callback",
+    ) -> Tuple[EventParticipant, bool]:
+        """
+        Unconfirm participant attendance (revert from confirmed to joined).
+        
+        Returns:
+            (participant_record, is_new_unconfirm)
+        """
+        result = await self.session.execute(
+            select(EventParticipant).where(
+                EventParticipant.event_id == event_id,
+                EventParticipant.telegram_user_id == telegram_user_id,
+            )
+        )
+        participant = result.scalar_one_or_none()
+        
+        if not participant:
+            raise ParticipantNotFoundError(
+                f"User {telegram_user_id} is not a participant of event {event_id}"
+            )
+        
+        if participant.status != ParticipantStatus.confirmed:
+            return participant, False
+        
+        participant.status = ParticipantStatus.joined
+        participant.confirmed_at = None
+        
+        logger.info(
+            "Participant unconfirmed",
+            extra={
+                "event_id": event_id,
+                "user": telegram_user_id,
+                "source": source,
+            }
+        )
+        
+        return participant, True
+    
     async def remove_participant(
         self,
         event_id: int,

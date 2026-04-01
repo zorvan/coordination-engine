@@ -10,16 +10,7 @@ from config.settings import settings
 from bot.common.event_states import (
     STATE_EXPLANATIONS,
 )
-from bot.common.scheduling import find_user_event_conflict
-from bot.common.attendance import (
-    derive_state_from_attendance,
-    finalize_commitments,
-    mark_confirmed,
-    mark_joined,
-    remove_attendee,
-    revert_confirmed_to_joined,
-)
-from datetime import datetime
+from bot.services import ParticipantService, EventLifecycleService
 
 
 async def handle_event_flow(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -95,12 +86,13 @@ async def handle_join(query, context: ContextTypes.DEFAULT_TYPE, event_id: int) 
             )
             return
         
-        new_attendance, changed = mark_joined(
-            event.attendance_list,
-            telegram_user_id,
+        # Use ParticipantService for join operation
+        participant_service = ParticipantService(session)
+        participant, is_new_join = await participant_service.join(
+            event_id=event_id,
+            telegram_user_id=telegram_user_id,
+            source="callback",
         )
-        if changed:
-            event.attendance_list = new_attendance
 
         user_id = await get_or_create_user_id(
             session,
@@ -109,8 +101,20 @@ async def handle_join(query, context: ContextTypes.DEFAULT_TYPE, event_id: int) 
             username=username,
         )
         
-        if event.state == "proposed":
-            event.state = "interested"
+        # Check if we need to transition state from proposed to interested
+        confirmed_count = await participant_service.get_confirmed_count(event_id)
+        if event.state == "proposed" and confirmed_count > 0:
+            lifecycle_service = EventLifecycleService(context.bot, session)
+            try:
+                event, _ = await lifecycle_service.transition_with_lifecycle(
+                    event_id=event_id,
+                    target_state="interested",
+                    actor_telegram_user_id=telegram_user_id,
+                    source="callback",
+                    reason="First participant joined",
+                )
+            except Exception as e:
+                logger.error(f"Failed to transition event {event_id} to interested: {e}")
         
         log = Log(
             event_id=event_id,
@@ -182,12 +186,28 @@ async def handle_confirm(query, context: ContextTypes.DEFAULT_TYPE, event_id: in
             )
             return
 
-        new_attendance, _ = mark_confirmed(
-            event.attendance_list,
-            telegram_user_id,
+        # Use ParticipantService for confirm operation
+        participant_service = ParticipantService(session)
+        participant, is_new_confirm = await participant_service.confirm(
+            event_id=event_id,
+            telegram_user_id=telegram_user_id,
+            source="callback",
         )
-        event.attendance_list = new_attendance
-        event.state = "confirmed"
+
+        # Check if we need to transition to confirmed state
+        confirmed_count = await participant_service.get_confirmed_count(event_id)
+        if event.state != "confirmed" and confirmed_count > 0:
+            lifecycle_service = EventLifecycleService(context.bot, session)
+            try:
+                event, _ = await lifecycle_service.transition_with_lifecycle(
+                    event_id=event_id,
+                    target_state="confirmed",
+                    actor_telegram_user_id=telegram_user_id,
+                    source="callback",
+                    reason="Participant confirmed attendance",
+                )
+            except Exception as e:
+                logger.error(f"Failed to transition event {event_id} to confirmed: {e}")
 
         user_id = await get_or_create_user_id(
             session,
@@ -277,18 +297,34 @@ async def handle_cancel(query, context: ContextTypes.DEFAULT_TYPE, event_id: int
             
             return
         
-        attendance, changed = remove_attendee(
-            event.attendance_list,
-            telegram_user_id,
-        )
-        if not changed:
-            await query.edit_message_text(
-                f"❌ You haven't joined event {event_id} yet. Nothing to cancel."
+        # Use ParticipantService for cancel operation
+        participant_service = ParticipantService(session)
+        try:
+            participant, is_new_cancel = await participant_service.cancel(
+                event_id=event_id,
+                telegram_user_id=telegram_user_id,
+                source="callback",
             )
+        except Exception as e:
+            await query.edit_message_text(f"❌ Failed to cancel attendance: {str(e)}")
             return
-        event.attendance_list = attendance
-        if event.state not in {"locked", "completed", "cancelled"}:
-            event.state = derive_state_from_attendance(attendance)
+
+        # Update event state if needed
+        confirmed_count = await participant_service.get_confirmed_count(event_id)
+        if event.state not in {"locked", "completed", "cancelled"} and confirmed_count == 0:
+            # If no one is confirmed anymore, go back to interested or proposed
+            new_state = "interested" if confirmed_count > 0 else "proposed"
+            lifecycle_service = EventLifecycleService(context.bot, session)
+            try:
+                event, _ = await lifecycle_service.transition_with_lifecycle(
+                    event_id=event_id,
+                    target_state=new_state,
+                    actor_telegram_user_id=telegram_user_id,
+                    source="callback",
+                    reason="Last participant cancelled",
+                )
+            except Exception as e:
+                logger.error(f"Failed to transition event {event_id} to {new_state}: {e}")
 
         user_id = await get_or_create_user_id(
             session,
@@ -340,11 +376,25 @@ async def handle_lock(query, context: ContextTypes.DEFAULT_TYPE, event_id: int) 
             
             return
         
-        event.state = "locked"
-        event.attendance_list, _ = finalize_commitments(event.attendance_list)
-        event.locked_at = datetime.utcnow()
+        # Use EventLifecycleService for state transition with full integration
+        lifecycle_service = EventLifecycleService(context.bot, session)
+        try:
+            event, _ = await lifecycle_service.transition_with_lifecycle(
+                event_id=event_id,
+                target_state="locked",
+                actor_telegram_user_id=query.from_user.id,
+                source="callback",
+                reason="Manual lock via callback",
+                expected_version=event.version,
+            )
+        except Exception as e:
+            await query.edit_message_text(f"❌ Failed to lock event: {str(e)}")
+            return
         
-        await session.commit()
+        # Finalize commitments - TODO: Move to ParticipantService
+        if event.attendance_list:
+            event.attendance_list, _ = finalize_commitments(event.attendance_list)
+            await session.commit()
         
         await query.edit_message_text(
             f"🔒 *Event {event_id} locked!*\n\n"

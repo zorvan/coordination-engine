@@ -1613,7 +1613,6 @@ async def finalize_event(
             commit_by=commit_by,
             duration_minutes=duration_minutes,
             threshold_attendance=data.get("threshold_attendance", 5),
-            attendance_list=[f"{creator_id}:interested"],
             planning_prefs={
                 "date_preset": data.get("date_preset"),
                 "time_window": data.get("time_window"),
@@ -1626,6 +1625,16 @@ async def finalize_event(
         session.add(event)
         await session.commit()
         await session.refresh(event)
+        
+        # Create participant record for the organizer
+        from bot.services import ParticipantService
+        participant_service = ParticipantService(session)
+        await participant_service.join(
+            event_id=event.event_id,
+            telegram_user_id=creator_id,
+            source="creation",
+            role="organizer"
+        )
 
     context.user_data.pop("event_flow", None)
 
@@ -1905,7 +1914,6 @@ async def finalize_private_event(
             commit_by=commit_by,
             duration_minutes=duration_minutes,
             threshold_attendance=data.get("threshold_attendance", 5),
-            attendance_list=[f"{creator_id}:interested"],
             planning_prefs={
                 "date_preset": data.get("date_preset"),
                 "time_window": data.get("time_window"),
@@ -1919,6 +1927,16 @@ async def finalize_private_event(
         session.add(event)
         await session.commit()
         await session.refresh(event)
+        
+        # Create participant record for the organizer
+        from bot.services import ParticipantService
+        participant_service = ParticipantService(session)
+        await participant_service.join(
+            event_id=event.event_id,
+            telegram_user_id=creator_id,
+            source="creation",
+            role="organizer"
+        )
 
     # Send invitations to invitees (private events)
     # Private events: DM ONLY to listed invitees + admin (NOT to all group members)

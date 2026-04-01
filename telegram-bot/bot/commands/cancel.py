@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Cancel attendance command handler with nudges."""
+import logging
 from telegram import Update
 from telegram.ext import ContextTypes
 from sqlalchemy import select
@@ -8,8 +9,10 @@ from db.connection import get_session
 from db.users import get_or_create_user_id
 from config.settings import settings
 from datetime import datetime
-from bot.common.attendance import derive_state_from_attendance, remove_attendee
+from bot.services import ParticipantService
 from bot.utils.nudges import generate_nudge_message
+
+logger = logging.getLogger(__name__)
 
 
 async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -56,20 +59,21 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             )
             return
 
-        attendance_list, changed = remove_attendee(
-            event.attendance_list,
-            telegram_user_id,
-        )
-        if not changed:
+        # Use ParticipantService to cancel attendance
+        participant_service = ParticipantService(session)
+        try:
+            participant, is_new_cancel = await participant_service.cancel(
+                event_id=event_id,
+                telegram_user_id=telegram_user_id,
+                source="slash",
+            )
+        except Exception as e:
             await message.reply_text(
                 f"❌ You haven't joined event {event_id} yet. "
                 "Nothing to cancel."
             )
             return
 
-        event.attendance_list = attendance_list
-        if event.state not in {"locked", "completed", "cancelled"}:
-            event.state = derive_state_from_attendance(attendance_list)
         user_id = await get_or_create_user_id(
             session,
             telegram_user_id=telegram_user_id,

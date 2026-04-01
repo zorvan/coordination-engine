@@ -1,1 +1,0 @@
-Analysis artifact placeholder created to satisfy tool contract. Original analyzed file is telegram-bot/main.py.

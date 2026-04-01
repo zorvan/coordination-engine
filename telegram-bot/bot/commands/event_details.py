@@ -61,7 +61,7 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
         bot_username = context.bot.username if context.bot else None
         user_id = user.id if user else None
-        reply_markup = build_event_details_action_markup(event, user_id, bot_username)
+        reply_markup = await build_event_details_action_markup(event, user_id, bot_username, session)
 
         await update.message.reply_text(
             await format_event_details_message(event_id, event, logs, constraints),
@@ -111,7 +111,7 @@ async def show_details(query, context: ContextTypes.DEFAULT_TYPE, event_id: int)
 
         bot_username = context.bot.username if context.bot else None
         user_id = query.from_user.id if query.from_user else None
-        reply_markup = build_event_details_action_markup(event, user_id, bot_username)
+        reply_markup = await build_event_details_action_markup(event, user_id, bot_username, session)
 
         await query.edit_message_text(
             await format_event_details_message(event_id, event, logs, constraints),
@@ -219,12 +219,23 @@ async def _get_event_constraints(session, event_id: int) -> list:
     return result.scalars().all()
 
 
-def build_event_details_action_markup(
-    event: Event, user_id: int | None, bot_username: str | None
+async def build_event_details_action_markup(
+    event: Event, user_id: int | None, bot_username: str | None, session
 ) -> InlineKeyboardMarkup:
     """Build standard action keyboard for event details view."""
-    attendance_list: list[Any] | None = event.attendance_list or []
-    user_joined = has_attendee(attendance_list, user_id) if user_id is not None else False
+    # Check if user has joined using ParticipantService
+    user_joined = False
+    if user_id is not None:
+        from bot.services import ParticipantService
+        participant_service = ParticipantService(session)
+        try:
+            participant = await participant_service.get_participant(event.event_id, user_id)
+            user_joined = participant is not None and participant.status in ['joined', 'confirmed']
+        except:
+            # Fallback to old logic if service fails
+            attendance_list: list[Any] | None = event.attendance_list or []
+            user_joined = has_attendee(attendance_list, user_id)
+    
     commit_text = "✅ Join" if not user_joined else "✅ Commit"
     keyboard = [
         [

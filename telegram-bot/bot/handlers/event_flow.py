@@ -5,7 +5,7 @@ import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from sqlalchemy import select
-from db.models import Event, Log
+from db.models import Event, Log, ParticipantStatus
 from db.connection import get_session
 from db.users import get_or_create_user_id
 from config.settings import settings
@@ -22,25 +22,26 @@ logger = logging.getLogger(__name__)
 async def handle_event_flow(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Main event flow handler - routes to state-specific handlers."""
     query = update.callback_query
-    
+
     if not query or not query.data:
         return
-    
+
     await query.answer()
-    
+
     data = query.data
-    
+
     if data.startswith("event_"):
         parts = data.split("_")
         if len(parts) >= 3:
             event_id = int(parts[-1])
             action = "_".join(parts[1:-1])
-            
+
             if action == "join":
                 await handle_join(query, context, event_id)
             elif action == "confirm":
                 await handle_confirm(query, context, event_id)
-            elif action == "back":
+            elif action == "back" or action == "unconfirm":
+                # Both "back" and "unconfirm" do the same thing - revert confirmation
                 await handle_back(query, context, event_id)
             elif action == "cancel":
                 await handle_cancel(query, context, event_id)
@@ -154,54 +155,82 @@ async def handle_join(query, context: ContextTypes.DEFAULT_TYPE, event_id: int) 
 
         # Get participant status to determine button text
         participant = await participant_service.get_participant(event_id, telegram_user_id)
-        user_confirmed = participant and participant.status == 'confirmed'
+        user_confirmed = participant and participant.status == ParticipantStatus.confirmed
+        user_joined = participant and participant.status in [ParticipantStatus.joined, ParticipantStatus.confirmed]
 
-        # Button text and callback change based on user status
-        if not participant:
-            commit_text = "✅ Join"
-            commit_callback = f"event_join_{event_id}"
+        # Build comprehensive event menu with all actions (state-aware)
+        # First row based on user status (mutually exclusive actions)
+        if not user_joined:
+            # User hasn't joined - show Join only
+            first_row = [
+                InlineKeyboardButton("✅ Join", callback_data=f"event_join_{event_id}"),
+            ]
+            # Show Cancel + Lock row
+            second_row = [
+                InlineKeyboardButton("❌ Cancel", callback_data=f"event_cancel_{event_id}"),
+                InlineKeyboardButton("🔒 Lock", callback_data=f"event_lock_{event_id}"),
+            ]
         elif user_confirmed:
-            commit_text = "✓ Confirmed"
-            commit_callback = f"event_confirm_{event_id}"
+            # User is confirmed - show Confirmed + Uncommit
+            first_row = [
+                InlineKeyboardButton("✓ Confirmed", callback_data=f"event_confirm_{event_id}"),
+                InlineKeyboardButton("↩️ Uncommit", callback_data=f"event_unconfirm_{event_id}"),
+            ]
+            # Show Cancel + Lock row
+            second_row = [
+                InlineKeyboardButton("❌ Cancel", callback_data=f"event_cancel_{event_id}"),
+                InlineKeyboardButton("🔒 Lock", callback_data=f"event_lock_{event_id}"),
+            ]
         else:
-            commit_text = "✅ Confirm"
-            commit_callback = f"event_confirm_{event_id}"
+            # User joined but not confirmed - show Confirm + Cancel (no separate Cancel row needed)
+            first_row = [
+                InlineKeyboardButton("✅ Confirm", callback_data=f"event_confirm_{event_id}"),
+                InlineKeyboardButton("❌ Cancel", callback_data=f"event_cancel_{event_id}"),
+            ]
+            # Show Lock + Logs row
+            second_row = [
+                InlineKeyboardButton("🔒 Lock", callback_data=f"event_lock_{event_id}"),
+                InlineKeyboardButton("📝 View Logs", callback_data=f"event_logs_{event_id}"),
+            ]
 
-        # Build comprehensive event menu with all actions
         keyboard = [
-            # Primary actions
-            [
-                InlineKeyboardButton(commit_text, callback_data=commit_callback),
-                InlineKeyboardButton("❌ Exit", callback_data=f"event_cancel_{event_id}"),
-            ],
-            # Event management
-            [
-                InlineKeyboardButton("📋 Event Details", callback_data=f"event_details_{event_id}"),
-                InlineKeyboardButton("📊 Status", callback_data=f"event_status_{event_id}"),
-            ],
-            # Planning & constraints
-            [
-                InlineKeyboardButton("📅 Set Availability", url=f"https://t.me/{bot.username}?start=avail_{event_id}"),
-                InlineKeyboardButton("🔒 Constraints", callback_data=f"event_constraints_{event_id}"),
-            ],
-            # Feedback & logs
-            [
-                InlineKeyboardButton("📝 Logs", callback_data=f"event_logs_{event_id}"),
-                InlineKeyboardButton("💬 Feedback", callback_data=f"event_feedback_{event_id}"),
-            ],
-            # Update button
-            [
-                InlineKeyboardButton("🔄 Update", callback_data=f"event_details_{event_id}"),
-            ],
+            first_row,
+            second_row,
         ]
 
-        # Add modify button for organizer/admin
+        # Add remaining rows for all users
+        if not user_joined or user_confirmed:
+            # Add Logs row if not already added
+            keyboard.append([InlineKeyboardButton("📝 View Logs", callback_data=f"event_logs_{event_id}")])
+
+        keyboard.extend([
+            [
+                InlineKeyboardButton(
+                    "🔒 Manage Constraints",
+                    callback_data=f"event_constraints_{event_id}",
+                )
+            ],
+            [InlineKeyboardButton("📊 Status", callback_data=f"event_status_{event_id}")],
+            [InlineKeyboardButton("🔄 Refresh", callback_data=f"event_details_{event_id}")],
+            [InlineKeyboardButton("🔙 Close", callback_data=f"event_close_{event_id}")],
+        ])
+
+        # Add Modify button for organizer/admin
         admin_id = get_event_admin_telegram_id(event)
         organizer_id = get_event_organizer_telegram_id(event)
         if telegram_user_id in [admin_id, organizer_id]:
-            keyboard.append([
-                InlineKeyboardButton("✏️ Modify Event", callback_data=f"event_modify_{event_id}"),
-            ])
+            keyboard.insert(4, [InlineKeyboardButton("🛠 Modify", callback_data=f"event_modify_{event_id}")])
+
+        # Add DM links
+        if bot.username:
+            avail_link = f"https://t.me/{bot.username}?start=avail_{event_id}"
+            feedback_link = f"https://t.me/{bot.username}?start=feedback_{event_id}"
+            keyboard.append(
+                [InlineKeyboardButton("📥 Set Availability in DM", url=avail_link)]
+            )
+            keyboard.append(
+                [InlineKeyboardButton("⭐ Give Feedback in DM", url=feedback_link)]
+            )
 
         reply_markup = InlineKeyboardMarkup(keyboard)
 
@@ -401,7 +430,7 @@ async def handle_confirm(query, context: ContextTypes.DEFAULT_TYPE, event_id: in
 
 
 async def handle_back(query, context: ContextTypes.DEFAULT_TYPE, event_id: int) -> None:
-    """Revert personal confirmation to interested before lock."""
+    """Revert personal confirmation to interested before lock (uncommit)."""
     telegram_user_id = query.from_user.id
     db_url = settings.db_url or ""
     async with get_session(db_url) as session:
@@ -412,13 +441,13 @@ async def handle_back(query, context: ContextTypes.DEFAULT_TYPE, event_id: int) 
             await query.edit_message_text("❌ Event not found.")
             return
         if event.state == "locked":
-            await query.edit_message_text("❌ Event is locked. Cannot go back.")
+            await query.edit_message_text("❌ Event is locked. Cannot uncommit.")
             return
 
         # Use ParticipantService for back operation (new system)
         participant_service = ParticipantService(session)
         participant = await participant_service.get_participant(event_id, telegram_user_id)
-        
+
         if not participant or participant.status != ParticipantStatus.confirmed:
             await query.edit_message_text(
                 "ℹ️ You are not confirmed in this event."
@@ -427,6 +456,7 @@ async def handle_back(query, context: ContextTypes.DEFAULT_TYPE, event_id: int) 
 
         # Revert to joined (interested)
         participant.status = ParticipantStatus.joined
+        participant.confirmed_at = None
         await session.commit()
 
         # Update event state if needed
@@ -438,7 +468,7 @@ async def handle_back(query, context: ContextTypes.DEFAULT_TYPE, event_id: int) 
     await query.edit_message_text(
         f"↩️ Confirmation reverted for event {event_id}.\n"
         f"State: {event.state}\n"
-        "You are now in interested state."
+        "You are now in interested state (uncommitted)."
     )
 
 

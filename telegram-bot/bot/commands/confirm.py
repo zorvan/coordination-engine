@@ -124,7 +124,7 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             [
                 [
                     InlineKeyboardButton(
-                        "↩️ Back", callback_data=f"event_back_{event_id}"
+                        "↩️ Uncommit", callback_data=f"event_unconfirm_{event_id}"
                     ),
                     InlineKeyboardButton(
                         "🔒 Lock Event", callback_data=f"event_lock_{event_id}"

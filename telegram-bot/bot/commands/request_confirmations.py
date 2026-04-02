@@ -92,7 +92,7 @@ async def send_confirmation_request_message(
         [
             [
                 InlineKeyboardButton("✅ Confirm", callback_data=f"event_confirm_{event_id}"),
-                InlineKeyboardButton("↩️ Back", callback_data=f"event_back_{event_id}"),
+                InlineKeyboardButton("↩️ Uncommit", callback_data=f"event_unconfirm_{event_id}"),
             ],
             [
                 InlineKeyboardButton("❌ Cancel", callback_data=f"event_cancel_{event_id}"),
@@ -117,7 +117,7 @@ async def send_confirmation_request_message(
         [
             [
                 InlineKeyboardButton("✅ Final Confirm", callback_data=f"event_confirm_{event_id}"),
-                InlineKeyboardButton("↩️ Back", callback_data=f"event_back_{event_id}"),
+                InlineKeyboardButton("↩️ Uncommit", callback_data=f"event_unconfirm_{event_id}"),
             ]
         ]
     )

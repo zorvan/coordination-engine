@@ -148,16 +148,17 @@ def main():
     callback_handlers = [
         # Event flow handlers (more specific, must come before general event_)
         (r"^event_(join|confirm|back|cancel|lock)_", event_flow.handle_event_flow),
-        (r"^event_(details|logs|constraints|close)_", event_details.handle_callback),
+        (r"^event_unconfirm_", event_flow.handle_event_flow),  # Uncommit (separate from back)
+        (r"^event_(details|status|logs|constraints|close)_", event_details.handle_callback),
         (r"^event_modify_", mentions.handle_callback),
-        
+
         # Event creation handlers (general, comes after specific ones)
         (r"^event_", organize_event.handle_callback),
         (r"^private_event_", organize_event.private_handle_callback),
-        
+
         # Modify input handlers
         (r"^modinput_", mentions.handle_callback),
-        
+
         # Other handlers
         (r"^constraint_nl_", constraints.handle_callback),
         (r"^mentionact_", mentions.handle_mention_callback),

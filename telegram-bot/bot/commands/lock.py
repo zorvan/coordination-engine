@@ -1,5 +1,12 @@
 #!/usr/bin/env python3
-"""Lock event command handler."""
+"""Lock event command handler.
+
+PRD v2 Updates:
+- Uses RBAC for permission checks
+- Enforces min_participants threshold
+- Finalizes all joined participants to confirmed
+"""
+import logging
 from datetime import datetime
 
 from telegram import Update
@@ -9,13 +16,23 @@ from sqlalchemy import select
 from bot.common.event_states import STATE_EXPLANATIONS
 from config.settings import settings
 from db.connection import get_session
-from db.models import Event
+from db.models import Event, EventParticipant, ParticipantStatus
 from bot.services import EventLifecycleService, ParticipantService
-from sqlalchemy import select
+from bot.common.rbac import check_can_lock_event
+from bot.services.event_state_transition_service import ThresholdNotMetError
+
+logger = logging.getLogger(__name__)
 
 
 async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle /lock command - finalize a confirmed event."""
+    """
+    Handle /lock command - finalize a confirmed event.
+
+    Requirements:
+    - User must be organizer or admin
+    - Event must be in 'confirmed' state
+    - Confirmed participants >= min_participants
+    """
     if not update.message:
         return
 
@@ -37,6 +54,8 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text("❌ Database configuration is unavailable.")
         return
 
+    user_id = update.effective_user.id if update.effective_user else None
+
     async with get_session(settings.db_url) as session:
         event = (
             await session.execute(
@@ -47,6 +66,17 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             await update.message.reply_text("❌ Event not found.")
             return
 
+        # RBAC check
+        is_authorized, error_msg = await check_can_lock_event(
+            session, event_id, user_id
+        )
+        if not is_authorized:
+            await update.message.reply_text(
+                f"❌ Cannot lock event.\n{error_msg}"
+            )
+            return
+
+        # State check
         if event.state != "confirmed":
             await update.message.reply_text(
                 f"❌ Cannot lock event {event_id}.\n"
@@ -56,13 +86,17 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             )
             return
 
-        user_id = update.effective_user.id if update.effective_user else None
-        if user_id and event.organizer_telegram_user_id != user_id:
+        # Threshold enforcement (PRD v2 Section 2.1)
+        min_required = event.min_participants or 2
+        participant_service = ParticipantService(session)
+        confirmed_count = await participant_service.get_confirmed_count(event_id)
+
+        if confirmed_count < min_required:
             await update.message.reply_text(
-                f"❌ You are not the event organizer!\n"
-                f"Event ID: {event_id}\n"
-                f"Organizer ID: {event.organizer_telegram_user_id}\n"
-                "Only the event organizer can lock this event."
+                f"❌ Cannot lock event - below minimum participants.\n\n"
+                f"Required: {min_required} confirmed\n"
+                f"Current: {confirmed_count} confirmed\n\n"
+                f"Wait for more participants to confirm, or reduce min_participants."
             )
             return
 
@@ -77,21 +111,28 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                 reason="Manual lock command",
                 expected_version=event.version,
             )
+        except ThresholdNotMetError as e:
+            await update.message.reply_text(
+                f"❌ Cannot lock event - threshold not met.\n{str(e)}"
+            )
+            return
         except Exception as e:
+            logger.exception("Failed to lock event %s", event_id)
             await update.message.reply_text(f"❌ Failed to lock event: {str(e)}")
             return
 
         # Finalize commitments - mark all joined participants as confirmed
-        participant_service = ParticipantService(session)
         finalized_count = await participant_service.finalize_commitments(event_id)
-        
+
         # Legacy cleanup - remove old attendance_list if it exists
         if event.attendance_list:
             event.attendance_list = None
             await session.commit()
 
     await update.message.reply_text(
-        f"🔒 Event {event_id} locked.\n"
+        f"🔒 Event {event_id} locked successfully.\n\n"
         f"State: locked\n"
+        f"Confirmed participants: {confirmed_count}\n"
+        f"Finalized commitments: {finalized_count}\n"
         f"Meaning: {STATE_EXPLANATIONS['locked']}"
     )

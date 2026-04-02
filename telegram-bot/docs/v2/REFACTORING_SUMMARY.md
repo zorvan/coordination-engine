@@ -8,16 +8,63 @@
 
 ## Executive Summary
 
-Successfully completed Phase 1 of the v2 refactoring, transforming the coordination bot from a command-handler architecture to a service-oriented design with three distinct layers (Coordination, Materialization, Memory).
+Successfully completed Phase 1 and Phase 2 of the v2 refactoring, transforming the coordination bot from a command-handler architecture to a service-oriented design with three distinct layers (Coordination, Materialization, Memory), plus critical PRD v2 features.
 
-### Key Achievements
+### Phase 1 Achievements ✅
 
-✅ **Service Layer Complete** - All 6 core services implemented and verified  
-✅ **Materialization Layer** - Automated announcements with proper triggers  
-✅ **Memory Layer** - Full memory collection and weave generation  
-✅ **Idempotency Framework** - Duplicate command prevention  
-✅ **Documentation** - QUICKSTART.md and Implementation.md created  
-✅ **Reference Implementation** - `join.py` refactored as pattern example  
+- **Service Layer Complete** — All 6 core services implemented
+- **Materialization Layer** — Automated announcements
+- **Memory Layer** — Full memory collection and weave
+- **Idempotency Framework** — Duplicate command prevention
+- **Navigation Fix** — State-aware menus
+
+### Phase 2 Achievements ✅ (Current)
+
+- **RBAC System** — Role-based access control (`bot/common/rbac.py`)
+- **Threshold Enforcement** — `min_participants` validation on lock
+- **Mutual Dependence Visibility** — Shows participants and fragility
+- **Uncommit Flow** — Separate from navigation "Back"
+- **Documentation** — Updated IMPLEMENTATION.md
+
+---
+
+## Files Changed (Phase 1 + Phase 2)
+
+### New Files Created (5)
+
+| File | Purpose | Lines |
+|------|---------|-------|
+| `bot/common/materialization.py` | Materialization orchestrator | 250+ |
+| `bot/common/rbac.py` | RBAC permission checks | 200+ |
+| `docs/v2/QUICKSTART.md` | Quick start guide | 350+ |
+| `docs/v2/IMPLEMENTATION.md` | Architecture decisions | 650+ |
+| `docs/v2/REFACTORING_SUMMARY.md` | This document | - |
+
+### Files Refactored (8)
+
+| File | Changes | Impact |
+|------|---------|--------|
+| `bot/commands/join.py` | Service integration, idempotency | High |
+| `bot/commands/lock.py` | RBAC, threshold enforcement | High |
+| `bot/commands/confirm.py` | "Uncommit" button | Medium |
+| `bot/commands/event_details.py` | State-aware menus, status with mutual dependence | High |
+| `bot/commands/request_confirmations.py` | "Uncommit" buttons | Medium |
+| `bot/handlers/event_flow.py` | State-aware navigation | High |
+| `bot/common/event_presenters.py` | Mutual dependence visibility | High |
+| `main.py` | Callback pattern routing | Medium |
+
+### Files Verified (6)
+
+All core services verified as complete:
+
+| File | Status | Notes |
+|------|--------|-------|
+| `bot/services/participant_service.py` | ✅ Complete | All CRUD |
+| `bot/services/event_state_transition_service.py` | ✅ Complete | Validation + concurrency |
+| `bot/services/event_lifecycle_service.py` | ✅ Complete | Orchestration |
+| `bot/services/event_materialization_service.py` | ✅ Complete | Announcements |
+| `bot/services/event_memory_service.py` | ✅ Complete | Memory |
+| `bot/services/idempotency_service.py` | ✅ Complete | Idempotency |  
 
 ---
 

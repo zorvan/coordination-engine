@@ -4,7 +4,7 @@ Telegram group coordination bot with hybrid AI + deterministic command flows.
 
 **Version 2.0** — Three-layer architecture with normalized participant management, automated lifecycle events, and comprehensive service integration.
 
-> **Phase 1 Refactoring Complete** ✅ — Service-oriented architecture, materialization layer, and memory layer fully implemented. See [IMPLEMENTATION.md](IMPLEMENTATION.md) for details.
+> **Phase 2 Complete** ✅ — Service-oriented architecture, RBAC, threshold enforcement, and mutual dependence visibility implemented. See [IMPLEMENTATION.md](docs/v2/IMPLEMENTATION.md) for details.
 
 This README reflects the **current v2 implementation** with normalized database schema and service-oriented architecture.
 
@@ -112,8 +112,8 @@ All services use async SQLAlchemy with proper transaction management.
 | [QUICKSTART.md](docs/v2/QUICKSTART.md) | Get running in 15 minutes |
 | [USER_FLOWS.md](docs/v2/USER_FLOWS.md) | Complete user flow specifications |
 | [PRD v2](docs/v2/coordination-engine-PRD-v2.md) | Product requirements document |
-| [IMPLEMENTATION.md](IMPLEMENTATION.md) | Architecture decisions and TODOs |
-| [REFACTORING_SUMMARY.md](REFACTORING_SUMMARY.md) | Phase 1 refactoring summary |
+| [IMPLEMENTATION.md](docs/v2/IMPLEMENTATION.md) | Architecture decisions and TODOs |
+| [REFACTORING_SUMMARY.md](docs/v2/REFACTORING_SUMMARY.md) | Phase 1 & 2 refactoring summary |
 
 ## Core Interaction Modes
 
@@ -403,10 +403,12 @@ pytest --cov=bot --cov-report=html
 ├── bot/
 │   ├── commands/                # Slash command handlers
 │   │   ├── join.py             # ✅ Refactored (v2 pattern)
-│   │   ├── confirm.py
-│   │   ├── cancel.py
+│   │   ├── lock.py             # ✅ RBAC + threshold enforcement
+│   │   ├── confirm.py          # ✅ Uncommit flow
+│   │   ├── event_details.py    # ✅ State-aware menus + mutual dependence
 │   │   └── ...
 │   ├── handlers/                # Update/message/callback handlers
+│   │   └── event_flow.py       # ✅ State-aware navigation
 │   ├── services/                # Service layer (single write paths)
 │   │   ├── participant_service.py
 │   │   ├── event_state_transition_service.py
@@ -415,8 +417,9 @@ pytest --cov=bot --cov-report=html
 │   │   ├── event_memory_service.py
 │   │   └── idempotency_service.py
 │   ├── common/                  # Shared helpers
+│   │   ├── rbac.py             # ✅ NEW: Role-based access control
 │   │   ├── materialization.py  # Materialization orchestrator
-│   │   ├── scheduling.py
+│   │   ├── event_presenters.py # ✅ Mutual dependence visibility
 │   │   └── ...
 │   └── utils/
 ├── config/                      # Settings + logging
@@ -425,11 +428,12 @@ pytest --cov=bot --cov-report=html
 │   └── v2/                      # v2 documentation
 │       ├── QUICKSTART.md
 │       ├── USER_FLOWS.md
-│       └── coordination-engine-PRD-v2.md
+│       ├── coordination-engine-PRD-v2.md
+│       ├── IMPLEMENTATION.md   # Architecture decisions
+│       └── REFACTORING_SUMMARY.md
 ├── tests/
 ├── main.py                      # App bootstrap
-├── IMPLEMENTATION.md            # Architecture decisions
-└── REFACTORING_SUMMARY.md       # Phase 1 summary
+└── IMPLEMENTATION.md            # Legacy (moved to docs/v2)
 ```
 
 ## Setup
@@ -532,7 +536,89 @@ LLM client is OpenAI-compatible and expects:
 | Test suite outdated | ⚠️ In Progress | Being updated for v2 architecture |
 | `reputation` command basic | ⚠️ Known | Use `/profile` for detailed stats |
 | Webhook support | ❌ TODO | Use polling (default) |
-| RBAC | ❌ TODO | Organizer-only checks in handlers |
+| RBAC coverage | ⚠️ Partial | Lock command done, more coming |
+| Rate limiting | ❌ TODO | Manual monitoring |
+| Callback replay protection | ❌ TODO | Short session timeouts |
+
+## New Features (Phase 2)
+
+### RBAC (Role-Based Access Control)
+
+**Permission Checks:**
+- `check_event_organizer()` — Organizer-only actions
+- `check_event_admin()` — Organizer or admin actions
+- `check_can_lock_event()` — Lock event (organizer/admin only)
+- `check_can_modify_event()` — Modify event (organizer/admin/confirmed)
+- `check_can_submit_private_note()` — Submit notes (NOT organizer)
+
+**Usage:**
+```python
+from bot.common.rbac import check_can_lock_event
+
+is_authorized, error = await check_can_lock_event(session, event_id, user_id)
+if not is_authorized:
+    await message.reply_text(f"❌ {error}")
+    return
+```
+
+### Threshold Enforcement
+
+**Lock Requirements:**
+1. User must be organizer or admin
+2. Event must be in `confirmed` state
+3. `confirmed_count >= min_participants`
+
+**Error Message:**
+```
+❌ Cannot lock event - below minimum participants.
+
+Required: 3 confirmed
+Current: 2 confirmed
+
+Wait for more participants to confirm, or reduce min_participants.
+```
+
+### Mutual Dependence Visibility
+
+**PRD v2 Section 2.2.3:** Shows who else is attending and threshold fragility.
+
+**Status Message Features:**
+- ✅ Confirmed participant names
+- 👀 Interested participant names
+- ⚠️ Threshold progress ("We need N more")
+- ❗ Fragility warning ("If one more drops, collapses")
+- 🤝 User acknowledgment ("You are one of N people others are counting on")
+
+**Example:**
+```
+📊 Event 123 Status
+
+⚠️ We need 2 more to reach threshold (2/4)
+❗ If one more person drops, this event collapses.
+
+🤝 You are one of 5 people others are counting on.
+   4 participants depending on you.
+
+Participants:
+✅ Confirmed (2): Alice(@alice), Bob(@bob)
+👀 Interested (3): Charlie, Diana, You
+```
+
+### State-Aware Navigation
+
+**Problem Solved:** "Back" button was confused between navigation and uncommit action.
+
+**Solution:** Separate callbacks:
+- `event_unconfirm_` — Revert confirmation
+- `event_details_` — Navigate to details (state-aware)
+- `event_close_` — Close menu
+
+**Menu Structure:**
+| User State | First Row |
+|------------|-----------|
+| Not joined | ✅ Join |
+| Joined | ✅ Confirm + ❌ Cancel |
+| Confirmed | ✓ Confirmed + ↩️ Uncommit |
 
 ## Production Deployment
 
@@ -585,6 +671,18 @@ Apache-2.0
 
 1. Read [PRD v2](docs/v2/coordination-engine-PRD-v2.md) for product philosophy
 2. Review [USER_FLOWS.md](docs/v2/USER_FLOWS.md) for interaction patterns
-3. Check [IMPLEMENTATION.md](IMPLEMENTATION.md) for architecture decisions
-4. Run tests: `pytest`
-5. Submit PR with description of changes
+3. Check [IMPLEMENTATION.md](docs/v2/IMPLEMENTATION.md) for architecture decisions
+4. Review [REFACTORING_SUMMARY.md](docs/v2/REFACTORING_SUMMARY.md) for implementation status
+5. Run tests: `pytest`
+6. Submit PR with description of changes
+
+## Implementation Status
+
+| Phase | Status | Features |
+|-------|--------|----------|
+| Phase 1 | ✅ Complete | Services, Materialization, Memory, Idempotency |
+| Phase 2 | ✅ Complete | RBAC, Threshold Enforcement, Mutual Dependence |
+| Phase 3 | 📋 Planned | Webhook, Callback Protection, Weekly Digest |
+| Phase 4 | 📋 Planned | CI/CD, Observability, Secret Management |
+
+See [IMPLEMENTATION.md](docs/v2/IMPLEMENTATION.md) for detailed TODO list.

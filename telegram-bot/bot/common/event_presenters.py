@@ -343,9 +343,22 @@ async def format_event_details_message(
 
 
 async def format_status_message(
-    event_id: int, event: Any, log_count: int, constraint_count: int, bot=None
+    event_id: int,
+    event: Any,
+    log_count: int,
+    constraint_count: int,
+    bot=None,
+    user_participant=None,
+    session=None,
 ) -> str:
-    """Build consistent event status message."""
+    """
+    Build consistent event status message with mutual dependence visibility.
+
+    PRD v2 Section 2.2.3: Visibility of Mutual Dependence
+    - Shows who else is in (confirmed names, interested names)
+    - Shows threshold progress and fragility
+    - User-specific acknowledgment: "You are one of [N] people [Name] is counting on"
+    """
     description = summarize_description(event.description, max_len=400)
     planning_prefs = (
         event.planning_prefs
@@ -358,6 +371,66 @@ async def format_status_message(
     time_window = str(planning_prefs.get("time_window", "n/a"))
     date_preset = str(planning_prefs.get("date_preset", "n/a"))
 
+    # Get participant counts with names (PRD v2: Visibility of Mutual Dependence)
+    min_participants = event.min_participants or 2
+    threshold = event.threshold_attendance or min_participants
+    confirmed_count = 0
+    interested_count = 0
+    confirmed_names = []
+    interested_names = []
+
+    if session and settings.db_url:
+        from db.models import EventParticipant, ParticipantStatus
+        from sqlalchemy import select
+
+        result = await session.execute(
+            select(EventParticipant, User)
+            .join(User, EventParticipant.telegram_user_id == User.telegram_user_id, isouter=True)
+            .where(EventParticipant.event_id == event_id)
+        )
+
+        for participant, user in result.all():
+            user_display = format_user_display(
+                telegram_user_id=participant.telegram_user_id,
+                username=getattr(user, 'username', None),
+                display_name=getattr(user, 'display_name', None),
+            )
+
+            if participant.status == ParticipantStatus.confirmed:
+                confirmed_count += 1
+                confirmed_names.append(user_display)
+            elif participant.status == ParticipantStatus.joined:
+                interested_count += 1
+                interested_names.append(user_display)
+
+    # Threshold fragility display (PRD v2 Section 2.2.1)
+    needed = max(threshold - confirmed_count, 0)
+    fragility_text = ""
+    if needed > 0:
+        fragility_text = f"\n⚠️ We need {needed} more to reach threshold ({confirmed_count}/{threshold})"
+        if needed == 1:
+            fragility_text += "\n❗ If one more person drops, this event collapses."
+    elif confirmed_count >= threshold:
+        fragility_text = f"\n✅ Threshold reached! ({confirmed_count}/{threshold})"
+
+    # User-specific mutual dependence acknowledgment (PRD v2 Section 2.2.3)
+    mutual_dependence_text = ""
+    if user_participant and session:
+        total_count = confirmed_count + interested_count
+        if total_count > 1:
+            # Find who the user might be counting on (other participants)
+            others_count = total_count - 1
+            if user_participant.status == ParticipantStatus.confirmed:
+                mutual_dependence_text = (
+                    f"\n\n🤝 You are one of {total_count} people others are counting on.\n"
+                    f"   {others_count} participant{'s' if others_count > 1 else ''} depending on you."
+                )
+            elif user_participant.status == ParticipantStatus.joined:
+                mutual_dependence_text = (
+                    f"\n\n🤝 You are one of {total_count} interested participants.\n"
+                    f"   Confirm to let others know you're committed."
+                )
+
     # Get admin mention
     admin_id = getattr(event, "admin_telegram_user_id", None)
     admin_text = "N/A"
@@ -365,25 +438,25 @@ async def format_status_message(
         async with get_session(settings.db_url) as session:
             admin_text = await get_user_mention(session, int(admin_id), bot=bot)
 
+    # Build participant lists
+    participant_text = ""
+    if confirmed_names:
+        participant_text += f"\n✅ Confirmed ({confirmed_count}): {', '.join(confirmed_names)}"
+    if interested_names:
+        participant_text += f"\n👀 Interested ({interested_count}): {', '.join(interested_names)}"
+    if not participant_text:
+        participant_text = "\nNo participants yet."
+
     return (
         f"📊 *Event {event_id} Status*\n\n"
         f"Type: {event.event_type}\n"
         f"Description: {description}\n"
-        f"Time: {event.scheduled_time}\n"
-        f"Commit-By: {event.commit_by or 'N/A'}\n"
-        f"Date Preset: {date_preset}\n"
-        f"Time Window: {time_window}\n"
-        f"Location Type: {location_type}\n"
-        f"Budget: {budget_level}\n"
-        f"Transport: {transport_mode}\n"
-        f"Duration: {event.duration_minutes or 120} minutes\n"
-        f"Threshold: {event.threshold_attendance}\n"
+        f"Time: {event.scheduled_time or 'TBD'}\n"
+        f"Threshold: {threshold}\n"
         f"State: {event.state}\n"
-        f"State Meaning: {STATE_EXPLANATIONS.get(event.state, 'Unknown state')}\n"
-        f"AI Score: {event.ai_score:.2f}\n\n"
-        f"Admin: {admin_text}\n\n"
-        f"Attendees: {len(event.attendance_list)}\n"
-        f"Logs: {log_count}\n"
-        f"Constraints: {constraint_count}\n"
-        f"Created: {event.created_at}"
+        f"{fragility_text}"
+        f"{mutual_dependence_text}\n\n"
+        f"Participants:{participant_text}\n\n"
+        f"Admin: {admin_text}\n"
+        f"Logs: {log_count} | Constraints: {constraint_count}"
     )

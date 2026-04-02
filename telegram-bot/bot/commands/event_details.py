@@ -146,13 +146,24 @@ async def show_status(query, context: ContextTypes.DEFAULT_TYPE, event_id: int) 
 
         user_id = query.from_user.id if query.from_user else None
         bot_username = context.bot.username if context.bot else None
+
+        # Get user's participant record for mutual dependence visibility
+        user_participant = None
+        if user_id:
+            from bot.services import ParticipantService
+            participant_service = ParticipantService(session)
+            user_participant = await participant_service.get_participant(event.event_id, user_id)
+
         keyboard = await build_status_action_markup(event, user_id, bot_username, session)
         reply_markup = InlineKeyboardMarkup(keyboard) if keyboard else None
 
         from bot.common.event_presenters import format_status_message
         try:
             await query.edit_message_text(
-                await format_status_message(event_id, event, log_count, constraint_count, context.bot),
+                await format_status_message(
+                    event_id, event, log_count, constraint_count, context.bot,
+                    user_participant=user_participant, session=session
+                ),
                 reply_markup=reply_markup,
             )
         except Exception as e:

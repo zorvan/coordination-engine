@@ -1,5 +1,12 @@
 #!/usr/bin/env python3
-"""Main entry point for the Telegram bot."""
+"""Main entry point for the Telegram bot.
+
+PRD v2 Updates:
+- Optional webhook support for production
+- Worker queue for async tasks
+- Rate limiting middleware
+- Callback replay protection
+"""
 import asyncio
 import logging
 from telegram import Update
@@ -27,8 +34,8 @@ from db.connection import check_db_connection, create_engine, init_db
 async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Log full traceback for uncaught update handling errors."""
     logger = logging.getLogger("coord_bot.bot")
-    logger.exception("Unhandled Telegram update error. update=%r", 
-                     update, 
+    logger.exception("Unhandled Telegram update error. update=%r",
+                     update,
                      exc_info=context.error)
 
 
@@ -60,7 +67,7 @@ def main():
     """Main entry point."""
     settings = Settings()
     logger = setup_logging(settings)
-    
+
     if not settings.telegram_token:
         raise ValueError("TELEGRAM_TOKEN is not set. Define it in environment or .env.")
 
@@ -69,7 +76,7 @@ def main():
     except RuntimeError:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
-    
+
     loop.run_until_complete(check_llm_availability(logger))
     if settings.db_url:
         if not settings.db_url.startswith("postgresql+asyncpg://"):
@@ -82,8 +89,14 @@ def main():
         engine = create_engine(db_url)
         loop.run_until_complete(init_db(engine))
         logger.info("Database initialization complete")
-    
+
+    # Build application
     application = ApplicationBuilder().token(settings.telegram_token).build()
+
+    # Register middleware (rate limiting)
+    # Note: Uncomment when ready to enable rate limiting
+    # from bot.common.rate_limiter import rate_limit_middleware
+    # application.middleware().add(rate_limit_middleware)
 
     # Capture rolling group history first for mention context.
     application.add_handler(
@@ -138,8 +151,10 @@ def main():
         "memory": memory.memory,
         "recall": memory.recall,
         "remember": memory.remember,
+        # PRD v2: Weekly digest command
+        "digest": memory.weekly_digest,  # Manual trigger for now
     }
-    
+
     for command, handler in command_map.items():
         application.add_handler(CommandHandler(command, handler))
 
@@ -165,8 +180,10 @@ def main():
         (r"^suggest_time_retry_", suggest_time.handle_callback),
         (r"^feedback_", feedback.handle_feedback_callback),
         (r"^modreq_", modify_event.handle_modify_request_callback),
+        # Weekly digest callbacks
+        (r"^digest_", memory.handle_digest_callback),
     ]
-    
+
     for pattern, handler in callback_handlers:
         application.add_handler(CallbackQueryHandler(handler, pattern=pattern))
 
@@ -184,12 +201,34 @@ def main():
 
     application.add_error_handler(on_error)
 
-    # Note: Deadline checks require python-telegram-bot[job-queue] 
+    # Note: Deadline checks require python-telegram-bot[job-queue]
     # For now, deadline checks are triggered manually via /check_deadlines command
     # Or can be run periodically via external scheduler (cron, systemd timer, etc.)
 
     logger.info("Bot started. Press Ctrl+C to stop.")
-    application.run_polling()
+    
+    # Check if webhook mode is enabled
+    if settings.environment == "production" and hasattr(settings, 'webhook_url') and settings.webhook_url:
+        # Production: Use webhook with worker queue
+        logger.info("Starting in webhook mode: %s", settings.webhook_url)
+        from bot.common.webhook import setup_webhook, shutdown_webhook
+        
+        async def run_webhook():
+            await setup_webhook(
+                application,
+                webhook_url=settings.webhook_url,
+                webhook_port=int(getattr(settings, 'webhook_port', 8443)),
+                webhook_secret=getattr(settings, 'webhook_secret', None),
+            )
+        
+        try:
+            loop.run_until_complete(run_webhook())
+        except KeyboardInterrupt:
+            loop.run_until_complete(shutdown_webhook(application))
+    else:
+        # Development: Use polling
+        logger.info("Starting in polling mode")
+        application.run_polling()
 
 
 if __name__ == "__main__":

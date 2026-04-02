@@ -6,6 +6,7 @@ Commands:
 - /memory [event_id] - View the memory weave for a past event
 - /recall - List recent memory weaves for the group
 - /remember [event_id] - Add a memory fragment outside the DM window
+- /digest - Get weekly digest for the group (manual trigger)
 """
 import logging
 from telegram import Update
@@ -14,6 +15,7 @@ from telegram.ext import ContextTypes
 from db.connection import get_session
 from db.models import Event, EventMemory
 from bot.services.event_memory_service import EventMemoryService
+from bot.common.weekly_digest import WeeklyDigestService
 from config.logging import set_correlation_context, clear_correlation_context
 
 logger = logging.getLogger("coord_bot.commands.memory")
@@ -261,6 +263,176 @@ async def remember(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                     "fragment_length": len(memory_text),
                 }
             )
-    
+
     finally:
         clear_correlation_context()
+
+
+async def weekly_digest(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    Get weekly digest for the group (manual trigger).
+
+    Usage: /digest
+    """
+    set_correlation_context(
+        correlation_id=f"digest_{update.effective_user.id}",
+        user_id=update.effective_user.id if update.effective_user else None,
+        chat_id=update.effective_chat.id if update.effective_chat else None,
+    )
+
+    try:
+        if not update.effective_chat:
+            return
+
+        async with get_session(context.bot_data.get("db_url")) as session:
+            # Get group
+            from sqlalchemy import select
+            from db.models import Group
+
+            result = await session.execute(
+                select(Group).where(Group.telegram_group_id == update.effective_chat.id)
+            )
+            group = result.scalar_one_or_none()
+
+            if not group:
+                await update.message.reply_text(
+                    "This group is not registered yet.\n"
+                    "Use /start to register."
+                )
+                return
+
+            # Generate digest
+            digest_service = WeeklyDigestService(context.bot, session)
+            digest_data = await digest_service.generate_digest(group.group_id)
+
+            # Build response
+            response_parts = []
+
+            # Recent memories
+            if digest_data.get("memories"):
+                response_parts.append("📿 <b>Recent Memories</b>")
+                for memory in digest_data["memories"]:
+                    event = memory.event
+                    event_title = f"{event.event_type} • {event.scheduled_time.strftime('%d %b') if event.scheduled_time else 'TBD'}"
+                    response_parts.append(f"• {event_title}")
+
+            # Upcoming events
+            if digest_data.get("upcoming_events"):
+                response_parts.append("\n📅 <b>Upcoming Events</b>")
+                for event in digest_data["upcoming_events"]:
+                    event_title = f"{event.event_type} • {event.scheduled_time.strftime('%d %b %H:%M') if event.scheduled_time else 'TBD'}"
+                    response_parts.append(f"• {event_title}")
+
+            # Stats
+            if digest_data.get("stats"):
+                stats = digest_data["stats"]
+                response_parts.append("\n📊 <b>This Week</b>")
+                if stats.get("events_completed"):
+                    response_parts.append(f"• {stats['events_completed']} events completed")
+                if stats.get("participants"):
+                    response_parts.append(f"• {stats['participants']} participants")
+                if stats.get("memory_fragments"):
+                    response_parts.append(f"• {stats['memory_fragments']} memories shared")
+
+            if not response_parts:
+                await update.message.reply_text(
+                    "No activity this week.\n\n"
+                    "Memories and events will appear here as your group becomes more active!"
+                )
+                return
+
+            response = "\n".join(response_parts)
+            await update.message.reply_text(response, parse_mode="HTML")
+
+            logger.info(
+                "User requested weekly digest",
+                extra={
+                    "group_id": group.group_id,
+                    "user": update.effective_user.id,
+                }
+            )
+
+    finally:
+        clear_correlation_context()
+
+
+async def handle_digest_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    Handle callback queries from weekly digest inline keyboard.
+
+    Callbacks:
+    - digest_events - View all events
+    - digest_memories - View all memories
+    """
+    query = update.callback_query
+    if query is None:
+        return
+
+    await query.answer()
+
+    action = query.data.split("_", 1)[1] if "_" in query.data else ""
+
+    async with get_session(context.bot_data.get("db_url")) as session:
+        from sqlalchemy import select
+        from db.models import Group
+
+        # Get group
+        result = await session.execute(
+            select(Group).where(Group.telegram_group_id == query.message.chat_id)
+        )
+        group = result.scalar_one_or_none()
+
+        if not group:
+            await query.edit_message_text("This group is not registered yet.")
+            return
+
+        if action == "events":
+            # Show all events
+            from db.models import Event
+            result = await session.execute(
+                select(Event)
+                .where(Event.group_id == group.group_id)
+                .order_by(Event.scheduled_time.desc())
+                .limit(10)
+            )
+            events = result.scalars().all()
+
+            if not events:
+                await query.edit_message_text("No events found for this group.")
+                return
+
+            response = "📅 <b>Recent Events</b>\n\n"
+            for event in events:
+                status = event.status.value if event.status else "unknown"
+                time_str = event.scheduled_time.strftime("%d %b %H:%M") if event.scheduled_time else "TBD"
+                response += f"• {event.event_type} • {time_str} [{status}]\n"
+
+            await query.edit_message_text(response, parse_mode="HTML")
+
+        elif action == "memories":
+            # Show all memories
+            from db.models import EventMemory
+            result = await session.execute(
+                select(EventMemory)
+                .join(Event)
+                .where(Event.group_id == group.group_id)
+                .order_by(EventMemory.created_at.desc())
+                .limit(10)
+            )
+            memories = result.scalars().all()
+
+            if not memories:
+                await query.edit_message_text("No memories found for this group.")
+                return
+
+            response = "📿 <b>Recent Memories</b>\n\n"
+            for memory in memories:
+                event = memory.event
+                event_title = f"{event.event_type} • {event.scheduled_time.strftime('%d %b') if event.scheduled_time else 'TBD'}"
+                fragment_count = len(memory.fragments) if memory.fragments else 0
+                response += f"• {event_title} ({fragment_count} fragments)\n"
+
+            await query.edit_message_text(response, parse_mode="HTML")
+
+        else:
+            await query.edit_message_text("Unknown action.")

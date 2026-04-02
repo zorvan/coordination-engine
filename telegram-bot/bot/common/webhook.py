@@ -10,8 +10,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from typing import Callable, Any, Optional
-from telegram import Update
-from telegram.ext import Application, ContextTypes
+from telegram.ext import Application
 
 logger = logging.getLogger("coord_bot.webhook")
 

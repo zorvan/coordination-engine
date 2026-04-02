@@ -140,7 +140,7 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             f"Use /back {event_id} to revert commitment before lock.",
             reply_markup=reply_markup,
         )
-        
+
 
 
 async def handle_callback(

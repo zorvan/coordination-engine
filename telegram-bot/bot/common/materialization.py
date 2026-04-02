@@ -7,12 +7,13 @@ This module provides the integration between service layer and group announcemen
 from __future__ import annotations
 
 import logging
-from typing import Optional, List, TYPE_CHECKING
+from typing import Optional, TYPE_CHECKING
 from telegram import Bot
 
 if TYPE_CHECKING:
-    from db.models import Event, EventParticipant, User
+    from db.models import Event, EventParticipant, User, ParticipantStatus
     from sqlalchemy.ext.asyncio import AsyncSession
+    from bot.services import EventMaterializationService
 
 logger = logging.getLogger("coord_bot.materialization")
 
@@ -78,10 +79,10 @@ class MaterializationOrchestrator:
 
     async def _announce_first_join(
         self,
-        event: 'Event',
+        event: Event,
         user_id: Optional[int],
         group_chat_id: int,
-        materialization: 'EventMaterializationService',
+        materialization: EventMaterializationService,
     ) -> None:
         """Announce first person joining."""
         if not user_id:
@@ -95,10 +96,10 @@ class MaterializationOrchestrator:
 
     async def _announce_join(
         self,
-        event: 'Event',
+        event: Event,
         user_id: Optional[int],
         group_chat_id: int,
-        materialization: 'EventMaterializationService',
+        materialization: EventMaterializationService,
     ) -> None:
         """Announce someone joining."""
         if not user_id:
@@ -110,7 +111,6 @@ class MaterializationOrchestrator:
 
         # Get confirmed count
         from sqlalchemy import select, func
-        from db.models import EventParticipant, ParticipantStatus
 
         result = await self.session.execute(
             select(func.count(EventParticipant.telegram_user_id))
@@ -128,13 +128,12 @@ class MaterializationOrchestrator:
 
     async def _announce_threshold(
         self,
-        event: 'Event',
+        event: Event,
         group_chat_id: int,
-        materialization: 'EventMaterializationService',
+        materialization: EventMaterializationService,
     ) -> None:
         """Announce threshold reached."""
         from sqlalchemy import select, func
-        from db.models import EventParticipant, ParticipantStatus
 
         result = await self.session.execute(
             select(func.count(EventParticipant.telegram_user_id))
@@ -154,13 +153,12 @@ class MaterializationOrchestrator:
 
     async def _announce_locked(
         self,
-        event: 'Event',
+        event: Event,
         group_chat_id: int,
-        materialization: 'EventMaterializationService',
+        materialization: EventMaterializationService,
     ) -> None:
         """Announce event locked."""
         from sqlalchemy import select
-        from db.models import EventParticipant, ParticipantStatus
 
         result = await self.session.execute(
             select(EventParticipant)
@@ -178,13 +176,12 @@ class MaterializationOrchestrator:
 
     async def _announce_completed(
         self,
-        event: 'Event',
+        event: Event,
         group_chat_id: int,
-        materialization: 'EventMaterializationService',
+        materialization: EventMaterializationService,
     ) -> None:
         """Announce event completed."""
         from sqlalchemy import select, func
-        from db.models import EventParticipant, ParticipantStatus
 
         result = await self.session.execute(
             select(func.count(EventParticipant.telegram_user_id))
@@ -204,9 +201,9 @@ class MaterializationOrchestrator:
 
     async def _announce_cancellation(
         self,
-        event: 'Event',
+        event: Event,
         cancelled_user_id: Optional[int],
-        materialization: 'EventMaterializationService',
+        materialization: EventMaterializationService,
     ) -> None:
         """Announce cancellation privately to organizer."""
         if not cancelled_user_id:
@@ -223,7 +220,6 @@ class MaterializationOrchestrator:
 
         # Get remaining count
         from sqlalchemy import select, func
-        from db.models import EventParticipant, ParticipantStatus
 
         result = await self.session.execute(
             select(func.count(EventParticipant.telegram_user_id))
@@ -241,10 +237,9 @@ class MaterializationOrchestrator:
             event, user, organizer_chat_id, remaining_count
         )
 
-    async def _get_user(self, telegram_user_id: int) -> Optional['User']:
+    async def _get_user(self, telegram_user_id: int) -> Optional[User]:
         """Get user by Telegram ID."""
         from sqlalchemy import select
-        from db.models import User
 
         result = await self.session.execute(
             select(User).where(User.telegram_user_id == telegram_user_id)

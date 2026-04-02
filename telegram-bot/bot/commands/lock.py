@@ -4,6 +4,7 @@
 PRD v2 Updates:
 - Uses RBAC for permission checks
 - Enforces min_participants threshold
+- Enforces lock_deadline (TODO-022)
 - Finalizes all joined participants to confirmed
 """
 import logging
@@ -16,7 +17,7 @@ from sqlalchemy import select
 from bot.common.event_states import STATE_EXPLANATIONS
 from config.settings import settings
 from db.connection import get_session
-from db.models import Event, EventParticipant, ParticipantStatus
+from db.models import Event
 from bot.services import EventLifecycleService, ParticipantService
 from bot.common.rbac import check_can_lock_event
 from bot.services.event_state_transition_service import ThresholdNotMetError
@@ -97,6 +98,16 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                 f"Required: {min_required} confirmed\n"
                 f"Current: {confirmed_count} confirmed\n\n"
                 f"Wait for more participants to confirm, or reduce min_participants."
+            )
+            return
+
+        # Lock deadline enforcement (TODO-022)
+        if event.lock_deadline and datetime.utcnow() > event.lock_deadline:
+            await update.message.reply_text(
+                f"❌ Cannot lock event - lock deadline has passed.\n\n"
+                f"Lock deadline was: {event.lock_deadline.strftime('%Y-%m-%d %H:%M')}\n"
+                f"Current time: {datetime.utcnow().strftime('%Y-%m-%d %H:%M')}\n\n"
+                f"Participants can still join, but the event cannot be locked."
             )
             return
 

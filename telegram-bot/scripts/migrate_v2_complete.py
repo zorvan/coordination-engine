@@ -39,7 +39,7 @@ async def run_migration():
             END $$;
         """)
         print("  ✓ participant_status")
-        
+
         await conn.execute("""
             DO $$ BEGIN
                 CREATE TYPE participant_role AS ENUM ('organizer', 'participant', 'observer');
@@ -60,7 +60,7 @@ async def run_migration():
         ]
 
         existing_columns = await conn.fetch("""
-            SELECT column_name FROM information_schema.columns 
+            SELECT column_name FROM information_schema.columns
             WHERE table_name = 'events'
         """)
         existing_column_names = {row['column_name'] for row in existing_columns}
@@ -74,7 +74,7 @@ async def run_migration():
 
         # 3. Create new tables
         print("\n[3/5] Creating new tables...")
-        
+
         # event_participants
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS event_participants (
@@ -157,17 +157,17 @@ async def run_migration():
 
         # 5. Verify schema
         print("\n[5/5] Verifying schema...")
-        
+
         # Check events table columns
         events_columns = await conn.fetch("""
-            SELECT column_name FROM information_schema.columns 
+            SELECT column_name FROM information_schema.columns
             WHERE table_name = 'events' ORDER BY ordinal_position
         """)
         print(f"  ✓ events table: {len(events_columns)} columns")
-        
+
         # Check tables exist
         tables = await conn.fetch("""
-            SELECT table_name FROM information_schema.tables 
+            SELECT table_name FROM information_schema.tables
             WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
             ORDER BY table_name
         """)

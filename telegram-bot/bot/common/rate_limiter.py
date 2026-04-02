@@ -232,7 +232,6 @@ async def rate_limit_middleware(update, context, next_handler):
         application.middleware().add(rate_limit_middleware)
     """
     from telegram import Update
-    from telegram.ext import ContextTypes
 
     if not isinstance(update, Update):
         return await next_handler(update, context)

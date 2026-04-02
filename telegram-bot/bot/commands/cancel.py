@@ -67,7 +67,7 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                 telegram_user_id=telegram_user_id,
                 source="slash",
             )
-        except Exception as e:
+        except Exception:
             await message.reply_text(
                 f"❌ You haven't joined event {event_id} yet. "
                 "Nothing to cancel."

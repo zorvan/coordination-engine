@@ -238,6 +238,20 @@ CREATE TABLE IF NOT EXISTS event_memories (
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+-- 15. EventWaitlist: Waitlist for oversubscribed events (TODO-023)
+CREATE TABLE IF NOT EXISTS event_waitlist (
+    waitlist_id SERIAL PRIMARY KEY,
+    event_id INTEGER NOT NULL REFERENCES events(event_id) ON DELETE CASCADE,
+    telegram_user_id BIGINT NOT NULL,
+    position INTEGER NOT NULL,
+    added_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    expires_at TIMESTAMP,
+    status VARCHAR(20) NOT NULL DEFAULT 'waiting' CHECK (
+        status IN ('waiting', 'offered', 'promoted', 'expired', 'cancelled')
+    ),
+    UNIQUE(event_id, telegram_user_id)
+);
+
 -- Indexes for performance
 CREATE INDEX IF NOT EXISTS idx_events_group ON events(group_id);
 CREATE INDEX IF NOT EXISTS idx_events_state ON events(state);
@@ -263,3 +277,8 @@ CREATE INDEX IF NOT EXISTS idx_event_participants_user_id ON event_participants(
 CREATE INDEX IF NOT EXISTS idx_event_participants_status ON event_participants(status);
 CREATE INDEX IF NOT EXISTS idx_event_state_transitions_event_id ON event_state_transitions(event_id);
 CREATE INDEX IF NOT EXISTS idx_idempotency_keys_expires ON idempotency_keys(expires_at);
+
+-- PRD v2: Waitlist indexes
+CREATE INDEX IF NOT EXISTS idx_event_waitlist_event_id ON event_waitlist(event_id);
+CREATE INDEX IF NOT EXISTS idx_event_waitlist_user_id ON event_waitlist(telegram_user_id);
+CREATE INDEX IF NOT EXISTS idx_event_waitlist_status ON event_waitlist(status);

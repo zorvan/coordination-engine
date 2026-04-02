@@ -19,7 +19,7 @@ from db.errors import (
 )
 
 __all__ = [
-    "create_engine", "create_session", "get_session", 
+    "create_engine", "create_session", "get_session",
     "check_db_connection", "retry_operation", "Base",
     "User", "Group", "Event", "Constraint", "Reputation", "Log", "Feedback", "AILog", "UserPreference",
     "DatabaseError", "DatabaseConnectionError", "DatabaseOperationError",

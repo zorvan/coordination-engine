@@ -26,8 +26,8 @@ class DatabaseOperationError(DatabaseError):
 
 
 def log_database_error(
-    operation: str, 
-    error: Exception, 
+    operation: str,
+    error: Exception,
     context: dict | None = None
 ) -> None:
     """Log database error with context information."""
@@ -49,33 +49,33 @@ async def handle_database_error(
 ) -> bool:
     """
     Handle database error gracefully and return True if error was handled.
-    
+
     Returns False if error should be propagated.
     """
     log_database_error(operation, error, {
         "update_id": update.update_id if update else None,
         "chat_id": update.effective_chat.id if update and update.effective_chat else None,
     })
-    
+
     if not user_message:
         user_message = (
             "❌ A database error occurred while processing your request. "
             "Please try again later."
         )
-    
+
     if update and update.effective_message:
         try:
             await update.effective_message.reply_text(user_message)
         except Exception as e:
             logger.warning("Failed to send error message to user: %s", e)
-    
+
     return True
 
 
 def database_error_handler(operation: str, user_message: str | None = None):
     """
     Decorator for handling database errors in handlers.
-    
+
     Usage:
         @database_error_handler("fetch events", "Failed to load events")
         async def get_events(session):
@@ -105,7 +105,7 @@ def is_connection_error(error: Exception) -> bool:
         "network unreachable", "host unreachable", "refused",
         "could not translate host name", "no route to host"
     }
-    
+
     return any(err in error_str for err in connection_errors)
 
 
@@ -115,5 +115,5 @@ def is_transaction_error(error: Exception) -> bool:
     transaction_errors = {
         "transaction", "rollback", "commit", "session", "flush"
     }
-    
+
     return any(err in error_str for err in transaction_errors)

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Deadline and auto-lock utilities."""
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Optional
 
 from sqlalchemy import select
@@ -12,7 +12,7 @@ from db.models import Event
 
 async def check_and_lock_expired_events(bot=None) -> list[dict]:
     """Check for events that have reached their deadline and auto-lock if threshold is met.
-    
+
     Returns:
         List of dicts with event_id and status for each processed event
     """
@@ -36,7 +36,6 @@ async def check_and_lock_expired_events(bot=None) -> list[dict]:
 
         for event in events_to_check:
             try:
-                event_id = int(event.event_id)
                 result = await _try_auto_lock_event(session, event, now, bot)
                 results.append(result)
             except Exception as e:
@@ -51,7 +50,7 @@ async def check_and_lock_expired_events(bot=None) -> list[dict]:
 
 async def _try_auto_lock_event(session, event, now: datetime, bot=None) -> dict:
     """Try to auto-lock a single event.
-    
+
     Returns:
         Dict with event_id, status, and message
     """
@@ -124,7 +123,7 @@ async def _try_auto_lock_event(session, event, now: datetime, bot=None) -> dict:
 
 async def check_deadline_status(event_id: int) -> Optional[dict]:
     """Get deadline status for a specific event.
-    
+
     Returns:
         Dict with deadline info or None if event not found
     """

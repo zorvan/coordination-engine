@@ -18,7 +18,7 @@ Base: Any = declarative_base()
 class User(Base):
     """Users table - global identity across groups."""
     __tablename__ = "users"
-    
+
     user_id = Column(Integer, primary_key=True)
     telegram_user_id = Column(BigInteger, unique=True, nullable=False)
     username = Column(String(255), unique=True)
@@ -56,14 +56,14 @@ class User(Base):
 class Group(Base):
     """Groups table - Telegram group context."""
     __tablename__ = "groups"
-    
+
     group_id = Column(Integer, primary_key=True)
     telegram_group_id = Column(BigInteger, unique=True, nullable=False)
     group_name = Column(String(255))
     group_type = Column(String(50), default="casual")
     member_list = Column(JSON, default=list)
     created_at = Column(DateTime, default=datetime.utcnow)
-    
+
     events = relationship("Event", back_populates="group")
 
 
@@ -85,13 +85,13 @@ class Event(Base):
     commit_by = Column(DateTime)
     duration_minutes = Column(Integer, default=120)
     threshold_attendance = Column(Integer, default=0)
-    
+
     # PRD v2: Explicit threshold fields (Section 2.1)
     min_participants = Column(Integer, default=2)  # Absolute floor for viability
     target_participants = Column(Integer, default=6)  # Desired count for optimal experience
     collapse_at = Column(DateTime)  # Auto-cancel deadline for underthreshold events
     lock_deadline = Column(DateTime)  # Cutoff for attendance changes
-    
+
     attendance_list = Column(JSON, default=list)  # DEPRECATED: kept for migration
     planning_prefs = Column(JSON, default=dict)
     ai_score = Column(Float, default=0.0)
@@ -99,7 +99,7 @@ class Event(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     locked_at = Column(DateTime)
     completed_at = Column(DateTime)
-    
+
     # PRD v2: Optimistic concurrency control (Priority 1)
     version = Column(Integer, default=0, nullable=False)
 
@@ -139,7 +139,7 @@ class Event(Base):
 class UserPreference(Base):
     """User preferences table - private preference profiles."""
     __tablename__ = "user_preferences"
-    
+
     preference_id = Column(Integer, primary_key=True)
     user_id = Column(
         Integer,
@@ -162,7 +162,7 @@ class UserPreference(Base):
 class Constraint(Base):
     """Constraints table - conditional participation."""
     __tablename__ = "constraints"
-    
+
     constraint_id = Column(Integer, primary_key=True)
     user_id = Column(
         Integer,
@@ -198,7 +198,7 @@ class Constraint(Base):
 class Reputation(Base):
     """Reputation table - activity-specific credibility."""
     __tablename__ = "reputation"
-    
+
     reputation_id = Column(Integer, primary_key=True)
     user_id = Column(
         Integer,
@@ -221,14 +221,14 @@ class Reputation(Base):
         ),
         UniqueConstraint("user_id", "activity_type", name="uq_user_activity"),
     )
-    
+
     user = relationship("User", back_populates="reputation_records")
 
 
 class Log(Base):
     """Logs table - audit trail."""
     __tablename__ = "logs"
-    
+
     log_id = Column(Integer, primary_key=True)
     event_id = Column(
         Integer,
@@ -241,7 +241,7 @@ class Log(Base):
     action = Column(String(100), nullable=False)
     timestamp = Column(DateTime, default=datetime.utcnow)
     metadata_dict = Column("metadata", JSON, default=dict)
-    
+
     event = relationship("Event", back_populates="logs")
     user = relationship("User", back_populates="logs")
 
@@ -249,7 +249,7 @@ class Log(Base):
 class Feedback(Base):
     """Feedback table - post-event ratings."""
     __tablename__ = "feedback"
-    
+
     feedback_id = Column(Integer, primary_key=True)
     event_id = Column(
         Integer,
@@ -265,7 +265,7 @@ class Feedback(Base):
     value = Column(Float, nullable=False)
     comment = Column(Text)
     timestamp = Column(DateTime, default=datetime.utcnow)
-    
+
     __table_args__ = (
         CheckConstraint(
             "value >= 0 AND value <= 5",
@@ -278,7 +278,7 @@ class Feedback(Base):
             name="uq_feedback_user_event"
         ),
     )
-    
+
     event = relationship("Event", back_populates="feedback")
     user = relationship("User", back_populates="feedback")
 
@@ -408,7 +408,7 @@ class EventParticipant(Base):
     confirmed_at = Column(DateTime)
     cancelled_at = Column(DateTime)
     source = Column(String(50))  # slash, callback, mention, dm
-    
+
     event = relationship("Event", back_populates="participants")
 
 
@@ -428,7 +428,7 @@ class IdempotencyKey(Base):
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     completed_at = Column(DateTime)
     expires_at = Column(DateTime, nullable=False)
-    
+
     user = relationship("User")
     event = relationship("Event")
 
@@ -452,7 +452,7 @@ class EventStateTransition(Base):
     timestamp = Column(DateTime, default=datetime.utcnow, nullable=False)
     reason = Column(Text)
     source = Column(String(50), nullable=False)  # slash, callback, AI mention
-    
+
     event = relationship("Event")
 
 
@@ -482,5 +482,52 @@ class EventMemory(Base):
     lineage_event_ids = Column(JSON, default=list)  # References to prior similar events
     tone_palette = Column(JSON, default=list)  # Coexisting tones identified
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    
+
     event = relationship("Event", back_populates="memories")
+
+
+# ============================================================================
+# PRD v2: Waitlist Support (TODO-023)
+# ============================================================================
+
+class EventWaitlist(Base):
+    """
+    EventWaitlist table - Waitlist for oversubscribed events.
+    PRD v2 Section 4.3: Waitlist support for Priority 3.
+
+    When events reach capacity, users can join waitlist.
+    Automatic promotion when confirmed participants cancel.
+    """
+    __tablename__ = "event_waitlist"
+
+    waitlist_id = Column(Integer, primary_key=True)
+    event_id = Column(
+        Integer,
+        ForeignKey("events.event_id", ondelete="CASCADE"),
+        nullable=False
+    )
+    telegram_user_id = Column(BigInteger, nullable=False)
+    position = Column(Integer, nullable=False)  # Waitlist position (1-based)
+    added_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    expires_at = Column(DateTime)  # When waitlist offer expires
+    status = Column(
+        String(20),
+        default="waiting",  # waiting, offered, promoted, expired, cancelled
+        nullable=False
+    )
+
+    __table_args__ = (
+        UniqueConstraint("event_id", "telegram_user_id", name="uq_waitlist_event_user"),
+    )
+
+    event = relationship("Event", back_populates="waitlist")
+
+
+# Add back-populates to Event model for waitlist
+# (This needs to be added to the Event class definition)
+Event.waitlist = relationship(
+    "EventWaitlist",
+    back_populates="event",
+    cascade="all, delete-orphan",
+    order_by="EventWaitlist.position"
+)

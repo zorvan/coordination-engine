@@ -346,12 +346,12 @@ class TestEventCreation:
             mock_session.execute = AsyncMock()
             mock_session.commit = AsyncMock()
             mock_session.refresh = AsyncMock()
-            
+
             # Mock group not found (will be created)
             mock_session.execute.return_value = MagicMock(
                 scalar_one_or_none=lambda: None
             )
-            
+
             mock_get_session.return_value.__aenter__.return_value = mock_session
 
             # Should initialize flow without error

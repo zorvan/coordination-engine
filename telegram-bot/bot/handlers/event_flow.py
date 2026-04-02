@@ -78,7 +78,7 @@ async def handle_join(query, context: ContextTypes.DEFAULT_TYPE, event_id: int) 
         # Check if user already joined/confirmed
         participant_service = ParticipantService(session)
         participant = await participant_service.get_participant(event_id, telegram_user_id)
-        
+
         if participant:
             if participant.status == ParticipantStatus.confirmed:
                 await query.answer("ℹ️ You've already confirmed", show_alert=True)
@@ -259,7 +259,7 @@ async def handle_join(query, context: ContextTypes.DEFAULT_TYPE, event_id: int) 
             reply_markup=reply_markup,
             parse_mode="Markdown"
         )
-        
+
 
 
 async def handle_confirm(query, context: ContextTypes.DEFAULT_TYPE, event_id: int) -> None:
@@ -293,7 +293,7 @@ async def handle_confirm(query, context: ContextTypes.DEFAULT_TYPE, event_id: in
         # Check if user already confirmed or hasn't joined
         participant_service = ParticipantService(session)
         participant = await participant_service.get_participant(event_id, telegram_user_id)
-        
+
         if not participant:
             await query.answer("❌ Please join first", show_alert=True)
             return
@@ -527,7 +527,7 @@ async def handle_cancel(query, context: ContextTypes.DEFAULT_TYPE, event_id: int
             display_name=display_name,
             username=username,
         )
-        
+
         log = Log(
             event_id=event_id,
             user_id=user_id,
@@ -536,13 +536,13 @@ async def handle_cancel(query, context: ContextTypes.DEFAULT_TYPE, event_id: int
         )
         session.add(log)
         await session.commit()
-        
+
         await query.edit_message_text(
             f"❌ *Attendance cancelled for event {event_id}!*\n\n"
             f"State: {event.state}\n"
             f"Meaning: {STATE_EXPLANATIONS.get(event.state, 'Unknown state')}"
         )
-        
+
 
 
 async def handle_lock(query, context: ContextTypes.DEFAULT_TYPE, event_id: int) -> None:
@@ -626,4 +626,4 @@ async def show_event_details(query, context: ContextTypes.DEFAULT_TYPE, event_id
             f"Threshold: {event.threshold_attendance}\n"
             f"Attendees: {total_attendees}"
         )
-        
+

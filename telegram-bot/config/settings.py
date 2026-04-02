@@ -16,28 +16,28 @@ class Settings:
     def __init__(self):
         # Telegram
         self.telegram_token: str | None = os.environ.get("TELEGRAM_TOKEN")
-        
+
         # Database
         self.db_url: str | None = os.environ.get("DB_URL")
-        
+
         # AI/LLM
         self.ai_endpoint: str = os.environ.get(
             "AI_ENDPOINT", "http://127.0.0.1:8080/v1/"
         )
         self.ai_model: str = os.environ.get("AI_MODEL", "qwen/qwen3-coder-next")
         self.ai_api_key: str = os.environ.get("AI_API_KEY", "dummy-key")
-        
+
         # Logging
         self.log_level: str = os.environ.get("LOG_LEVEL", "INFO")
         self.log_level_telegram: str = os.environ.get("LOG_LEVEL_TELEGRAM", "INFO")
         self.log_level_httpx: str = os.environ.get("LOG_LEVEL_HTTPX", "WARNING")
         self.json_logs: bool = os.environ.get("JSON_LOGS", "false").lower() == "true"
-        
+
         # PRD v2: Feature flags
         self.enable_materialization: bool = os.environ.get("ENABLE_MATERIALIZATION", "true").lower() == "true"
         self.enable_memory_layer: bool = os.environ.get("ENABLE_MEMORY_LAYER", "true").lower() == "true"
         self.enable_reputation_effects: bool = os.environ.get("ENABLE_REPUTATION_EFFECTS", "false").lower() == "true"
-        
+
         # PRD v2: Production settings
         self.environment: str = os.environ.get("ENVIRONMENT", "development")  # development, staging, production
         self.enable_idempotency: bool = os.environ.get("ENABLE_IDEMPOTENCY", "false").lower() == "true"

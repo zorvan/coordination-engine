@@ -89,7 +89,7 @@ async def _send_suggestion(
         event = result.scalar_one_or_none()
         if not event:
             await msg.reply_text("❌ Event not found.")
-            
+
             return
 
         session_factory = create_session_factory(db_url)
@@ -98,7 +98,7 @@ async def _send_suggestion(
                                                      event_id=event_id)
         if "error" in suggestion:
             await msg.reply_text(f"❌ Error: {suggestion['error']}")
-            
+
             return
 
         suggested_time_raw = suggestion.get("suggested_time")

@@ -22,7 +22,7 @@ class StructuredJsonFormatter(logging.Formatter):
     JSON formatter for structured logging.
     Adds correlation IDs and contextual fields to every log entry.
     """
-    
+
     def format(self, record: logging.LogRecord) -> str:
         log_entry: Dict[str, Any] = {
             "timestamp": datetime.utcnow().isoformat() + "Z",
@@ -30,31 +30,31 @@ class StructuredJsonFormatter(logging.Formatter):
             "logger": record.name,
             "message": record.getMessage(),
         }
-        
+
         # Add correlation IDs from context
         correlation_id = correlation_id_var.get()
         if correlation_id:
             log_entry["correlation_id"] = correlation_id
-        
+
         event_id = event_id_var.get()
         if event_id is not None:
             log_entry["event_id"] = event_id
-        
+
         user_id = user_id_var.get()
         if user_id is not None:
             log_entry["user_id"] = user_id
-        
+
         chat_id = chat_id_var.get()
         if chat_id is not None:
             log_entry["chat_id"] = chat_id
-        
+
         # Add standard fields if present
         if record.exc_info:
             log_entry["exception"] = self.formatException(record.exc_info)
-        
+
         if record.stack_info:
             log_entry["stack_info"] = self.formatStack(record.stack_info)
-        
+
         # Add extra fields (passed via extra={...})
         extra_fields = {
             k: v for k, v in record.__dict__.items()
@@ -67,10 +67,10 @@ class StructuredJsonFormatter(logging.Formatter):
             }
             and not k.startswith('_')
         }
-        
+
         if extra_fields:
             log_entry["extra"] = extra_fields
-        
+
         return json.dumps(log_entry, default=str)
 
 
@@ -82,7 +82,7 @@ def set_correlation_context(
 ) -> None:
     """
     Set correlation context for the current async task.
-    
+
     Use this to link logs across a single request/command lifecycle.
     """
     if correlation_id is not None:
@@ -110,7 +110,7 @@ def setup_logging(settings: Settings) -> logging.Logger:
 
     # Use JSON formatter in production, readable in dev
     use_json_logs = getattr(settings, 'json_logs', False)
-    
+
     if use_json_logs:
         formatter = StructuredJsonFormatter()
     else:
@@ -121,7 +121,7 @@ def setup_logging(settings: Settings) -> logging.Logger:
 
     handler = logging.StreamHandler(sys.stdout)
     handler.setFormatter(formatter)
-    
+
     root_logger = logging.getLogger()
     root_logger.handlers.clear()
     root_logger.addHandler(handler)

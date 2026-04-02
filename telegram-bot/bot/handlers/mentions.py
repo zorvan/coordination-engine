@@ -15,20 +15,13 @@ from telegram import (
 )
 from telegram.ext import ContextTypes
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from ai.llm import LLMClient
 from bot.commands import event_creation, request_confirmations, suggest_time
 from bot.common.scheduling import find_user_event_conflict
-from bot.common.attendance import (
-    derive_state_from_attendance,
-    has_attendee,
-    has_confirmed,
-)
 from bot.services import ParticipantService, EventLifecycleService
 from bot.common.event_notifications import (
     send_event_invitation_dm,
-    send_event_modification_request_dm,
 )
 
 from bot.common.event_presenters import (
@@ -36,15 +29,15 @@ from bot.common.event_presenters import (
     format_status_message,
 )
 
-logger = logging.getLogger("coord_bot.mentions")
 from config.settings import settings
 from db.connection import get_session
 from db.models import Constraint, Event, Group, Log, User
 from bot.common.event_access import (
-    get_event_organizer_telegram_id,
     get_event_admin_telegram_id,
 )
 from db.users import get_or_create_user_id, get_user_id_by_username
+
+logger = logging.getLogger("coord_bot.mentions")
 
 HISTORY_LIMIT = 40
 MENTION_PATTERN = re.compile(r"@([A-Za-z0-9_]{5,32})")
@@ -145,7 +138,7 @@ async def handle_mention(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     action_type = str(action.get("action_type", "opinion")).strip().lower()
     logger.debug(f"Mention inference: action_type={action_type}, event_id={action.get('event_id')}, text={text[:100]}")
-    
+
     # Handle organize_event actions (these don't need event_id - they CREATE events)
     if action_type in {"organize_event", "organize_event_flexible"}:
         mode = "flexible" if action_type == "organize_event_flexible" else "public"
@@ -208,7 +201,7 @@ async def handle_mention(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 user=user,
             )
             return
-        
+
         await message.reply_text(
             f"❌ I inferred you want to **{action_type}**, but I'm not sure which event.\n\n"
             f"Please specify the event ID or mention it in your message.\n\n"
@@ -416,7 +409,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         except (TypeError, ValueError):
             await query.edit_message_text("❌ Invalid event ID.")
             return
-        await _send_event_details(query.message, event_id)
+        await _send_event_details(query.message, event_id, context)
         return
 
     if data.startswith("event_status_"):
@@ -426,7 +419,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         except (TypeError, ValueError):
             await query.edit_message_text("❌ Invalid event ID.")
             return
-        await _send_status(query.message, event_id)
+        await _send_status(query.message, event_id, context)
         return
 
     if data.startswith("modinput_"):
@@ -710,10 +703,10 @@ async def _execute_inferred_action(
         await suggest_time._send_suggestion(reply_message, event_id)
         return
     if action_type == "status" and event_id is not None:
-        await _send_status(reply_message, event_id)
+        await _send_status(reply_message, event_id, context)
         return
     if action_type == "event_details" and event_id is not None:
-        await _send_event_details(reply_message, event_id)
+        await _send_event_details(reply_message, event_id, context)
         return
     if action_type == "constraint_add" and event_id is not None:
         target_username = str(action.get("target_username", "")).strip()
@@ -739,6 +732,7 @@ async def _execute_inferred_action(
             requester_username=requester_username,
             event_id=event_id,
             action_type=action_type,
+            context=context,
         )
         return
     if action_type == "lock" and event_id is not None:
@@ -761,7 +755,7 @@ async def _execute_inferred_action(
     await reply_message.reply_text(f"🤖 {response}")
 
 
-async def _send_status(reply_message, event_id: int) -> None:
+async def _send_status(reply_message, event_id: int, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Send event status text in mention flow."""
     if not settings.db_url:
         await reply_message.reply_text("❌ Database configuration is unavailable.")
@@ -796,7 +790,7 @@ async def _send_status(reply_message, event_id: int) -> None:
     )
 
 
-async def _send_event_details(reply_message, event_id: int) -> None:
+async def _send_event_details(reply_message, event_id: int, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Send event details in mention flow."""
     if not settings.db_url:
         await reply_message.reply_text("❌ Database configuration is unavailable.")
@@ -993,6 +987,7 @@ async def _apply_participation_action(
     requester_username: str | None,
     event_id: int,
     action_type: str,
+    context: ContextTypes.DEFAULT_TYPE,
 ) -> None:
     """Apply join/confirm/cancel using shared attendance functions."""
     if not settings.db_url:
@@ -1067,7 +1062,7 @@ async def _apply_participation_action(
                     f"❌ Cannot confirm event {event_id} - it's {event.state}."
                 )
                 return
-            
+
             # Use ParticipantService for confirm operation
             participant_service = ParticipantService(session)
             participant, is_new_confirm = await participant_service.confirm(
@@ -1097,7 +1092,7 @@ async def _apply_participation_action(
                     f"❌ Cannot cancel event {event_id} - it's already locked."
                 )
                 return
-            
+
             # Use ParticipantService for cancel operation
             participant_service = ParticipantService(session)
             try:
@@ -1167,11 +1162,11 @@ async def _apply_lock_action(reply_message, event_id: int) -> None:
                 "Lock is allowed only when state is `confirmed`."
             )
             return
-        
+
         # Use ParticipantService to finalize commitments (new system)
         participant_service = ParticipantService(session)
         await participant_service.finalize_commitments(event_id)
-        
+
         event.state = "locked"
         event.locked_at = datetime.utcnow()
         await session.commit()
@@ -1191,32 +1186,30 @@ async def _start_interactive_event_flow(
 ) -> None:
     """
     Start interactive event creation flow with pre-filled data from LLM draft.
-    
+
     This allows the bot to ask for missing parameters while using inferred values
     for what the LLM could extract from context.
     """
     from bot.commands.event_creation import start_event_flow
-    
-    creator_id = user.id if user else None
-    
+
     # Start the standard event flow first
     await start_event_flow(update, context, mode=mode)
-    
+
     # Now pre-fill the flow data with inferred values from the draft
     if context.user_data is None:
         return
-    
+
     flow_key = "private_event_flow" if mode == "private" else "event_flow"
     event_flow_raw = context.user_data.get(flow_key)
     if not isinstance(event_flow_raw, dict):
         return
-    
+
     event_flow: dict[str, Any] = event_flow_raw
     flow_data = event_flow.get("data")
     if not isinstance(flow_data, dict):
         flow_data = {}
         event_flow["data"] = flow_data
-    
+
     # Pre-fill with inferred values (only if present in draft)
     if draft.get("description"):
         flow_data["description"] = str(draft.get("description")).strip()[:500]
@@ -1269,9 +1262,9 @@ async def _start_interactive_event_flow(
             if isinstance(notes, list)
             else []
         )
-    
+
     context.user_data[flow_key] = event_flow
-    
+
     # Notify user about the inferred values and continue the flow
     inferred_msg = "🤖 I've inferred some details from your message:\n\n"
     inferred_items = []
@@ -1283,7 +1276,7 @@ async def _start_interactive_event_flow(
         inferred_items.append(f"• Time: {flow_data['scheduled_time']}")
     if flow_data.get("location_type"):
         inferred_items.append(f"• Location: {flow_data['location_type']}")
-    
+
     if inferred_items:
         inferred_msg += "\n".join(inferred_items)
         inferred_msg += "\n\nI'll guide you through the remaining details to set up the event."
@@ -1305,7 +1298,7 @@ async def _handle_organize_event_direct(
 ) -> None:
     """
     Create event from LLM draft, or start interactive flow if parameters are missing.
-    
+
     If the draft has sufficient information (at minimum a description), creates the event directly.
     Otherwise, starts the interactive event creation flow with pre-filled data from the draft.
     """
@@ -1316,7 +1309,7 @@ async def _handle_organize_event_direct(
     # Check if we have minimum required information
     description = draft.get("description")
     has_description = bool(description and str(description).strip())
-    
+
     # If missing critical info (description), start interactive flow instead
     if not has_description:
         # Start interactive flow with pre-filled data from draft

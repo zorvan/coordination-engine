@@ -53,7 +53,7 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
         if not event:
             await update.message.reply_text("❌ Event not found.")
-            
+
             return
 
         logs = await _get_event_logs(session, event_id)
@@ -67,7 +67,7 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             await format_event_details_message(event_id, event, logs, constraints, context.bot),
             reply_markup=reply_markup
         )
-        
+
 
 async def handle_callback(
     update: Update, context: ContextTypes.DEFAULT_TYPE
@@ -238,7 +238,7 @@ async def show_logs(query, event_id: int) -> None:
                     include_link=False,
                 )
                 user_info = f" by {user_display}"
-            
+
             # Map action to readable text
             action_text = {
                 "join": "joined",
@@ -249,7 +249,7 @@ async def show_logs(query, event_id: int) -> None:
                 "nudge": "was nudged",
                 "constraint_update": "updated constraints",
             }.get(log.action, log.action)
-            
+
             msg += f"- {action_text}{user_info} at {log.timestamp}\n"
 
         if len(rows) > 10:
@@ -289,7 +289,7 @@ async def show_constraints(query, event_id: int) -> None:
             await query.edit_message_text(
                 f"ℹ️ Event {event_id} has no constraints."
             )
-            
+
             return
 
         # Fetch all relevant users at once for display names
@@ -298,7 +298,7 @@ async def show_constraints(query, event_id: int) -> None:
             user_ids.add(c.user_id)
             if c.target_user_id:
                 user_ids.add(c.target_user_id)
-        
+
         users = {}
         if user_ids:
             result = await session.execute(
@@ -316,7 +316,7 @@ async def show_constraints(query, event_id: int) -> None:
                 display_name=user.display_name if user and getattr(user, "display_name", None) else None,
                 include_link=False,
             ) if user else f"User {c.user_id}"
-            
+
             msg += f"- {user_display}: "
             if c.target_user_id:
                 target_user = users.get(c.target_user_id)
@@ -387,7 +387,7 @@ async def build_event_details_action_markup(
             if participant:
                 user_joined = participant.status in [ParticipantStatus.joined, ParticipantStatus.confirmed]
                 user_confirmed = participant.status == ParticipantStatus.confirmed
-        except:
+        except Exception:
             # Fallback to old logic if service fails
             attendance_list: list[Any] | None = event.attendance_list or []
             user_joined = has_attendee(attendance_list, user_id)

@@ -35,7 +35,7 @@ async def collect_feedback(
     except ValueError:
         await update.message.reply_text("❌ Event ID must be a number.")
         return
-    
+
     db_url = settings.db_url or ""
     async with get_session(db_url) as session:
         result = await session.execute(
@@ -45,7 +45,7 @@ async def collect_feedback(
 
         if not event:
             await update.message.reply_text("❌ Event not found.")
-            
+
             return
 
         if event.state != "completed":
@@ -53,7 +53,7 @@ async def collect_feedback(
                 f"❌ Event {event_id} is not completed yet. "
                 "Wait until the event is finished."
             )
-            
+
             return
 
         user = update.effective_user
@@ -75,7 +75,7 @@ async def collect_feedback(
             await update.message.reply_text(
                 "ℹ️ You have already provided feedback for this event."
             )
-            
+
             return
 
         # Natural-language feedback mode:
@@ -105,7 +105,7 @@ async def collect_feedback(
                 f"Comment: {str(parsed.get('sanitized_comment', ''))}"
             )
             return
-        
+
         keyboard = [
             [
                 InlineKeyboardButton(
@@ -136,7 +136,7 @@ async def collect_feedback(
             "Please rate your experience:",
             reply_markup=reply_markup
         )
-        
+
 
 
 async def handle_feedback_callback(
@@ -165,17 +165,17 @@ async def process_feedback(
     telegram_user_id = query.from_user.id
     display_name = query.from_user.full_name
     username = query.from_user.username
-    
+
     db_url = settings.db_url or ""
     async with get_session(db_url) as session:
         result = await session.execute(
             select(Event).where(Event.event_id == event_id)
         )
         event = result.scalar_one_or_none()
-        
+
         if not event:
             await query.edit_message_text("❌ Event not found.")
-            
+
             return
 
         user_id = await get_or_create_user_id(
@@ -184,7 +184,7 @@ async def process_feedback(
             display_name=display_name,
             username=username,
         )
-        
+
         await _store_feedback_and_update_reputation(
             session=session,
             event=event,
@@ -195,12 +195,12 @@ async def process_feedback(
             expertise_adjustments={},
         )
         await session.commit()
-        
+
         await query.edit_message_text(
             f"⭐ *Thank you for your feedback!*\n\n"
             f"Event {event_id}: {score} out of 5 stars"
         )
-        
+
 
 
 async def _get_existing_feedback(session, event_id: int, user_id: int):

@@ -12,35 +12,35 @@ async def add_admin_column():
         print("❌ No database URL configured")
         return
     db_url = db_url.replace('postgresql://', 'postgresql+asyncpg://')
-    
-    print(f"Connecting to database...")
-    
+
+    print("Connecting to database...")
+
     engine = create_async_engine(db_url)
-    
+
     try:
         async with engine.begin() as conn:
             # Check if column exists
             result = await conn.execute(text("""
-                SELECT column_name 
-                FROM information_schema.columns 
+                SELECT column_name
+                FROM information_schema.columns
                 WHERE table_name = 'events' AND column_name = 'admin_telegram_user_id'
             """))
             exists = result.fetchone()
-            
+
             if not exists:
                 print("Adding admin_telegram_user_id column to events table...")
                 await conn.execute(text("""
-                    ALTER TABLE events 
+                    ALTER TABLE events
                     ADD COLUMN admin_telegram_user_id BIGINT;
                 """))
                 print("✅ Column added successfully!")
             else:
                 print("⚠️ Column already exists!")
-            
+
             # Verify
             result2 = await conn.execute(text("""
-                SELECT column_name 
-                FROM information_schema.columns 
+                SELECT column_name
+                FROM information_schema.columns
                 WHERE table_name = 'events' AND column_name = 'admin_telegram_user_id'
             """))
             verified = result2.fetchone()

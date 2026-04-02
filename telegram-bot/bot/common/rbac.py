@@ -8,7 +8,7 @@ from typing import Optional, Tuple
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
-from db.models import Event, EventParticipant, ParticipantRole
+from db.models import Event, EventParticipant
 
 
 async def check_event_organizer(

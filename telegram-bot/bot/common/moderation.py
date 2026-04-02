@@ -1,17 +1,14 @@
 """Moderation actions and reputation penalty helpers."""
 from __future__ import annotations
 
-from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from db.models import User, Event
-
 
 def check_minimum_evidence(evidence_count: int, action: str) -> bool:
     """Check if minimum evidence threshold is met for an action.
-    
+
     Returns True if action can proceed, False otherwise.
     """
     thresholds = {
@@ -19,7 +16,7 @@ def check_minimum_evidence(evidence_count: int, action: str) -> bool:
         "mute_recommendation": MIN_EVIDENCE_FOR_MUTE,
         "block_recommendation": MIN_EVIDENCE_FOR_BLOCK,
     }
-    
+
     required = thresholds.get(action, MIN_EVIDENCE_FOR_WARNING)
     return evidence_count >= required
 
@@ -33,12 +30,12 @@ def generate_reputation_explanation(
     """Generate human-readable explanation for reputation score changes."""
     change = new_score - old_score
     direction = "increased" if change > 0 else "decreased"
-    
+
     explanation = (
         f"Your reputation score has {direction} from {old_score:.2f} to {new_score:.2f}. "
         f"Reason: {action} - {reason}. "
     )
-    
+
     if change < 0:
         explanation += (
             "This reflects recent behavior. To improve your score, "
@@ -48,7 +45,7 @@ def generate_reputation_explanation(
         explanation += (
             "This reflects improved behavior. Keep up the good work!"
         )
-    
+
     return explanation
 
 
@@ -69,13 +66,13 @@ def check_anti_bias(
     """Check if evidence shows bias against a specific user."""
     if not evidence:
         return True
-    
+
     sources = [e.get("source_user_id") for e in evidence if e.get("source_user_id")]
     unique_sources = len(set(sources))
-    
+
     if unique_sources < 2:
         return False
-    
+
     return True
 
 

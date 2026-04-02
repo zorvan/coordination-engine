@@ -4,17 +4,10 @@ from bot.commands.event_creation import (
     private_handle as handle,
     private_handle_callback as handle_callback,
     private_handle_message as handle_message,
-    handle_callback,
-    private_handle,
-    private_handle_callback,
-    private_handle_message,
 )
 
 __all__ = [
     "handle",
     "handle_callback",
     "handle_message",
-    "private_handle",
-    "private_handle_callback",
-    "private_handle_message",
 ]

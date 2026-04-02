@@ -8,9 +8,8 @@ All join/confirm/cancel operations must route through this service.
 from __future__ import annotations
 
 import logging
-import sqlalchemy
 from datetime import datetime
-from typing import Optional, Tuple, Dict, Any, List
+from typing import Optional, Tuple, Dict, List
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update, delete, func
 
@@ -32,17 +31,17 @@ class ParticipantNotFoundError(ParticipantError):
 class ParticipantService:
     """
     Single write path for participant management.
-    
+
     Handles:
     - Join/leave operations
     - Confirm/cancel operations
     - Status queries and counts
     - Migration from legacy attendance_list
     """
-    
+
     def __init__(self, session: AsyncSession):
         self.session = session
-    
+
     async def join(
         self,
         event_id: int,
@@ -52,7 +51,7 @@ class ParticipantService:
     ) -> Tuple[EventParticipant, bool]:
         """
         Add user as participant (joined state).
-        
+
         Returns:
             (participant_record, is_new_join)
         """
@@ -64,7 +63,7 @@ class ParticipantService:
             )
         )
         participant = result.scalar_one_or_none()
-        
+
         if participant:
             # Already joined - update status if cancelled
             if participant.status == ParticipantStatus.cancelled:
@@ -76,18 +75,18 @@ class ParticipantService:
                     extra={"event_id": event_id, "user": telegram_user_id}
                 )
                 return participant, True
-            
+
             if participant.status == ParticipantStatus.joined:
                 return participant, False
-            
+
             # Upgrade from no_show
             if participant.status == ParticipantStatus.no_show:
                 participant.status = ParticipantStatus.joined
                 participant.joined_at = datetime.utcnow()
                 return participant, True
-            
+
             return participant, False
-        
+
         # Create new participant
         participant = EventParticipant(
             event_id=event_id,
@@ -98,7 +97,7 @@ class ParticipantService:
             joined_at=datetime.utcnow(),
         )
         self.session.add(participant)
-        
+
         logger.info(
             "New participant joined",
             extra={
@@ -107,9 +106,9 @@ class ParticipantService:
                 "source": source,
             }
         )
-        
+
         return participant, True
-    
+
     async def confirm(
         self,
         event_id: int,
@@ -118,7 +117,7 @@ class ParticipantService:
     ) -> Tuple[EventParticipant, bool]:
         """
         Confirm participant attendance.
-        
+
         Returns:
             (participant_record, is_new_confirm)
         """
@@ -129,22 +128,22 @@ class ParticipantService:
             )
         )
         participant = result.scalar_one_or_none()
-        
+
         if not participant:
             # Auto-join on confirm
             return await self.join(event_id, telegram_user_id, source)
-        
+
         if participant.status == ParticipantStatus.confirmed:
             return participant, False
-        
+
         if participant.status == ParticipantStatus.cancelled:
             raise ParticipantError(
                 f"User {telegram_user_id} cannot confirm after cancelling"
             )
-        
+
         participant.status = ParticipantStatus.confirmed
         participant.confirmed_at = datetime.utcnow()
-        
+
         logger.info(
             "Participant confirmed",
             extra={
@@ -153,9 +152,9 @@ class ParticipantService:
                 "source": source,
             }
         )
-        
+
         return participant, True
-    
+
     async def cancel(
         self,
         event_id: int,
@@ -164,7 +163,7 @@ class ParticipantService:
     ) -> Tuple[EventParticipant, bool]:
         """
         Cancel participant attendance.
-        
+
         Returns:
             (participant_record, is_new_cancel)
         """
@@ -175,18 +174,18 @@ class ParticipantService:
             )
         )
         participant = result.scalar_one_or_none()
-        
+
         if not participant:
             raise ParticipantNotFoundError(
                 f"User {telegram_user_id} is not a participant of event {event_id}"
             )
-        
+
         if participant.status == ParticipantStatus.cancelled:
             return participant, False
-        
+
         participant.status = ParticipantStatus.cancelled
         participant.cancelled_at = datetime.utcnow()
-        
+
         logger.info(
             "Participant cancelled",
             extra={
@@ -195,9 +194,9 @@ class ParticipantService:
                 "source": source,
             }
         )
-        
+
         return participant, True
-    
+
     async def mark_no_show(
         self,
         event_id: int,
@@ -211,14 +210,14 @@ class ParticipantService:
             )
         )
         participant = result.scalar_one_or_none()
-        
+
         if participant and participant.status == ParticipantStatus.confirmed:
             participant.status = ParticipantStatus.no_show
             logger.warning(
                 "Participant marked as no-show",
                 extra={"event_id": event_id, "user": telegram_user_id}
             )
-    
+
     async def get_participant(
         self,
         event_id: int,
@@ -232,7 +231,7 @@ class ParticipantService:
             )
         )
         return result.scalar_one_or_none()
-    
+
     async def get_all_participants(
         self,
         event_id: int,
@@ -242,17 +241,17 @@ class ParticipantService:
         query = select(EventParticipant).where(
             EventParticipant.event_id == event_id
         )
-        
+
         if status_filter:
             query = query.where(EventParticipant.status == status_filter)
-        
+
         result = await self.session.execute(query)
         return list(result.scalars().all())
-    
+
     async def get_counts(self, event_id: int) -> Dict[str, int]:
         """
         Get participant counts by status.
-        
+
         Returns dict with: joined, confirmed, cancelled, total
         """
         result = await self.session.execute(
@@ -263,7 +262,7 @@ class ParticipantService:
             .where(EventParticipant.event_id == event_id)
             .group_by(EventParticipant.status)
         )
-        
+
         counts = {
             "joined": 0,
             "confirmed": 0,
@@ -271,13 +270,13 @@ class ParticipantService:
             "no_show": 0,
             "total": 0,
         }
-        
+
         for status, count in result.all():
             counts[status.value] = count
             counts["total"] += count
-        
+
         return counts
-    
+
     async def get_interested_count(self, event_id: int) -> int:
         """Get count of interested participants (joined but not confirmed)."""
         result = await self.session.execute(
@@ -299,11 +298,11 @@ class ParticipantService:
             )
         )
         return result.scalar() or 0
-    
+
     async def finalize_commitments(self, event_id: int) -> int:
         """
         Finalize commitments by marking all joined participants as confirmed.
-        
+
         Returns the number of participants that were finalized.
         """
         result = await self.session.execute(
@@ -317,7 +316,7 @@ class ParticipantService:
                 confirmed_at=datetime.utcnow(),
             )
         )
-        
+
         finalized_count = result.rowcount
         if finalized_count > 0:
             logger.info(
@@ -327,9 +326,9 @@ class ParticipantService:
                     "finalized_count": finalized_count,
                 }
             )
-        
+
         return finalized_count
-    
+
     async def unconfirm(
         self,
         event_id: int,
@@ -338,7 +337,7 @@ class ParticipantService:
     ) -> Tuple[EventParticipant, bool]:
         """
         Unconfirm participant attendance (revert from confirmed to joined).
-        
+
         Returns:
             (participant_record, is_new_unconfirm)
         """
@@ -349,18 +348,18 @@ class ParticipantService:
             )
         )
         participant = result.scalar_one_or_none()
-        
+
         if not participant:
             raise ParticipantNotFoundError(
                 f"User {telegram_user_id} is not a participant of event {event_id}"
             )
-        
+
         if participant.status != ParticipantStatus.confirmed:
             return participant, False
-        
+
         participant.status = ParticipantStatus.joined
         participant.confirmed_at = None
-        
+
         logger.info(
             "Participant unconfirmed",
             extra={
@@ -369,9 +368,9 @@ class ParticipantService:
                 "source": source,
             }
         )
-        
+
         return participant, True
-    
+
     async def remove_participant(
         self,
         event_id: int,
@@ -379,7 +378,7 @@ class ParticipantService:
     ) -> bool:
         """
         Completely remove participant record.
-        
+
         Use with caution - prefer cancel() for audit trail.
         """
         result = await self.session.execute(
@@ -389,14 +388,14 @@ class ParticipantService:
             )
         )
         return result.rowcount > 0
-    
+
     async def migrate_from_legacy(
         self,
         event: Event,
     ) -> int:
         """
         Migrate event from legacy attendance_list to normalized table.
-        
+
         Returns count of migrated participants.
         """
         from bot.common.attendance import parse_attendance_with_status
@@ -434,3 +433,152 @@ class ParticipantService:
         )
 
         return migrated_count
+
+    # ========================================================================
+    # PRD v2: Reputation Operational Effects (TODO-009)
+    # ========================================================================
+
+    async def get_user_reliability_score(
+        self,
+        telegram_user_id: int,
+        event_type: Optional[str] = None,
+    ) -> float:
+        """
+        Get user's reliability score (0-5 scale).
+
+        PRD v2 Section 2.2.4: Reputation as background signal, not score.
+        Used for:
+        - Priority on oversubscribed events
+        - Earlier reconfirmation windows for low-reliability users
+
+        Args:
+            telegram_user_id: User's Telegram ID
+            event_type: Optional activity type for activity-specific score
+
+        Returns:
+            Reliability score (0-5)
+        """
+        from db.models import User, Reputation
+
+        if event_type:
+            # Get activity-specific reputation
+            result = await self.session.execute(
+                select(Reputation.score)
+                .join(User, Reputation.user_id == User.user_id)
+                .where(
+                    User.telegram_user_id == telegram_user_id,
+                    Reputation.activity_type == event_type,
+                )
+            )
+            rep = result.scalar_one_or_none()
+            return rep if rep else 3.0  # Default neutral score
+        else:
+            # Get overall reputation
+            result = await self.session.execute(
+                select(User.reputation)
+                .where(User.telegram_user_id == telegram_user_id)
+            )
+            rep = result.scalar_one_or_none()
+            return rep if rep else 3.0  # Default neutral score
+
+    async def calculate_reconfirmation_window(
+        self,
+        telegram_user_id: int,
+        base_deadline: datetime,
+        event_type: Optional[str] = None,
+    ) -> datetime:
+        """
+        Calculate personalized reconfirmation deadline.
+
+        PRD v2 Section 2.2.4: Reliability-informed confirmation windows.
+        - Low-reliability users get earlier deadlines (more lead time)
+        - High-reliability users get standard deadlines
+        - Never shown as "penalty" to user
+
+        Args:
+            telegram_user_id: User's Telegram ID
+            base_deadline: Standard confirmation deadline
+            event_type: Optional activity type
+
+        Returns:
+            Adjusted deadline (earlier for low-reliability users)
+        """
+        reliability = await self.get_user_reliability_score(
+            telegram_user_id,
+            event_type,
+        )
+
+        # Adjustment rules:
+        # - Reliability < 2.5: 7 days earlier
+        # - Reliability 2.5-3.5: 3 days earlier
+        # - Reliability > 3.5: no adjustment
+        from datetime import timedelta
+
+        if reliability < 2.5:
+            adjustment_days = 7
+        elif reliability < 3.5:
+            adjustment_days = 3
+        else:
+            adjustment_days = 0
+
+        adjusted_deadline = base_deadline - timedelta(days=adjustment_days)
+
+        logger.info(
+            "Reconfirmation window: %s days adjustment (reliability=%.1f)",
+            adjustment_days,
+            reliability,
+            extra={"user": telegram_user_id}
+        )
+
+        return adjusted_deadline
+
+    async def check_event_priority_access(
+        self,
+        telegram_user_id: int,
+        event_id: int,
+    ) -> Tuple[bool, str]:
+        """
+        Check if user has priority access based on reputation.
+
+        PRD v2 Section 2.2.4: Priority on scarce/oversubscribed events.
+        - Higher-reliability participants get priority
+        - Lower-reliability users may be waitlisted (future feature)
+
+        Args:
+            telegram_user_id: User's Telegram ID
+            event_id: Event ID
+
+        Returns:
+            (has_priority, reason)
+        """
+        from sqlalchemy import select
+        from db.models import Event
+
+        # Get event details
+        result = await self.session.execute(
+            select(Event).where(Event.event_id == event_id)
+        )
+        event = result.scalar_one_or_none()
+
+        if not event:
+            return False, "Event not found"
+
+        # Get user's reliability
+        reliability = await self.get_user_reliability_score(
+            telegram_user_id,
+            event.event_type,
+        )
+
+        # Check if event is oversubscribed
+        confirmed_count = await self.get_confirmed_count(event_id)
+        threshold = event.threshold_attendance or 3
+
+        if confirmed_count >= threshold:
+            # Event is at/over capacity - check priority
+            if reliability >= 4.0:
+                return True, "High-reliability priority access"
+            else:
+                return False, "Event at capacity - priority given to higher-reliability users"
+
+        # Event has space - no priority check needed
+        return True, "Event has available space"

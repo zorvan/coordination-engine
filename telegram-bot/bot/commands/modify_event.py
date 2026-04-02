@@ -14,7 +14,6 @@ from bot.common.confirmation import (
     notify_attendees_of_modification,
 )
 from bot.common.event_access import (
-    get_event_organizer_telegram_id,
     get_event_admin_telegram_id,
 )
 from bot.common.event_notifications import send_event_modification_request_dm
@@ -154,7 +153,7 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             event=event,
             reason=", ".join(reason_parts) or "event details changed",
         )
-        notified = await notify_attendees_of_modification(
+        await notify_attendees_of_modification(
             context=context,
             event=event,
             reason=", ".join(reason_parts) or "event details changed",
@@ -182,7 +181,7 @@ async def _submit_modify_request(
             "❌ Could not identify event admin to approve modification request."
         )
         return
-    
+
     request_id = uuid_lib.uuid4().hex[:8]
     pending_key = f"modify_request_{request_id}"
     context.bot_data.setdefault("pending_modify_requests", {})[pending_key] = {
@@ -193,7 +192,7 @@ async def _submit_modify_request(
         "admin_id": admin_id,
         "created_at": datetime.utcnow().isoformat(),
     }
-    
+
     keyboard = [
         [
             InlineKeyboardButton("✅ Approve", callback_data=f"modreq_{request_id}_approve"),
@@ -201,7 +200,7 @@ async def _submit_modify_request(
         ]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    
+
     await update.message.reply_text(
         f"📩 *Modify request submitted for admin approval*\n\n"
         f"Event ID: {event.event_id}\n"
@@ -210,7 +209,7 @@ async def _submit_modify_request(
         f"Waiting for admin approval...",
         reply_markup=reply_markup,
     )
-    
+
     adminDM_sent = await send_event_modification_request_dm(
         context=context,
         telegram_user_id=admin_id,
@@ -228,7 +227,7 @@ async def _submit_modify_request(
         deadline_info="Please review and approve the modification request",
         request_id=request_id,
     )
-    
+
     if not adminDM_sent:
         await update.message.reply_text(
             "⚠️ Could not send DM to admin. Please check your privacy settings."
@@ -243,42 +242,42 @@ async def handle_modify_request_callback(
     if not query or not query.data:
         return
     await query.answer()
-    
+
     data = query.data
     if not data.startswith("modreq_"):
         return
-    
+
     parts = data.split("_")
     if len(parts) != 3:
         return
-    
+
     request_id = parts[1]
     decision = parts[2]
-    
+
     pending_root = context.bot_data.get("pending_modify_requests", {})
     pending = pending_root.get(f"modreq_{request_id}")
-    
+
     if not pending:
         await query.edit_message_text("⚠️ This modify request has expired.")
         return
-    
+
     admin_id = pending.get("admin_id")
     requester_id = pending.get("requester_id")
     event_id = pending.get("event_id")
     change_text = pending.get("change_text")
-    
+
     if query.from_user.id != admin_id:
         await query.answer("Only the event admin can approve/reject this request.", show_alert=True)
         return
-    
+
     pending_root.pop(f"modreq_{request_id}", None)
-    
+
     if decision == "reject":
         await query.edit_message_text(
             f"❌ Modify request for event {event_id} was rejected by admin."
         )
         return
-    
+
     async with get_session(settings.db_url) as session:
         event = (
             await session.execute(select(Event).where(Event.event_id == event_id))
@@ -291,7 +290,7 @@ async def handle_modify_request_callback(
                 f"❌ Event {event_id} is {event.state}; modification is no longer possible."
             )
             return
-        
+
         draft = {
             "description": event.description or "",
             "event_type": event.event_type,
@@ -308,10 +307,10 @@ async def handle_modify_request_callback(
             patch = await llm.infer_event_draft_patch(draft, change_text)
         finally:
             await llm.close()
-        
+
         changed_fields: list[str] = []
         reason_parts: list[str] = []
-        
+
         description = patch.get("description")
         if isinstance(description, str) and description.strip():
             next_description = description.strip()[:500]
@@ -319,7 +318,7 @@ async def handle_modify_request_callback(
                 event.description = next_description
                 changed_fields.append("description")
                 reason_parts.append("description changed")
-        
+
         event_type = patch.get("event_type")
         if isinstance(event_type, str):
             normalized = event_type.strip().lower()
@@ -327,7 +326,7 @@ async def handle_modify_request_callback(
                 event.event_type = normalized
                 changed_fields.append("event_type")
                 reason_parts.append("event type changed")
-        
+
         threshold = patch.get("threshold_attendance")
         if threshold is not None:
             try:
@@ -338,7 +337,7 @@ async def handle_modify_request_callback(
                     reason_parts.append("threshold changed")
             except (TypeError, ValueError):
                 pass
-        
+
         duration = patch.get("duration_minutes")
         if duration is not None:
             try:
@@ -349,12 +348,12 @@ async def handle_modify_request_callback(
                     reason_parts.append("duration changed")
             except (TypeError, ValueError):
                 pass
-        
+
         if bool(patch.get("clear_time")) and event.scheduled_time is not None:
             event.scheduled_time = None
             changed_fields.append("scheduled_time")
             reason_parts.append("time cleared")
-        
+
         scheduled_time_iso = patch.get("scheduled_time_iso")
         if scheduled_time_iso is not None:
             try:
@@ -365,32 +364,32 @@ async def handle_modify_request_callback(
                     reason_parts.append("time changed")
             except ValueError:
                 pass
-        
+
         if not changed_fields:
             await query.edit_message_text(
                 "⚠️ No valid event change inferred from your approval."
             )
             return
-        
+
         reconfirm_needed = await invalidate_confirmations_and_notify(
             context=context,
             event=event,
             reason=", ".join(reason_parts) or "event details changed",
         )
-        notified = await notify_attendees_of_modification(
+        await notify_attendees_of_modification(
             context=context,
             event=event,
             reason=", ".join(reason_parts) or "event details changed",
         )
         await session.commit()
-    
+
     await query.edit_message_text(
         f"✅ Modify request approved.\n"
         f"Event {event_id} updated.\n"
         f"Changed fields: {', '.join(changed_fields)}\n"
         f"Confirmations reset: {reconfirm_needed}"
     )
-    
+
     await context.bot.send_message(
         chat_id=requester_id,
         text=f"✅ Your modify request for event {event_id} was approved by admin."

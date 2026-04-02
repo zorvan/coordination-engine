@@ -22,7 +22,7 @@ async def get_event_summary(
     event = result.scalar_one_or_none()
     if not event:
         return {"error": "Event not found"}
-    
+
     summary = {
         "event_id": event.event_id,
         "event_type": event.event_type,
@@ -42,26 +42,26 @@ async def get_event_summary(
         },
         "highlights": [],
     }
-    
+
     attendance_list = event.attendance_list or []
-    
+
     def get_user_id(a):
         if isinstance(a, dict):
             return a.get("user_id")
         elif isinstance(a, (int, float)):
             return int(a)
         return None
-    
+
     telegram_ids = [get_user_id(a) for a in attendance_list]
     telegram_ids = [t for t in telegram_ids if t]
-    
+
     if telegram_ids:
         result = await session.execute(
             select(User).where(User.telegram_user_id.in_(telegram_ids))
         )
         users = result.scalars().all()
         user_map = {u.telegram_user_id: u for u in users}
-        
+
         summary["attendees"] = [
             {
                 "telegram_user_id": t_id,
@@ -71,7 +71,7 @@ async def get_event_summary(
             }
             for t_id in telegram_ids
         ]
-    
+
     if event.organizer_telegram_user_id:
         result = await session.execute(
             select(User).where(User.telegram_user_id == event.organizer_telegram_user_id)
@@ -83,10 +83,10 @@ async def get_event_summary(
                 "username": organizer.username,
                 "display_name": organizer.display_name or "Unknown",
             }
-    
+
     summary["stats"]["total_invited"] = len(telegram_ids)
     summary["stats"]["joined"] = len(telegram_ids)
-    
+
     confirmed_count = 0
     for attendee in attendance_list:
         if isinstance(attendee, dict):
@@ -94,26 +94,26 @@ async def get_event_summary(
                 confirmed_count += 1
         elif isinstance(attendee, (int, float)):
             confirmed_count += 1
-    
+
     summary["stats"]["confirmed"] = confirmed_count
     summary["stats"]["commitment_rate"] = (
         confirmed_count / len(telegram_ids) if telegram_ids else 0
     )
-    
+
     summary["stats"]["cancelled"] = summary["stats"]["total_invited"] - summary["stats"]["confirmed"]
-    
+
     if event.state == "completed":
         summary["completion_status"] = "completed_successfully"
     elif event.state == "cancelled":
         summary["completion_status"] = "cancelled"
     elif event.state in ["locked", "confirmed"]:
         summary["completion_status"] = "completed_without_feedback"
-    
+
     if summary["stats"]["commitment_rate"] >= 0.8:
         summary["highlights"].append("⭐ High commitment rate - great coordination!")
     if summary["stats"]["confirmed"] >= 5:
         summary["highlights"].append("👥 Large group turnout!")
-    
+
     return summary
 
 
@@ -125,10 +125,10 @@ async def post_event_summary(
 ) -> Dict[str, Any]:
     """Post event summary to group chat after completion."""
     summary = await get_event_summary(session, event_id)
-    
+
     if "error" in summary:
         return summary
-    
+
     lines = [
         "📋 *Event Summary*",
         "",
@@ -143,7 +143,7 @@ async def post_event_summary(
         f"  ✅ Commitment rate: {summary['stats']['commitment_rate']*100:.0f}%",
         "",
     ]
-    
+
     if summary.get("organizer"):
         organizer_user = summary['organizer']
         organizer_display = format_user_display(
@@ -165,13 +165,13 @@ async def post_event_summary(
             lines.append(f"  • {attendee_display}")
         if len(summary["attendees"]) > 10:
             lines.append(f"  ... and {len(summary['attendees']) - 10} more")
-    
+
     if summary.get("highlights"):
         lines.append("")
         lines.append("✨ Highlights:")
         for highlight in summary["highlights"]:
             lines.append(f"  {highlight}")
-    
+
     return {
         "message": "\n".join(lines),
         "event_summary": summary,
@@ -185,7 +185,7 @@ async def create_feedback_prompt(
 ) -> Dict[str, Any]:
     """Create one-tap lightweight feedback prompt for attendees."""
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-    
+
     keyboard = [
         [
             InlineKeyboardButton("⭐ 5 - Perfect!", callback_data=f"feedback_{event_id}_5"),
@@ -202,11 +202,11 @@ async def create_feedback_prompt(
             InlineKeyboardButton("💬 Add comment", callback_data=f"feedback_{event_id}_comment"),
         ],
     ]
-    
+
     reply_markup = InlineKeyboardMarkup(keyboard)
-    
+
     scheduled_str = scheduled_time.strftime("%Y-%m-%d %H:%M") if scheduled_time else "TBD"
-    
+
     return {
         "message": (
             f"👋 *Thanks for attending {event_type}!*\n\n"
@@ -226,17 +226,17 @@ async def create_schedule_next_prompt(
 ) -> Dict[str, Any]:
     """Create 'schedule next one?' prompt after event completion."""
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-    
+
     telegram_ids = []
     for a in attendance_list or []:
         if isinstance(a, dict):
             telegram_ids.append(a.get("user_id"))
         elif isinstance(a, (int, float)):
             telegram_ids.append(int(a))
-    
+
     telegram_ids = [t for t in telegram_ids if t]
     total_attendees = len(telegram_ids)
-    
+
     keyboard = [
         [
             InlineKeyboardButton("📅 Schedule next one!", callback_data=f"schedule_next_{event_id}"),
@@ -251,11 +251,11 @@ async def create_schedule_next_prompt(
             InlineKeyboardButton("🔄 Reuse defaults", callback_data=f"reuse_defaults_{event_id}"),
         ],
     ]
-    
+
     reply_markup = InlineKeyboardMarkup(keyboard)
-    
+
     scheduled_str = scheduled_time.strftime("%Y-%m-%d %H:%M") if scheduled_time else "TBD"
-    
+
     return {
         "message": (
             f"✨ *{event_type} completed successfully!*\n\n"
@@ -282,9 +282,9 @@ async def create_attendee_followup(
             telegram_ids.append(a.get("user_id"))
         elif isinstance(a, (int, float)):
             telegram_ids.append(int(a))
-    
+
     telegram_ids = [t for t in telegram_ids if t]
-    
+
     return {
         "message": (
             f"📝 *Feedback needed for {event_type}* ({len(telegram_ids)} attendees)\n\n"
@@ -300,7 +300,7 @@ def generate_suggestions_for_event(
 ) -> List[str]:
     """Generate time/place improvement suggestions based on event data."""
     suggestions = []
-    
+
     if event.scheduled_time:
         hour = event.scheduled_time.hour
         if hour < 9:
@@ -309,7 +309,7 @@ def generate_suggestions_for_event(
             suggestions.append("Lunchtime could work well for quick meetups")
         elif hour > 18:
             suggestions.append("Evening events are popular for after-work gatherings")
-    
+
     if event.event_type:
         if "dining" in event.event_type.lower() or "food" in event.event_type.lower():
             suggestions.append("Suggest restaurants with good reviews")
@@ -317,7 +317,7 @@ def generate_suggestions_for_event(
             suggestions.append("Check sports facilities availability")
         elif "movie" in event.event_type.lower():
             suggestions.append("Cinema with good sound system preferred")
-    
+
     return suggestions
 
 
@@ -327,7 +327,7 @@ async def create_reactivation_prompt(
 ) -> Dict[str, Any]:
     """Create reactivation nudge for inactive groups."""
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-    
+
     if days_inactive > 30:
         message = (
             f"👋 *We miss you!* 🌟\n\n"
@@ -346,7 +346,7 @@ async def create_reactivation_prompt(
             f"Your group has been quiet for {days_inactive} days.\n\n"
             "Want to schedule an event soon?"
         )
-    
+
     keyboard = [
         [
             InlineKeyboardButton("📅 Schedule event now", callback_data="reactivate_schedule"),
@@ -358,9 +358,9 @@ async def create_reactivation_prompt(
             InlineKeyboardButton("👻 Maybe later", callback_data="reactivate_later"),
         ],
     ]
-    
+
     reply_markup = InlineKeyboardMarkup(keyboard)
-    
+
     return {
         "message": message,
         "reply_markup": reply_markup,

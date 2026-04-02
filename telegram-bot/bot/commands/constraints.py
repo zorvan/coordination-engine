@@ -83,7 +83,7 @@ async def view_constraints(update: Update, event_id: int) -> None:
             await update.message.reply_text(
                 f"ℹ️ Event {event_id} has no constraints yet."
             )
-            
+
             return
 
         msg = f"📋 *Constraints for Event {event_id}*\n\n"
@@ -109,7 +109,7 @@ async def view_constraints(update: Update, event_id: int) -> None:
             msg += "\n".join(availability_lines)
 
         await update.message.reply_text(msg)
-        
+
 
 
 async def add_constraint(
@@ -295,7 +295,7 @@ async def _save_constraint_from_inputs(
                 await query.edit_message_text("❌ Event not found.")
             elif message:
                 await message.reply_text("❌ Event not found.")
-            
+
             return
         chat = update.effective_chat
         is_private_chat = bool(chat and chat.type == "private")
@@ -433,7 +433,7 @@ async def _save_constraint_from_inputs(
             await query.edit_message_text(success_msg)
         elif message:
             await message.reply_text(success_msg)
-        
+
 
 
 async def remove_constraint(

@@ -1,5 +1,8 @@
 """
 OpenAI-compatible LLM client for Qwen3.
+PRD v2 Priority 4: Production Hardening (TODO-016).
+- Schema validation for all LLM outputs
+- Type safety and value range validation
 """
 import httpx
 import json
@@ -14,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 class LLMClient:
     """OpenAI SDK wrapper for Qwen3 (or any OpenAI-compatible API)."""
-    
+
     def __init__(self):
         self.base_url = settings.ai_endpoint
         self.api_key = settings.ai_api_key
@@ -24,7 +27,7 @@ class LLMClient:
             headers={"Authorization": f"Bearer {self.api_key}"},
             timeout=60.0
         )
-    
+
     async def resolve_conflicts(
         self,
         event: Event,
@@ -33,35 +36,57 @@ class LLMClient:
         notes: list[str] | None = None,
     ) -> Dict[str, Any]:
         """Generate conflict resolution suggestions using LLM."""
+        from ai.schemas import ConflictResolution, validate_llm_output
+
         prompt = self._build_conflict_prompt(
             event, availability, reliability, notes or []
         )
-        
+
+        def fallback():
+            return {
+                "conflict_detected": False,
+                "suggested_time": "TBD",
+                "reasoning": "LLM unavailable, using fallback",
+                "compromises": []
+            }
+
         try:
             response = await self._call_llm(prompt)
-            return json.loads(response)
-        except json.JSONDecodeError:
-            return {
-                "suggested_time": "TBD",
-                "reasoning": "LLM returned invalid JSON, using fallback",
-                "confidence": 0.0,
-                "note": "JSON parse error"
-            }
+            return validate_llm_output(
+                ConflictResolution,
+                response,
+                fallback_factory=fallback,
+                logger=logger
+            )
         except Exception as e:
-            raise Exception(f"LLM resolution failed: {e}")
-    
+            logger.exception("Conflict resolution failed: %s", e)
+            return fallback()
+
     async def analyze_constraints(self, constraints) -> list[Dict[str, Any]]:
         """Analyze constraints for conflicts."""
+        from ai.schemas import ConstraintAnalysis, validate_llm_output
+
         prompt = self._build_constraint_prompt(constraints)
-        
+
+        def fallback():
+            return {"conflicts": []}
+
         try:
             response = await self._call_llm(prompt)
-            return json.loads(response)
+            validated = validate_llm_output(
+                ConstraintAnalysis,
+                response,
+                fallback_factory=fallback,
+                logger=logger
+            )
+            return [c.dict() for c in validated.get("conflicts", [])]
         except Exception:
             return []
 
     async def infer_constraint_from_text(self, text: str) -> Dict[str, Any]:
         """Infer structured constraint from free-form user text."""
+        from ai.schemas import ConstraintInference, validate_llm_output
+
         prompt = f"""
         Convert the user's message into a scheduling constraint JSON.
         Allowed types: if_joins, if_attends, unless_joins.
@@ -79,22 +104,8 @@ class LLMClient:
           "sanitized_summary": "clean short summary"
         }}
         """
-        try:
-            response = await self._call_llm(prompt)
-            parsed = json.loads(response)
-            return {
-                "constraint_type": str(parsed.get("constraint_type", "")).strip(),
-                "target_username": (
-                    str(parsed.get("target_username")).strip()
-                    if parsed.get("target_username") is not None
-                    else None
-                ),
-                "confidence": float(parsed.get("confidence", 0.6)),
-                "sanitized_summary": str(
-                    parsed.get("sanitized_summary", text)
-                ).strip(),
-            }
-        except Exception:
+
+        def fallback():
             lowered = text.lower()
             inferred_type = "if_joins"
             if "unless" in lowered:
@@ -114,10 +125,23 @@ class LLMClient:
                 "sanitized_summary": text.strip()[:240],
             }
 
+        try:
+            response = await self._call_llm(prompt)
+            return validate_llm_output(
+                ConstraintInference,
+                response,
+                fallback_factory=fallback,
+                logger=logger
+            )
+        except Exception:
+            return fallback()
+
     async def infer_feedback_from_text(
         self, event_type: str, text: str
     ) -> Dict[str, Any]:
         """Infer weighted structured feedback from free-form text."""
+        from ai.schemas import FeedbackInference, validate_llm_output
+
         prompt = f"""
         Convert user feedback into structured JSON.
         Remove toxicity and abusive wording while preserving meaning.
@@ -139,27 +163,8 @@ class LLMClient:
           "expertise_adjustments": {{"tag": 0.1}}
         }}
         """
-        try:
-            response = await self._call_llm(prompt)
-            parsed = json.loads(response)
-            score = float(parsed.get("score", 3.0))
-            weight = float(parsed.get("weight", 0.7))
-            expertise = parsed.get("expertise_adjustments", {})
-            if not isinstance(expertise, dict):
-                expertise = {}
-            return {
-                "score": max(1.0, min(5.0, score)),
-                "weight": max(0.0, min(1.0, weight)),
-                "sanitized_comment": str(
-                    parsed.get("sanitized_comment", text)
-                ).strip(),
-                "expertise_adjustments": {
-                    str(k): float(v)
-                    for k, v in expertise.items()
-                    if isinstance(k, str)
-                },
-            }
-        except Exception:
+
+        def fallback():
             cleaned = _sanitize_toxic_text(text)
             sentiment = _simple_sentiment_score(cleaned)
             return {
@@ -168,6 +173,17 @@ class LLMClient:
                 "sanitized_comment": cleaned,
                 "expertise_adjustments": {event_type: 0.1},
             }
+
+        try:
+            response = await self._call_llm(prompt)
+            return validate_llm_output(
+                FeedbackInference,
+                response,
+                fallback_factory=fallback,
+                logger=logger
+            )
+        except Exception:
+            return fallback()
 
     async def infer_event_draft_patch(
         self,
@@ -587,7 +603,7 @@ class LLMClient:
                 "constraint_type": None,
                 "assistant_response": "I inferred a best-effort action from your mention.",
             }
-    
+
     async def _call_llm(self, prompt: str) -> str:
         """Make LLM API call."""
         response = await self.client.post(
@@ -613,7 +629,7 @@ class LLMClient:
             return True, f"LLM available (models={model_count})"
         except Exception as e:
             return False, f"LLM unavailable: {type(e).__name__}: {e}"
-    
+
     def _build_conflict_prompt(
         self,
         event: Event,
@@ -646,7 +662,7 @@ class LLMClient:
             "compromises": ["suggestion 1", "suggestion 2"]
         }}
         """
-    
+
     def _build_constraint_prompt(self, constraints) -> str:
         """Construct Qwen3 prompt for constraint analysis."""
         return f"""
@@ -662,7 +678,7 @@ class LLMClient:
             ]
         }}
         """
-    
+
     async def close(self) -> None:
         """Close HTTP client."""
         await self.client.aclose()

@@ -132,7 +132,7 @@ async def attendance_stats_with_usernames(
     Reads from event_participants table for accurate status.
     Format: "Name(@username) has confirmed"
     """
-    from db.models import EventParticipant, ParticipantStatus
+    from db.models import EventParticipant
 
     if not event_id:
         # Fallback to old method (legacy attendance_list)
@@ -214,12 +214,12 @@ def attendance_stats(attendance: list[Any] | None) -> tuple[int, int, str]:
 
     lines = []
     user_ids = list(status_by_user.keys())
-    
+
     # Fetch user data for formatting
     from db.models import User
     from db.connection import get_session
     from config.settings import settings
-    
+
     users = {}
     if user_ids and settings.db_url:
         import asyncio
@@ -240,7 +240,7 @@ def attendance_stats(attendance: list[Any] | None) -> tuple[int, int, str]:
         user = users.get(telegram_user_id)
         username = getattr(user, "username", None) if user else None
         display_name = getattr(user, "display_name", None) if user else None
-        
+
         # Format: "Name(@username) has confirmed"
         if display_name and username:
             user_display = f"{display_name}(@{username})"
@@ -250,14 +250,14 @@ def attendance_stats(attendance: list[Any] | None) -> tuple[int, int, str]:
             user_display = display_name
         else:
             user_display = f"User{telegram_user_id}"
-        
+
         status_text = {
             "invited": "has been invited",
             "interested": "has joined",
             "confirmed": "has confirmed",
             "committed": "has confirmed",  # Legacy mapping
         }.get(status, status)
-        
+
         lines.append(f"{user_display} {status_text}")
     return interested_count, confirmed_count, "\n".join(lines)
 
@@ -267,7 +267,7 @@ async def format_event_details_message(
 ) -> str:
     """Build consistent detailed event info with early-stage progress."""
     attendance = event.attendance_list or []
-    
+
     if settings.db_url:
         async with get_session(settings.db_url) as session:
             interested_count, confirmed_count, attendees_text = await attendance_stats_with_usernames(attendance, session, event_id)
@@ -360,16 +360,6 @@ async def format_status_message(
     - User-specific acknowledgment: "You are one of [N] people [Name] is counting on"
     """
     description = summarize_description(event.description, max_len=400)
-    planning_prefs = (
-        event.planning_prefs
-        if isinstance(getattr(event, "planning_prefs", None), dict)
-        else {}
-    )
-    location_type = str(planning_prefs.get("location_type", "n/a")).replace("_", " ")
-    budget_level = str(planning_prefs.get("budget_level", "n/a")).replace("_", " ")
-    transport_mode = str(planning_prefs.get("transport_mode", "n/a")).replace("_", " ")
-    time_window = str(planning_prefs.get("time_window", "n/a"))
-    date_preset = str(planning_prefs.get("date_preset", "n/a"))
 
     # Get participant counts with names (PRD v2: Visibility of Mutual Dependence)
     min_participants = event.min_participants or 2

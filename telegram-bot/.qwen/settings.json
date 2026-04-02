@@ -4,7 +4,15 @@
       "Bash(python *)",
       "Bash(sleep *)",
       "Bash(timeout *)",
-      "Bash(true)"
+      "Bash(true)",
+      "Bash(do)",
+      "Bash(then)",
+      "Bash(continue)",
+      "Bash(fi)",
+      "Bash(sed *)",
+      "Bash(echo *)",
+      "Bash(done)",
+      "Bash(pip install *)"
     ]
   },
   "$version": 3

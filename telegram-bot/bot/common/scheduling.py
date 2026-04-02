@@ -1,6 +1,5 @@
 """Shared scheduling helpers for conflict checks."""
 from datetime import timedelta
-from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession

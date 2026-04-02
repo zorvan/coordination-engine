@@ -430,26 +430,26 @@ def build_event_summary_text(data: dict[str, Any], is_private: bool = False) -> 
             f"Invitees: {invitees_summary}\n\n"
             "Press *Confirm & Lock* to finalize and lock this event."
         )
-    else:
-        return (
-            f"✨ *Event Summary*\n\n"
-            f"Type: {data.get('event_type', 'N/A')}\n"
-            f"Description: {data.get('description', 'N/A')}\n"
-            f"Time: {scheduled_time}\n"
-            f"Date Preset: {date_preset_label}\n"
-            f"Time Window: {time_window_label}\n"
-            f"Commit-By: {commit_by_text}\n"
-            f"Duration: {data.get('duration_minutes', 120)} minutes\n"
-            f"Mode: {data.get('scheduling_mode', 'fixed')}\n"
-            f"Location Type: {location_type}\n"
-            f"Budget: {budget_level}\n"
-            f"Transport: {transport_mode}\n"
-            f"Threshold: {data.get('threshold_attendance', 'N/A')}\n"
-            f"Invitees: {invitees_summary}"
-            f"{notes_text}\n\n"
-            "Create this event?\n"
-            "You can press *Modify* or reply with free-text changes."
-        )
+
+    return (
+        f"✨ *Event Summary*\n\n"
+        f"Type: {data.get('event_type', 'N/A')}\n"
+        f"Description: {data.get('description', 'N/A')}\n"
+        f"Time: {scheduled_time}\n"
+        f"Date Preset: {date_preset_label}\n"
+        f"Time Window: {time_window_label}\n"
+        f"Commit-By: {commit_by_text}\n"
+        f"Duration: {data.get('duration_minutes', 120)} minutes\n"
+        f"Mode: {data.get('scheduling_mode', 'fixed')}\n"
+        f"Location Type: {location_type}\n"
+        f"Budget: {budget_level}\n"
+        f"Transport: {transport_mode}\n"
+        f"Threshold: {data.get('threshold_attendance', 'N/A')}\n"
+        f"Invitees: {invitees_summary}"
+        f"{notes_text}\n\n"
+        "Create this event?\n"
+        "You can press *Modify* or reply with free-text changes."
+    )
 
 
 def _normalize_patch_invitees(values: Any) -> list[str]:
@@ -490,8 +490,7 @@ async def _apply_final_stage_patch(
     except Exception:
         if is_private:
             return False, [], "LLM unavailable for modifications"
-        else:
-            return False, [], None
+        return False, [], None
 
     changes: list[str] = []
     warnings: list[str] = []
@@ -779,10 +778,15 @@ async def start_event_flow(
         )
     else:
         scheduling_mode = flow_data["data"].get("scheduling_mode", "fixed")
+        mode_text = (
+            'Fixed date/time'
+            if scheduling_mode == 'fixed'
+            else 'Flexible (collect availability first)'
+        )
         await update.message.reply_text(
             "📝 *Event Description*\n\n"
             "Send a short description for the event.\n"
-            f"Mode: {'Fixed date/time' if scheduling_mode == 'fixed' else 'Flexible (collect availability first)'}\n\n"
+            f"Mode: {mode_text}\n\n"
             "Example: Friendly football match at the central field.\n"
             "Most next steps are one-tap inline options.",
         )
@@ -893,7 +897,7 @@ async def start_event_flow_from_prefill(
             reply_markup=build_final_confirmation_markup(prefix=prefix),
         )
         await update.message.reply_text(
-            build_event_summary_text(flow_data, is_private=(mode == "private")),
+            build_event_summary_text(flow_data, is_private=mode == "private"),
             reply_markup=build_final_confirmation_markup(prefix=prefix),
         )
 
@@ -1065,7 +1069,7 @@ async def _handle_callback_common(
             event_flow["stage"] = "final"
             context.user_data[flow_key] = event_flow
             await query.edit_message_text(
-                build_event_summary_text(flow_data, is_private=(mode == "private")),
+                build_event_summary_text(flow_data, is_private=mode == "private"),
                 reply_markup=build_final_confirmation_markup(prefix=prefix),
             )
 
@@ -1124,8 +1128,9 @@ async def _handle_callback_common(
             else:
                 event_flow["stage"] = "date_options"
                 context.user_data[flow_key] = event_flow
+                label = DATE_PRESET_LABELS.get(preset, preset.title())
                 await query.edit_message_text(
-                    f"📆 *{DATE_PRESET_LABELS.get(preset, preset.title())}*\n\nPick a specific date:",
+                    f"📆 *{label}*\n\nPick a specific date:",
                     reply_markup=build_date_options_markup(
                         choices, preset, prefix=prefix
                     ),
@@ -1263,7 +1268,7 @@ async def _handle_callback_common(
         flow_data["invite_all_members"] = True
         context.user_data[flow_key] = event_flow
         await query.edit_message_text(
-            build_event_summary_text(flow_data, is_private=(mode == "private")),
+            build_event_summary_text(flow_data, is_private=mode == "private"),
             reply_markup=build_final_confirmation_markup(prefix=prefix),
         )
 
@@ -1286,7 +1291,7 @@ async def _handle_callback_common(
         if mode == "private":
             await finalize_private_event(query, context)
         else:
-            await finalize_event(query, context, mode=mode)
+            await finalize_event(query, context)
     elif data == f"{prefix}_final_edit":
         await query.edit_message_text(
             "🛠 Send your modification in natural language.\n\n"
@@ -1421,6 +1426,11 @@ async def _handle_message_common(
             if mode == "public"
             else "fixed"
         )
+        scheduling_mode_text = (
+            'Fixed date/time'
+            if scheduling_mode == 'fixed'
+            else 'Flexible (collect availability first)'
+        )
 
         if mode == "private":
             await update.message.reply_text(
@@ -1431,7 +1441,7 @@ async def _handle_message_common(
             await update.message.reply_text(
                 "📋 *Event Type*\n\n"
                 "What type of event would you like to organize?\n"
-                f"Mode: {'Fixed date/time' if scheduling_mode == 'fixed' else 'Flexible (collect availability first)'}",
+                f"Mode: {scheduling_mode_text}",
                 reply_markup=build_event_type_markup(prefix="event"),
             )
 
@@ -1489,7 +1499,7 @@ async def _handle_message_common(
             data = flow_data
             prefix = "private_event" if mode == "private" else "event"
             await update.message.reply_text(
-                build_event_summary_text(data, is_private=(mode == "private")),
+                build_event_summary_text(data, is_private=mode == "private"),
                 reply_markup=build_final_confirmation_markup(prefix=prefix),
             )
         except ValueError:
@@ -1550,7 +1560,7 @@ async def _handle_message_common(
 
 
 async def finalize_event(
-    query: CallbackQuery, context: ContextTypes.DEFAULT_TYPE, mode: str = "public"
+    query: CallbackQuery, context: ContextTypes.DEFAULT_TYPE, _mode: str = "public"
 ) -> None:
     """Finalize and create the public/event in database."""
     if context.user_data is None:
@@ -1626,7 +1636,7 @@ async def finalize_event(
         session.add(event)
         await session.commit()
         await session.refresh(event)
-        
+
         # Create participant record for the organizer
         from bot.services import ParticipantService
         participant_service = ParticipantService(session)
@@ -1637,12 +1647,47 @@ async def finalize_event(
             role="organizer"
         )
 
+        # Check for event lineage (TODO-013) - prior events of same type
+        from bot.services.event_memory_service import EventMemoryService
+        memory_service = EventMemoryService(context.bot, session)
+        prior_memories = await memory_service.get_recent_memories(group_id, limit=5)
+
+        # Filter for same event type
+        lineage_event_ids = []
+        lineage_suggestion = None
+        for memory in prior_memories:
+            if memory.event and memory.event.event_type == event.event_type:
+                lineage_event_ids.append(memory.event.event_id)
+                if not lineage_suggestion and memory.weave_text:
+                    # Use first memory as lineage suggestion
+                    lineage_suggestion = {
+                        "event_id": memory.event.event_id,
+                        "event_type": memory.event.event_type,
+                        "weave_preview": memory.weave_text[:200] if memory.weave_text else None,
+                        "hashtags": memory.hashtags or [],
+                    }
+
+        # Store lineage if found
+        if lineage_event_ids:
+            await memory_service.link_lineage(event.event_id, lineage_event_ids[:3])  # Max 3
+            logger.info(
+                "Linked lineage for event %s: %s",
+                event.event_id,
+                lineage_event_ids[:3],
+            )
+
     context.user_data.pop("event_flow", None)
 
-    send_to_all_members = bool(data.get("invite_all_members", True))  # Default to True for public events
+    # Default to True for public events
+    send_to_all_members = bool(data.get("invite_all_members", True))
     invitees = list(data.get("invitees", []))
-    
-    logger.info(f"Event {event.event_id}: send_to_all_members={send_to_all_members}, invitees={invitees}")
+
+    logger.info(
+        "Event %s: send_to_all_members=%s, invitees=%s",
+        event.event_id,
+        send_to_all_members,
+        invitees,
+    )
 
     async with get_session(settings.db_url) as session:
         # Get organizer's username and display_name for display in invitation
@@ -1672,7 +1717,9 @@ async def finalize_event(
         if send_to_all_members:
             # Public event: DM all group members (excluding creator who gets admin DM)
             logger.info(
-                f"Public event {event.event_id}: Sending DMs to all {len(group_members)} group members"
+                "Public event %s: Sending DMs to all %s group members",
+                event.event_id,
+                len(group_members),
             )
             for telegram_user_id in group_members:
                 if telegram_user_id and telegram_user_id != creator_id:
@@ -1685,20 +1732,27 @@ async def finalize_event(
                         )
                         if sent:
                             logger.info(
-                                f"DM sent to user {telegram_user_id} for event {event.event_id} (public event, all members)"
+                                "DM sent to user %s for event %s (public event, all members)",
+                                telegram_user_id,
+                                event.event_id,
                             )
                             dm_count += 1
                         else:
                             dm_failed += 1
                     except Exception as e:
                         logger.error(
-                            f"Error sending DM to user {telegram_user_id}: {e}",
+                            "Error sending DM to user %s: %s",
+                            telegram_user_id,
+                            e,
                             exc_info=True,
                         )
                         dm_failed += 1
         else:
             # Private event: DM ONLY invitees + admin
-            logger.info(f"Private event {event.event_id}: Sending DMs to invitees only")
+            logger.info(
+                "Private event %s: Sending DMs to invitees only",
+                event.event_id,
+            )
 
             # First, send to all listed invitees
             for handle in invitees:
@@ -1721,23 +1775,35 @@ async def finalize_event(
                             )
                             if sent:
                                 logger.info(
-                                    f"DM sent to user {invitee_user.telegram_user_id} (@{username}) for event {event.event_id} (private invitee)"
+                                    "DM sent to user %s (@%s) for event %s (private invitee)",
+                                    invitee_user.telegram_user_id,
+                                    username,
+                                    event.event_id,
                                 )
                                 dm_count += 1
                             else:
                                 dm_failed += 1
                         else:
                             logger.warning(
-                                f"User @{username} not found or no telegram_user_id for private event {event.event_id}"
+                                "User @%s not found or no telegram_user_id for private event %s",
+                                username,
+                                event.event_id,
                             )
                             dm_failed += 1
                     else:
                         logger.warning(
-                            f"No user_id found for handle @{username} in private event {event.event_id}"
+                            "No user_id found for handle @%s in private event %s",
+                            username,
+                            event.event_id,
                         )
                         dm_failed += 1
                 except Exception as e:
-                    logger.error(f"Error sending DM to @{username}: {e}", exc_info=True)
+                    logger.error(
+                        "Error sending DM to @%s: %s",
+                        username,
+                        e,
+                        exc_info=True,
+                    )
                     dm_failed += 1
 
             # Also send to admin/creator
@@ -1750,19 +1816,27 @@ async def finalize_event(
                 )
                 if sent:
                     logger.info(
-                        f"DM sent to admin {creator_id} for event {event.event_id} (private event admin)"
+                        "DM sent to admin %s for event %s (private event admin)",
+                        creator_id,
+                        event.event_id,
                     )
                     dm_count += 1
                 else:
                     dm_failed += 1
             except Exception as e:
                 logger.error(
-                    f"Error sending DM to admin {creator_id}: {e}", exc_info=True
+                    "Error sending DM to admin %s: %s",
+                    creator_id,
+                    e,
+                    exc_info=True,
                 )
                 dm_failed += 1
 
         logger.info(
-            f"Event {event.event_id} DM distribution complete: {dm_count} sent, {dm_failed} failed"
+            "Event %s DM distribution complete: %s sent, %s failed",
+            event.event_id,
+            dm_count,
+            dm_failed,
         )
     scheduled_time = (
         str(data.get("scheduled_time", "TBD")).replace("T", " ")
@@ -1849,7 +1923,9 @@ async def finalize_event(
         parse_mode="Markdown",
     )
     logger.info(
-        f"Full event details sent to admin {creator_id} via DM for event {event.event_id}"
+        "Full event details sent to admin %s via DM for event %s",
+        creator_id,
+        event.event_id,
     )
 
 
@@ -1930,7 +2006,7 @@ async def finalize_private_event(
         session.add(event)
         await session.commit()
         await session.refresh(event)
-        
+
         # Create participant record for the organizer
         from bot.services import ParticipantService
         participant_service = ParticipantService(session)
@@ -1966,7 +2042,9 @@ async def finalize_private_event(
         # Send to all listed invitees
         if invitees:
             logger.info(
-                f"Private event {event.event_id}: Sending DMs to {len(invitees)} invitees"
+                "Private event %s: Sending DMs to %s invitees",
+                event.event_id,
+                len(invitees),
             )
             for handle in invitees:
                 if not handle.startswith("@"):
@@ -1988,23 +2066,35 @@ async def finalize_private_event(
                             )
                             if sent:
                                 logger.info(
-                                    f"DM sent to user {invitee_user.telegram_user_id} (@{username}) for private event {event.event_id} (invitee)"
+                                    "DM sent to user %s (@%s) for private event %s (invitee)",
+                                    invitee_user.telegram_user_id,
+                                    username,
+                                    event.event_id,
                                 )
                                 dm_count += 1
                             else:
                                 dm_failed += 1
                         else:
                             logger.warning(
-                                f"User @{username} not found or no telegram_user_id for private event {event.event_id}"
+                                "User @%s not found or no telegram_user_id for private event %s",
+                                username,
+                                event.event_id,
                             )
                             dm_failed += 1
                     else:
                         logger.warning(
-                            f"No user_id found for handle @{username} in private event {event.event_id}"
+                            "No user_id found for handle @%s in private event %s",
+                            username,
+                            event.event_id,
                         )
                         dm_failed += 1
                 except Exception as e:
-                    logger.error(f"Error sending DM to @{username}: {e}", exc_info=True)
+                    logger.error(
+                        "Error sending DM to @%s: %s",
+                        username,
+                        e,
+                        exc_info=True,
+                    )
                     dm_failed += 1
         else:
             await query.edit_message_text(
@@ -2019,17 +2109,27 @@ async def finalize_private_event(
             )
             if sent:
                 logger.info(
-                    f"DM sent to admin {creator_id} for private event {event.event_id} (admin)"
+                    "DM sent to admin %s for private event %s (admin)",
+                    creator_id,
+                    event.event_id,
                 )
                 dm_count += 1
             else:
                 dm_failed += 1
         except Exception as e:
-            logger.error(f"Error sending DM to admin {creator_id}: {e}", exc_info=True)
+            logger.error(
+                "Error sending DM to admin %s: %s",
+                creator_id,
+                e,
+                exc_info=True,
+            )
             dm_failed += 1
 
         logger.info(
-            f"Private event {event.event_id} DM distribution complete: {dm_count} sent, {dm_failed} failed"
+            "Private event %s DM distribution complete: %s sent, %s failed",
+            event.event_id,
+            dm_count,
+            dm_failed,
         )
 
     context.user_data.pop("private_event_flow", None)

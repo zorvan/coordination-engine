@@ -36,7 +36,7 @@ async def run_migration():
 
         # Get existing columns
         existing = await conn.fetch("""
-            SELECT column_name FROM information_schema.columns 
+            SELECT column_name FROM information_schema.columns
             WHERE table_name = 'events'
         """)
         existing_columns = {row['column_name'] for row in existing}

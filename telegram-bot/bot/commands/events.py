@@ -34,7 +34,7 @@ async def handle(update: Update, _context: ContextTypes.DEFAULT_TYPE) -> None:
 
         if not rows:
             await update.message.reply_text("ℹ️ No events found.")
-            
+
             return
 
         title = (
@@ -63,5 +63,5 @@ async def handle(update: Update, _context: ContextTypes.DEFAULT_TYPE) -> None:
             lines.append(f"  Description: {description}")
 
         await update.message.reply_text("\n".join(lines))
-        
+
         return

@@ -8,13 +8,12 @@ PRD v2 Refactoring:
 - Triggers materialization announcements via lifecycle service
 """
 import logging
-import hashlib
 from datetime import datetime
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from sqlalchemy import select
 
-from db.models import Event, Log, User
+from db.models import Event, Log
 from db.connection import get_session
 from db.users import get_or_create_user_id
 from config.settings import settings

@@ -47,7 +47,7 @@ def get_existing_columns(engine, table_name: str) -> set:
 async def migrate_events_table(engine):
     """Add new columns to events table."""
     print("Migrating events table...")
-    
+
     columns_to_add = [
         ("min_participants", "INTEGER DEFAULT 2"),
         ("target_participants", "INTEGER DEFAULT 6"),
@@ -55,9 +55,9 @@ async def migrate_events_table(engine):
         ("lock_deadline", "TIMESTAMP"),
         ("version", "INTEGER DEFAULT 0 NOT NULL"),
     ]
-    
+
     existing_columns = get_existing_columns(engine, "events")
-    
+
     with engine.connect() as conn:
         for col_name, col_def in columns_to_add:
             if col_name not in existing_columns:
@@ -66,21 +66,21 @@ async def migrate_events_table(engine):
                 await conn.commit()
             else:
                 print(f"  Column already exists: {col_name}")
-    
+
     print("  ✓ Events table migration complete")
 
 
 async def create_new_tables(engine):
     """Create new tables for v2."""
     print("\nCreating new tables...")
-    
+
     tables_to_create = [
         "event_participants",
         "idempotency_keys",
         "event_state_transitions",
         "event_memories",
     ]
-    
+
     with engine.connect() as conn:
         for table_name in tables_to_create:
             if not check_table_exists(engine, table_name):
@@ -89,28 +89,28 @@ async def create_new_tables(engine):
                 Base.metadata.create_all(engine, tables=[table_name])
             else:
                 print(f"  Table already exists: {table_name}")
-    
+
     print("  ✓ New tables created")
 
 
 async def migrate_attendance_to_participants(engine):
     """Migrate existing attendance_list JSON to normalized event_participants table."""
     print("\nMigrating attendance data to normalized table...")
-    
+
     with engine.connect() as conn:
         # Get all events with attendance_list data
         result = await conn.execute(text("""
-            SELECT event_id, attendance_list 
-            FROM events 
-            WHERE attendance_list IS NOT NULL 
+            SELECT event_id, attendance_list
+            FROM events
+            WHERE attendance_list IS NOT NULL
             AND json_array_length(attendance_list) > 0
         """))
         events = result.fetchall()
-        
+
         if not events:
             print("  No attendance data to migrate")
             return
-        
+
         migrated_count = 0
         for event_id, attendance_json in events:
             # Parse attendance_list and insert into event_participants
@@ -124,17 +124,17 @@ async def migrate_attendance_to_participants(engine):
                     else:
                         telegram_id = item
                         status_str = "interested"
-                    
+
                     if telegram_id.isdigit():
                         # Map status
                         if status_str in {"committed", "confirmed"}:
                             status = "confirmed"
                         else:
                             status = "joined"
-                        
+
                         # Insert or ignore (in case of duplicates)
                         await conn.execute(text("""
-                            INSERT INTO event_participants 
+                            INSERT INTO event_participants
                             (event_id, telegram_user_id, status, role, joined_at)
                             VALUES (:event_id, :telegram_id, :status, 'participant', NOW())
                             ON CONFLICT (event_id, telegram_user_id) DO NOTHING
@@ -144,7 +144,7 @@ async def migrate_attendance_to_participants(engine):
                             "status": status,
                         })
                         migrated_count += 1
-        
+
         await conn.commit()
         print(f"  ✓ Migrated {migrated_count} participant records")
 
@@ -152,7 +152,7 @@ async def migrate_attendance_to_participants(engine):
 async def create_indexes(engine):
     """Create performance indexes."""
     print("\nCreating indexes...")
-    
+
     indexes = [
         ("idx_event_participants_event_id", "event_participants", "event_id"),
         ("idx_event_participants_user_id", "event_participants", "telegram_user_id"),
@@ -161,7 +161,7 @@ async def create_indexes(engine):
         ("idx_idempotency_keys_expires", "idempotency_keys", "expires_at"),
         ("idx_events_state", "events", "state"),
     ]
-    
+
     with engine.connect() as conn:
         for idx_name, table, column in indexes:
             try:
@@ -169,9 +169,9 @@ async def create_indexes(engine):
                 print(f"  Created index: {idx_name}")
             except Exception as e:
                 print(f"  Index creation failed (may exist): {idx_name} - {e}")
-        
+
         await conn.commit()
-    
+
     print("  ✓ Indexes created")
 
 
@@ -180,32 +180,32 @@ async def run_migration():
     print("=" * 60)
     print("Coordination Engine v2 Database Migration")
     print("=" * 60)
-    
+
     # Get database URL
     db_url = os.environ.get("DB_URL")
     if not db_url:
         print("ERROR: DB_URL environment variable not set")
         sys.exit(1)
-    
+
     # Convert to sync engine for migration
     if db_url.startswith("postgresql+asyncpg://"):
         db_url = db_url.replace("postgresql+asyncpg://", "postgresql://", 1)
-    
+
     print(f"\nConnecting to database...")
     engine = get_sync_engine(db_url)
-    
+
     try:
         # Test connection
         with engine.connect() as conn:
             result = conn.execute(text("SELECT 1"))
             print("  ✓ Database connection successful")
-        
+
         # Run migrations
         await migrate_events_table(engine)
         await create_new_tables(engine)
         await migrate_attendance_to_participants(engine)
         await create_indexes(engine)
-        
+
         print("\n" + "=" * 60)
         print("✓ Migration completed successfully!")
         print("=" * 60)
@@ -214,7 +214,7 @@ async def run_migration():
         print("2. Update application code to use new services")
         print("3. Enable feature flags in environment")
         print("4. Monitor logs for any issues")
-        
+
     except Exception as e:
         print(f"\n✗ Migration failed: {e}")
         import traceback

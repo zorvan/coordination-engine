@@ -6,10 +6,10 @@ PRD v2 Updates:
 - Worker queue for async tasks
 - Rate limiting middleware
 - Callback replay protection
+- Scheduled tasks (memory collection, log pruning, collapse checks, reminders)
 """
 import asyncio
 import logging
-from telegram import Update
 from telegram.ext import (
     ApplicationBuilder,
     CallbackQueryHandler,
@@ -24,7 +24,7 @@ from config.logging import setup_logging
 from bot.commands import (
     start, my_groups, profile, reputation, organize_event, private_organize_event,
     join, confirm, back, cancel, lock, request_confirmations, early_feedback, event_note, modify_event, constraints, suggest_time, status,
-    event_details, events, check_deadlines, memory,
+    event_details, events, check_deadlines, memory, my_history,
 )
 from bot.handlers import event_flow, feedback, membership, mentions
 from ai.llm import LLMClient
@@ -63,6 +63,21 @@ async def check_db_availability(logger: logging.Logger, db_url: str) -> None:
         logger.warning("Startup DB check: %s", message)
 
 
+async def run_scheduled_tasks(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    Run scheduled background tasks.
+
+    Triggered by job queue every 30 minutes.
+    """
+    from bot.common.scheduler import run_scheduled_tasks as run_tasks
+
+    settings = context.bot_data.get("settings")
+    if not settings or not settings.db_url:
+        return
+
+    await run_tasks(context.bot, settings.db_url)
+
+
 def main():
     """Main entry point."""
     settings = Settings()
@@ -90,8 +105,16 @@ def main():
         loop.run_until_complete(init_db(engine))
         logger.info("Database initialization complete")
 
-    # Build application
-    application = ApplicationBuilder().token(settings.telegram_token).build()
+    # Build application with job queue for scheduled tasks
+    application = (
+        ApplicationBuilder()
+        .token(settings.telegram_token)
+        .job_queue_interval(30)  # Run job queue every 30 seconds (check interval)
+        .build()
+    )
+
+    # Store settings in bot_data for access by handlers and jobs
+    application.bot_data["settings"] = settings
 
     # Register middleware (rate limiting)
     # Note: Uncomment when ready to enable rate limiting
@@ -153,6 +176,8 @@ def main():
         "remember": memory.remember,
         # PRD v2: Weekly digest command
         "digest": memory.weekly_digest,  # Manual trigger for now
+        # PRD v2: Personal history (DM only)
+        "my_history": my_history.handle,
     }
 
     for command, handler in command_map.items():
@@ -201,18 +226,32 @@ def main():
 
     application.add_error_handler(on_error)
 
-    # Note: Deadline checks require python-telegram-bot[job-queue]
-    # For now, deadline checks are triggered manually via /check_deadlines command
-    # Or can be run periodically via external scheduler (cron, systemd timer, etc.)
+    # Schedule periodic tasks using job queue
+    # Memory collection: every 30 minutes
+    # Log pruning: weekly (checked in task)
+    # Collapse checks: hourly (checked in task)
+    # 24h reminders: daily at 9 AM (checked in task)
+    job_queue = application.job_queue
+    if job_queue:
+        job_queue.run_repeating(
+            run_scheduled_tasks,
+            interval=1800,  # 30 minutes
+            first=60,  # Start after 1 minute
+            name="scheduled_tasks",
+        )
+        logger.info("Scheduled tasks job registered (30-minute interval)")
+
+    # Note: Deadline checks can also be run periodically via job queue
+    # For now, triggered manually via /check_deadlines command
 
     logger.info("Bot started. Press Ctrl+C to stop.")
-    
+
     # Check if webhook mode is enabled
     if settings.environment == "production" and hasattr(settings, 'webhook_url') and settings.webhook_url:
         # Production: Use webhook with worker queue
         logger.info("Starting in webhook mode: %s", settings.webhook_url)
         from bot.common.webhook import setup_webhook, shutdown_webhook
-        
+
         async def run_webhook():
             await setup_webhook(
                 application,
@@ -220,7 +259,7 @@ def main():
                 webhook_port=int(getattr(settings, 'webhook_port', 8443)),
                 webhook_secret=getattr(settings, 'webhook_secret', None),
             )
-        
+
         try:
             loop.run_until_complete(run_webhook())
         except KeyboardInterrupt:

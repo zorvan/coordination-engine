@@ -43,14 +43,14 @@ async def send_confirmation_request_message(
         # Get participants using ParticipantService
         participant_service = ParticipantService(session)
         all_participants = await participant_service.get_all_participants(event_id)
-        
+
         participants = set()
         confirmed = set()
         for p in all_participants:
             participants.add(p.telegram_user_id)
             if p.status == 'confirmed':
                 confirmed.add(p.telegram_user_id)
-        
+
         pending = sorted(participants - confirmed)
 
         users_by_tid: dict[int, User] = {}

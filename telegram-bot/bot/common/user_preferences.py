@@ -64,7 +64,7 @@ async def create_or_update_user_preferences(
 ) -> UserPreference:
     """Create or update user preferences."""
     preferences = await get_user_preferences(session, telegram_user_id)
-    
+
     if not preferences:
         preferences = UserPreference(
             user_id=telegram_user_id,
@@ -91,7 +91,7 @@ async def create_or_update_user_preferences(
             current_privacy = preferences.privacy_settings or {}
             current_privacy.update(privacy_settings)
             preferences.privacy_settings = current_privacy
-    
+
     preferences.last_updated = datetime.utcnow()
     await session.flush()
     return preferences
@@ -116,16 +116,16 @@ def get_preference_value(
     """Get preference value with privacy controls."""
     if not preferences:
         return None
-    
+
     privacy = preferences.privacy_settings or {}
-    
+
     if is_organizer or not is_private:
         return getattr(preferences, f"{preference_type}_preference", None)
-    
+
     privacy_settings = privacy.get(preference_type, get_privacy_defaults(preference_type))
     if privacy_settings.get("private", False):
         return None
-    
+
     return getattr(preferences, f"{preference_type}_preference", None)
 
 
@@ -141,7 +141,7 @@ def merge_aggregate_preferences(
             counts[value] = counts.get(value, 0) + 1
         elif value == "any":
             continue
-    
+
     return counts
 
 
@@ -154,7 +154,7 @@ def should_refresh_preference(preferences: UserPreference, preference_type: str)
     last_updated = preferences.last_updated or preferences.created_at
     if not last_updated:
         return True
-    
+
     days_since_update = (datetime.utcnow() - last_updated).days
     return days_since_update > PREFERENCE_REFRESH_THRESHOLD_DAYS
 
@@ -165,15 +165,15 @@ def apply_preference_decay(preferences: UserPreference) -> Dict[str, str]:
     last_updated = preferences.last_updated or preferences.created_at
     if not last_updated:
         return decayed
-    
+
     days_since_update = (datetime.utcnow() - last_updated).days
-    
+
     if days_since_update > PREFERENCE_DECAY_DAYS:
         for pref_type in ["time", "activity", "budget", "location_type", "transport"]:
             current_value = getattr(preferences, f"{pref_type}_preference", None)
             if current_value and current_value != "any":
                 decayed[pref_type] = "any"
-    
+
     return decayed
 
 
@@ -182,26 +182,26 @@ def get_aggregate_preference_counts(
     preference_type: str,
 ) -> tuple[Dict[str, int], int]:
     """Get aggregate preference counts with privacy filtering.
-    
+
     Returns:
         Tuple of (preference_counts, total_non_private)
     """
     counts: Dict[str, int] = {}
     total_non_private = 0
-    
+
     for pref in preferences_list:
         privacy = pref.privacy_settings or {}
         pref_type = preference_type.replace("_type", "")
         privacy_settings = privacy.get(pref_type, get_privacy_defaults(pref_type))
-        
+
         if privacy_settings.get("private", False):
             continue
-        
+
         value = getattr(pref, f"{preference_type}_preference", None)
         if value and value != "any":
             counts[value] = counts.get(value, 0) + 1
             total_non_private += 1
-    
+
     return counts, total_non_private
 
 
@@ -213,12 +213,12 @@ def format_aggregate_preference(
     """Format aggregate preference for display in group chats."""
     if not counts:
         return f"{preference_type.replace('_', ' ').title()}: No preferences shared"
-    
+
     sorted_prefs = sorted(counts.items(), key=lambda x: x[1], reverse=True)
     top_choice = sorted_prefs[0]
-    
+
     percentage = (top_choice[1] / total_users * 100) if total_users > 0 else 0
-    
+
     return (
         f"{preference_type.replace('_', ' ').title()}: {top_choice[0]} "
         f"({top_choice[1]}/{total_users} users, {percentage:.0f}%)"
@@ -227,27 +227,27 @@ def format_aggregate_preference(
 
 async def refresh_expired_preferences(session: AsyncSession, telegram_user_id: int) -> Dict[str, str]:
     """Refresh preferences that have expired due to decay.
-    
+
     Returns dict of preference_type -> old_value for changed preferences.
     """
     preferences = await get_user_preferences(session, telegram_user_id)
     if not preferences:
         return {}
-    
+
     decayed = apply_preference_decay(preferences)
-    
+
     if not decayed:
         return {}
-    
+
     old_values: Dict[str, str] = {}
     for pref_type, new_value in decayed.items():
         old_value = getattr(preferences, f"{pref_type}_preference", None)
         old_values[pref_type] = old_value or ""
         setattr(preferences, f"{pref_type}_preference", new_value)
-    
+
     preferences.last_updated = datetime.utcnow()
     await session.flush()
-    
+
     return old_values
 
 
@@ -269,52 +269,52 @@ async def get_group_aggregate_preferences(
     is_organizer: bool,
 ) -> Dict[str, str]:
     """Get aggregate preferences for all participants in an event.
-    
+
     For non-organizers: only show aggregate (no individual preferences)
     For organizers: can show individual preferences if not marked private
     """
     from db.models import Event
-    
+
     result = await session.execute(
         select(Event).where(Event.event_id == event_id)
     )
     event = result.scalar_one_or_none()
     if not event:
         return {}
-    
+
     from db.users import get_user_ids_for_telegram_ids
-    
+
     def get_telegram_id(attendee):
         if isinstance(attendee, dict):
             return attendee.get("user_id")
         elif isinstance(attendee, (int, float)):
             return int(attendee)
         return None
-    
+
     telegram_ids = [get_telegram_id(a) for a in (event.attendance_list or [])]
     telegram_ids = [t for t in telegram_ids if t]
-    
+
     if not telegram_ids:
         return {}
-    
+
     user_ids_map = await get_user_ids_for_telegram_ids(session, telegram_ids)
-    
+
     preferences_list = []
     for uid in user_ids_map.values():
         pref = await get_user_preferences(session, uid)
         if pref:
             preferences_list.append(pref)
-    
+
     if not preferences_list:
         return {}
-    
+
     result_dict: Dict[str, str] = {}
-    
+
     for pref_type in ["time", "activity", "budget", "location_type", "transport"]:
         counts, total_non_private = get_aggregate_preference_counts(
             preferences_list, f"{pref_type}_preference"
         )
-        
+
         if not is_organizer and total_non_private == 0:
             result_dict[pref_type] = "No preferences shared"
         elif not is_organizer:
@@ -325,7 +325,7 @@ async def get_group_aggregate_preferences(
                 result_dict[pref_type] = format_aggregate_preference(pref_type, counts, total_non_private)
             else:
                 result_dict[pref_type] = "All preferences are private"
-    
+
     return result_dict
 
 
@@ -337,14 +337,14 @@ def set_preference_private_mode(
     """Set a preference to 'prefer not to share' mode."""
     if "private_mode" not in privacy_settings:
         privacy_settings["private_mode"] = {}
-    
+
     privacy_settings["private_mode"][preference_type] = private_mode
-    
+
     if private_mode:
         privacy_settings[preference_type] = {
             "private": True,
             "share_with_organizer": False,
             "share_with_attendees": False,
         }
-    
+
     return privacy_settings

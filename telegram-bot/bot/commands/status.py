@@ -40,7 +40,7 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
         if not event:
             await update.message.reply_text("❌ Event not found.")
-            
+
             return
 
         log_count = await _get_log_count(session, event_id)
@@ -48,7 +48,7 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text(
             await format_status_message(event_id, event, log_count, constraint_count, context.bot)
         )
-        
+
 
 
 async def _get_log_count(session: AsyncSession, event_id: int) -> int:

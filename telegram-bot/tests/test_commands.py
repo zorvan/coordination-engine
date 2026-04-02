@@ -28,9 +28,9 @@ async def test_start_command():
         )
     )
     context = MockContext()
-    
+
     await start.handle(update, context)
-    
+
     assert update.message.text == "/start"
 
 
@@ -47,7 +47,7 @@ async def test_my_groups_command():
         )
     )
     context = ContextTypes.DEFAULT_TYPE()
-    
+
     await my_groups.handle(update, context)
 
 
@@ -64,7 +64,7 @@ async def test_profile_command():
         )
     )
     context = ContextTypes.DEFAULT_TYPE()
-    
+
     await profile.handle(update, context)
 
 
@@ -81,7 +81,7 @@ async def test_reputation_command():
         )
     )
     context = ContextTypes.DEFAULT_TYPE()
-    
+
     await reputation.handle(update, context)
 
 
@@ -99,7 +99,7 @@ async def test_join_command_without_args():
     )
     context = ContextTypes.DEFAULT_TYPE()
     context.args = []
-    
+
     await join.handle(update, context)
 
 
@@ -117,7 +117,7 @@ async def test_join_command_with_event_id():
     )
     context = ContextTypes.DEFAULT_TYPE()
     context.args = ["1"]
-    
+
     await join.handle(update, context)
 
 
@@ -135,7 +135,7 @@ async def test_cancel_command():
     )
     context = ContextTypes.DEFAULT_TYPE()
     context.args = ["1"]
-    
+
     await cancel.handle(update, context)
 
 
@@ -153,7 +153,7 @@ async def test_status_command():
     )
     context = ContextTypes.DEFAULT_TYPE()
     context.args = ["1"]
-    
+
     await status.handle(update, context)
 
 
@@ -171,7 +171,7 @@ async def test_event_details_command():
     )
     context = ContextTypes.DEFAULT_TYPE()
     context.args = ["1"]
-    
+
     await event_details.handle(update, context)
 
 
@@ -189,7 +189,7 @@ async def test_constraints_command_view():
     )
     context = ContextTypes.DEFAULT_TYPE()
     context.args = ["1", "view"]
-    
+
     await constraints.handle(update, context)
 
 
@@ -207,7 +207,7 @@ async def test_suggest_time_command():
     )
     context = ContextTypes.DEFAULT_TYPE()
     context.args = ["1"]
-    
+
     await suggest_time.handle(update, context)
 
 
@@ -224,5 +224,5 @@ async def test_organize_event_command():
         )
     )
     context = ContextTypes.DEFAULT_TYPE()
-    
+
     await organize_event.handle(update, context)

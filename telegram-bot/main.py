@@ -109,7 +109,6 @@ def main():
     application = (
         ApplicationBuilder()
         .token(settings.telegram_token)
-        .job_queue_interval(30)  # Run job queue every 30 seconds (check interval)
         .build()
     )
 

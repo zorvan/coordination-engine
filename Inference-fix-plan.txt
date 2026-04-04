@@ -1,0 +1,182 @@
+Diagnosis: Why "I inferred an event then stops"
+The bot's UX failure has four compounding root causes:
+Root Cause 1 — max_tokens: 500 is critically too low
+In ai/llm.py, every LLM call is capped at 500 tokens. The infer_event_draft_from_context prompt is large (it includes 30 messages of chat history + the prompt template itself), leaving the LLM almost no room to output a full event JSON. The response gets truncated mid-JSON, json.loads() throws, and the fallback silently fires — which produces a skeleton draft with description = message_text but no rich inferred details.
+Fix: Raise max_tokens to at least 1500 for draft inference calls, and use a separate _call_llm_large() helper for context-heavy calls.
+
+Root Cause 2 — _handle_organize_event_direct shows nothing meaningful on the happy path
+When the LLM does produce a valid description and the event gets created, the group message is a raw data dump (Event ID, type, commit-by, budget, transport, date preset, time window…). It reads like a database row, not a social invitation. Users see this wall of technical text and have no idea what to do next. The bot also sends the full admin summary only to the organizer DM, but group members get no call-to-action buttons.
+Fix: Replace the group creation message with a warm, narrative-style announcement that includes one-tap Join/Confirm buttons, clearly shows what's missing (time if flexible), and uses 🌱 → 🎉 visual language from the PRD's materialization layer.
+
+Root Cause 3 — The opinion fallback is a dead-end
+When the LLM returns action_type: "opinion" (its default when uncertain), the bot emits whatever assistant_response is in the JSON — often a vague AI-generated advisory — and stops. There's no follow-up offer, no inline keyboard, no path forward for the user. In tight situations (ambiguous context, no event ID, sparse history), this happens constantly.
+Fix: The opinion branch needs to detect intent ambiguity vs genuine advisory request, and for the former, render an interactive disambiguation keyboard: [🗓 Create Event] [📋 View Events] [❓ Ask a question].
+
+Root Cause 4 — The "I inferred organize_event but no event_id" dead-end
+In handle_mention(), when the action needs an event ID but one isn't provided (very common in normal group chat), the bot returns:
+❌ I inferred you want to **confirm**, but I'm not sure which event.
+This is a cliff edge. Users who just described a complex negotiation ("let's do it Saturday if Ahmed and Sara can make it") get an error asking them to type confirm event 12. The whole point of the AI mode is to avoid that.
+Fix: When event_id is missing for join/confirm/cancel, instead of erroring, query the database for the user's most recent active events and offer them as inline buttons. Let the user tap to apply the action — zero typing required.
+
+Complete Fix Plan
+Here are the specific file changes needed, in priority order:
+Priority 1 — ai/llm.py: Fix token limit and split API calls
+python# Change _call_llm to accept max_tokens parameter
+async def _call_llm(self, prompt: str, max_tokens: int = 800) -> str:
+    response = await self.client.post(
+        "/chat/completions",
+        json={
+            "model": self.model,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.3,
+            "max_tokens": max_tokens   # was hardcoded 500
+        }
+    )
+    ...
+
+# In infer_event_draft_from_context, trim history more aggressively
+# and call with more tokens:
+compact_history = (history or [])[-15:]  # was -30, reduce to save prompt space
+# ... and call:
+response = await self._call_llm(prompt, max_tokens=1200)
+
+# In infer_group_mention_action, also increase:
+response = await self._call_llm(prompt, max_tokens=600)
+
+Priority 2 — bot/handlers/mentions.py: Replace the group event creation message
+Replace the raw data dump with a materialization-layer announcement:
+python# After event is created, instead of the current group_message wall of text:
+
+time_display = scheduled_time_group if scheduled_time_raw else "⏳ Time TBD — flexible scheduling"
+threshold_call = f"We need {threshold} people to make this happen."
+
+group_message = (
+    f"🌱 *New event proposed by {organizer_username or 'the group'}*\n\n"
+    f"*{escaped_desc_group}*\n\n"
+    f"📅 {time_display}\n"
+    f"⏱ {duration} min · 📍 {location_group}\n"
+    f"👥 {threshold_call}\n\n"
+    f"_Event #{event.event_id} · Tap below to join_"
+)
+
+group_keyboard = InlineKeyboardMarkup([
+    [
+        InlineKeyboardButton("✅ I'm in", callback_data=f"event_join_{event.event_id}"),
+        InlineKeyboardButton("📋 Details", callback_data=f"event_details_{event.event_id}"),
+    ],
+    [
+        InlineKeyboardButton("📣 Share", switch_inline_query=f"event {event.event_id}"),
+    ]
+])
+
+await update.message.reply_text(
+    group_message,
+    reply_markup=group_keyboard,
+    parse_mode="Markdown"
+)
+
+Priority 3 — bot/handlers/mentions.py: Fix the opinion dead-end
+pythonif action_type == "opinion":
+    response = str(action.get("assistant_response", "")).strip()
+
+    # Detect ambiguous intent vs genuine advisory
+    lowered = text.lower()
+    wants_event = any(kw in lowered for kw in [
+        "let's", "let us", "we should", "how about", "shall we",
+        "what if", "can we", "gather", "meet", "meetup", "hangout"
+    ])
+
+    if wants_event:
+        # Ambiguous event intent — offer action buttons
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🗓 Create an event from this",
+                callback_data="mention_start_organize")],
+            [InlineKeyboardButton("📋 See current events",
+                callback_data="mention_show_status")],
+        ])
+        await message.reply_text(
+            f"🤖 {response}\n\n_Want me to turn this into an event?_",
+            reply_markup=keyboard,
+            parse_mode="Markdown"
+        )
+    else:
+        await message.reply_text(f"🤖 {response}")
+    return
+
+Priority 4 — bot/handlers/mentions.py: Fix missing event_id — query and offer buttons
+python# Replace the current ❌ error block for missing event_id:
+async def _offer_event_selection(
+    message, context, action_type: str, requester_id: int
+) -> None:
+    """Query active events and offer them as tap targets."""
+    async with get_session(settings.db_url) as session:
+        result = await session.execute(
+            select(Event)
+            .where(Event.state.in_(["proposed", "interested", "confirmed"]))
+            .order_by(Event.event_id.desc())
+            .limit(5)
+        )
+        events = result.scalars().all()
+
+    if not events:
+        await message.reply_text("No active events found. Use @bot to create one.")
+        return
+
+    action_label = {"join": "✅ Join", "confirm": "🎯 Confirm", "cancel": "❌ Cancel"}.get(action_type, action_type)
+    buttons = [
+        [InlineKeyboardButton(
+            f"{action_label} #{e.event_id}: {(e.description or '')[:30]}",
+            callback_data=f"mention_{action_type}_{e.event_id}"
+        )]
+        for e in events
+    ]
+    await message.reply_text(
+        f"Which event did you mean?",
+        reply_markup=InlineKeyboardMarkup(buttons)
+    )
+
+Priority 5 — ai/llm.py: Improve the infer_event_draft_from_context prompt for tight situations
+The current prompt uses conservative defaults and doesn't encourage the LLM to be aggressive enough with inference when context is rich. Add this to the prompt:
+pythonprompt = f"""
+Build an event draft JSON from group context.
+Be GENEROUS with inference — extract as much as possible from the conversation history.
+Even if time is uncertain, extract hints (e.g., "Saturday evening" → use next Saturday 19:00).
+If multiple people are mentioned, add them to invitees.
+Never return null for description — summarize the intent.
+
+...the rest of the prompt
+"""
+Also: add collapse_at to the draft output (PRD requirement) so events auto-cancel if threshold isn't met, which gives the system a real deadline to work against.
+
+Priority 6 — ai/llm.py: Add a mediator system prompt
+Right now every LLM call uses only a user role message. Adding a system message transforms the AI's persona from "JSON extractor" to "active group mediator":
+pythonasync def _call_llm(self, prompt: str, max_tokens: int = 800, system: str | None = None) -> str:
+    messages = []
+    if system:
+        messages.append({"role": "system", "content": system})
+    messages.append({"role": "user", "content": prompt})
+
+    response = await self.client.post(
+        "/chat/completions",
+        json={
+            "model": self.model,
+            "messages": messages,
+            "temperature": 0.3,
+            "max_tokens": max_tokens
+        }
+    )
+    ...
+
+# Use it in infer_group_mention_action:
+MEDIATOR_SYSTEM = """You are a group coordination mediator embedded in a Telegram group.
+Your role is to help the group bring events into existence, not just parse commands.
+When people express vague intent (let's meet, we should do this, how about Saturday),
+treat it as an event organization request. Be proactive and warm, not technical.
+When uncertain, prefer action over inaction — propose a draft, offer options, ask one clarifying question.
+Never respond with only a classification — always include a helpful next step."""
+
+action = await llm.infer_group_mention_action(text=text, history=history, system=MEDIATOR_SYSTEM)
+
+Summary Table
+IssueFileFixLLM truncates JSON → fallback fires silentlyai/llm.pymax_tokens: 500 → 1200, parameterize per callEvent creation posts raw data dumpmentions.pyReplace with materialization announcement + Join buttonopinion branch is a dead endmentions.pyDetect intent → offer action keyboardMissing event_id returns error, not optionsmentions.pyQuery active events, offer as tap buttonsWeak inference on rich contextai/llm.pyMore aggressive prompt + system role mediator personaNo collapse_at on drafted eventsmentions.py + llm.pyAuto-set deadline so events have urgency from creation
+The most impactful single change is Priority 1 + 2 together: fixing the token limit (so the LLM can actually return a full draft) and replacing the creation message with an announcement + Join button. That alone will transform the experience from "I inferred an event then stopped" to "an event card appeared in the chat that people can immediately tap to join."

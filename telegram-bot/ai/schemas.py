@@ -8,13 +8,15 @@ This module provides schema validation for all LLM outputs to ensure:
 - Value ranges validated
 - Clear error logging
 """
-from typing import Optional, List, Dict, Any, Literal
+
+from typing import Any, Callable, Dict, List, Literal, Optional
 from pydantic import BaseModel, Field, validator, ValidationError
 
 
 # ============================================================================
 # Constraint Inference Schema
 # ============================================================================
+
 
 class ConstraintInference(BaseModel):
     """Schema for constraint inference from natural language."""
@@ -24,19 +26,19 @@ class ConstraintInference(BaseModel):
     confidence: float = Field(ge=0.0, le=1.0, default=0.6)
     sanitized_summary: str = Field(max_length=500, default="")
 
-    @validator('target_username')
+    @validator("target_username")
     def username_not_empty(cls, v: Optional[str]) -> Optional[str]:
         """Ensure username is not empty string."""
         if v is not None and len(v.strip()) == 0:
             return None
         return v.strip() if v else None
 
-    @validator('sanitized_summary')
+    @validator("sanitized_summary")
     def ensure_summary_not_empty(cls, v: str, values: Dict[str, Any]) -> str:
         """Ensure summary has content."""
         if not v or len(v.strip()) == 0:
             # Fallback to constraint type description
-            constraint_type = values.get('constraint_type', 'constraint')
+            constraint_type = values.get("constraint_type", "constraint")
             return f"User set {constraint_type} constraint"
         return v.strip()
 
@@ -44,6 +46,7 @@ class ConstraintInference(BaseModel):
 # ============================================================================
 # Feedback Inference Schema
 # ============================================================================
+
 
 class FeedbackInference(BaseModel):
     """Schema for feedback inference from natural language."""
@@ -53,7 +56,7 @@ class FeedbackInference(BaseModel):
     sanitized_comment: str = Field(max_length=1000, default="")
     expertise_adjustments: Dict[str, float] = Field(default_factory=dict)
 
-    @validator('expertise_adjustments')
+    @validator("expertise_adjustments")
     def validate_expertise_values(cls, v: Dict[str, float]) -> Dict[str, float]:
         """Ensure expertise adjustments are in valid range."""
         validated = {}
@@ -62,7 +65,7 @@ class FeedbackInference(BaseModel):
                 validated[str(key)] = max(-1.0, min(1.0, float(value)))
         return validated
 
-    @validator('sanitized_comment')
+    @validator("sanitized_comment")
     def ensure_comment_not_empty(cls, v: str) -> str:
         """Ensure comment has content."""
         if not v or len(v.strip()) == 0:
@@ -73,6 +76,7 @@ class FeedbackInference(BaseModel):
 # ============================================================================
 # Event Draft Patch Schema
 # ============================================================================
+
 
 class EventDraftPatch(BaseModel):
     """Schema for event draft modification patches."""
@@ -89,7 +93,7 @@ class EventDraftPatch(BaseModel):
     scheduling_mode: Optional[Literal["fixed", "flexible"]] = None
     note: Optional[str] = Field(max_length=500, default=None)
 
-    @validator('invitees_add', 'invitees_remove')
+    @validator("invitees_add", "invitees_remove")
     def normalize_handles(cls, v: List[str]) -> List[str]:
         """Normalize Telegram handles (add @ prefix, lowercase)."""
         normalized = []
@@ -97,7 +101,7 @@ class EventDraftPatch(BaseModel):
             h = str(handle).strip()
             if not h:
                 continue
-            if not h.startswith('@'):
+            if not h.startswith("@"):
                 h = f"@{h}"
             normalized.append(h.lower())
         return normalized
@@ -106,6 +110,7 @@ class EventDraftPatch(BaseModel):
 # ============================================================================
 # Event Draft from Context Schema
 # ============================================================================
+
 
 class EventDraftFromContext(BaseModel):
     """Schema for event draft generated from chat context."""
@@ -119,7 +124,7 @@ class EventDraftFromContext(BaseModel):
     invitees: List[str] = Field(default_factory=list)
     planning_notes: List[str] = Field(default_factory=list)
 
-    @validator('invitees')
+    @validator("invitees")
     def normalize_invitees(cls, v: List[str]) -> List[str]:
         """Normalize invitee handles."""
         normalized = []
@@ -127,12 +132,12 @@ class EventDraftFromContext(BaseModel):
             h = str(handle).strip()
             if not h:
                 continue
-            if not h.startswith('@'):
+            if not h.startswith("@"):
                 h = f"@{h}"
             normalized.append(h.lower())
         return normalized
 
-    @validator('planning_notes')
+    @validator("planning_notes")
     def validate_notes(cls, v: List[str]) -> List[str]:
         """Validate planning notes."""
         validated = []
@@ -147,19 +152,19 @@ class EventDraftFromContext(BaseModel):
 # Early Feedback Inference Schema
 # ============================================================================
 
+
 class EarlyFeedbackInference(BaseModel):
     """Schema for early behavioral feedback inference."""
 
     signal_type: Literal[
-        "overall", "reliability", "cooperation",
-        "toxicity", "commitment", "trust"
+        "overall", "reliability", "cooperation", "toxicity", "commitment", "trust"
     ] = "overall"
     score: float = Field(ge=0.0, le=5.0, default=3.0)
     weight: float = Field(ge=0.0, le=1.0, default=0.6)
     confidence: float = Field(ge=0.0, le=1.0, default=0.7)
     sanitized_comment: str = Field(max_length=500, default="")
 
-    @validator('sanitized_comment')
+    @validator("sanitized_comment")
     def ensure_comment_not_empty(cls, v: str) -> str:
         """Ensure comment has content."""
         if not v or len(v.strip()) == 0:
@@ -171,27 +176,37 @@ class EarlyFeedbackInference(BaseModel):
 # Group Mention Action Schema
 # ============================================================================
 
+
 class GroupMentionAction(BaseModel):
     """Schema for group mention action inference."""
 
     action_type: Literal[
-        "opinion", "organize_event", "organize_event_flexible",
-        "status", "event_details", "suggest_time", "constraint_add",
-        "join", "confirm", "cancel", "lock", "request_confirmations"
+        "opinion",
+        "organize_event",
+        "organize_event_flexible",
+        "status",
+        "event_details",
+        "suggest_time",
+        "constraint_add",
+        "join",
+        "confirm",
+        "cancel",
+        "lock",
+        "request_confirmations",
     ] = "opinion"
     event_id: Optional[int] = Field(default=None)
     target_username: Optional[str] = None
     constraint_type: Optional[Literal["if_joins", "if_attends", "unless_joins"]] = None
     assistant_response: str = Field(max_length=500, default="")
 
-    @validator('target_username')
+    @validator("target_username")
     def username_not_empty(cls, v: Optional[str]) -> Optional[str]:
         """Ensure username is not empty string."""
         if v is not None and len(v.strip()) == 0:
             return None
-        return v.strip().lstrip('@') if v else None
+        return v.strip().lstrip("@") if v else None
 
-    @validator('assistant_response')
+    @validator("assistant_response")
     def ensure_response_not_empty(cls, v: str) -> str:
         """Ensure response has content."""
         if not v or len(v.strip()) == 0:
@@ -203,6 +218,7 @@ class GroupMentionAction(BaseModel):
 # Conflict Resolution Schema
 # ============================================================================
 
+
 class ConflictResolution(BaseModel):
     """Schema for scheduling conflict resolution."""
 
@@ -211,7 +227,7 @@ class ConflictResolution(BaseModel):
     reasoning: str = Field(max_length=500, default="")
     compromises: List[str] = Field(default_factory=list)
 
-    @validator('compromises')
+    @validator("compromises")
     def validate_compromises(cls, v: List[str]) -> List[str]:
         """Validate compromise suggestions."""
         validated = []
@@ -225,6 +241,7 @@ class ConflictResolution(BaseModel):
 # ============================================================================
 # Constraint Analysis Schema
 # ============================================================================
+
 
 class ConstraintConflict(BaseModel):
     """Schema for constraint conflict analysis."""
@@ -244,6 +261,7 @@ class ConstraintAnalysis(BaseModel):
 # Memory Weave Schema (for structured LLM output)
 # ============================================================================
 
+
 class MemoryWeaveFragment(BaseModel):
     """Schema for individual memory fragment in weave."""
 
@@ -259,7 +277,7 @@ class MemoryWeaveOutput(BaseModel):
     tone_palette: List[str] = Field(default_factory=list)
     fragments_used: int = Field(ge=0, default=0)
 
-    @validator('tone_palette')
+    @validator("tone_palette")
     def validate_tone_palette(cls, v: List[str]) -> List[str]:
         """Validate tone palette."""
         validated = []
@@ -274,10 +292,11 @@ class MemoryWeaveOutput(BaseModel):
 # Validation Helper Functions
 # ============================================================================
 
+
 def validate_llm_output(
     schema_class: type[BaseModel],
     raw_response: str,
-    fallback_factory: callable = None,
+    fallback_factory: Optional[Callable[[], Dict[str, Any]]] = None,
     logger: Any = None,
 ) -> Dict[str, Any]:
     """
@@ -316,7 +335,7 @@ def validate_llm_output(
             logger.warning(
                 "LLM output JSON parse error: %s",
                 e,
-                extra={"raw_response": raw_response[:200]}
+                extra={"raw_response": raw_response[:200]},
             )
         if fallback_factory:
             return fallback_factory()
@@ -327,7 +346,7 @@ def validate_llm_output(
             logger.warning(
                 "LLM output schema validation error: %s",
                 e.errors(),
-                extra={"raw_response": raw_response[:200]}
+                extra={"raw_response": raw_response[:200]},
             )
         if fallback_factory:
             return fallback_factory()
@@ -338,7 +357,7 @@ def validate_llm_output(
             logger.exception(
                 "LLM output validation failed: %s",
                 e,
-                extra={"raw_response": raw_response[:200]}
+                extra={"raw_response": raw_response[:200]},
             )
         if fallback_factory:
             return fallback_factory()

@@ -1,6 +1,8 @@
 """Shared event state definitions."""
 
-EVENT_STATE_TRANSITIONS = {
+from typing import Dict, List
+
+EVENT_STATE_TRANSITIONS: Dict[str, List[str]] = {
     "proposed": ["interested", "cancelled"],
     "interested": ["confirmed", "cancelled"],
     "confirmed": ["locked", "cancelled"],

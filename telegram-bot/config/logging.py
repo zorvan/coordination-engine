@@ -2,6 +2,7 @@
 Application logging configuration.
 PRD v2 Priority 1: Structured JSON logging with correlation IDs.
 """
+
 import logging
 import json
 import sys
@@ -11,7 +12,9 @@ from contextvars import ContextVar
 from config.settings import Settings
 
 # Context variables for correlation IDs
-correlation_id_var: ContextVar[Optional[str]] = ContextVar("correlation_id", default=None)
+correlation_id_var: ContextVar[Optional[str]] = ContextVar(
+    "correlation_id", default=None
+)
 event_id_var: ContextVar[Optional[int]] = ContextVar("event_id", default=None)
 user_id_var: ContextVar[Optional[int]] = ContextVar("user_id", default=None)
 chat_id_var: ContextVar[Optional[int]] = ContextVar("chat_id", default=None)
@@ -57,15 +60,35 @@ class StructuredJsonFormatter(logging.Formatter):
 
         # Add extra fields (passed via extra={...})
         extra_fields = {
-            k: v for k, v in record.__dict__.items()
-            if k not in {
-                'msg', 'args', 'created', 'filename', 'funcName',
-                'levelname', 'levelno', 'lineno', 'module', 'msecs',
-                'name', 'pathname', 'process', 'processName', 'relativeCreated',
-                'stack_info', 'exc_info', 'exc_text', 'thread', 'threadName',
-                'message', 'asctime', 'taskName',
+            k: v
+            for k, v in record.__dict__.items()
+            if k
+            not in {
+                "msg",
+                "args",
+                "created",
+                "filename",
+                "funcName",
+                "levelname",
+                "levelno",
+                "lineno",
+                "module",
+                "msecs",
+                "name",
+                "pathname",
+                "process",
+                "processName",
+                "relativeCreated",
+                "stack_info",
+                "exc_info",
+                "exc_text",
+                "thread",
+                "threadName",
+                "message",
+                "asctime",
+                "taskName",
             }
-            and not k.startswith('_')
+            and not k.startswith("_")
         }
 
         if extra_fields:
@@ -109,14 +132,15 @@ def setup_logging(settings: Settings) -> logging.Logger:
     log_level = getattr(logging, log_level_str.upper(), logging.INFO)
 
     # Use JSON formatter in production, readable in dev
-    use_json_logs = getattr(settings, 'json_logs', False)
+    use_json_logs = getattr(settings, "json_logs", False)
 
+    formatter: logging.Formatter
     if use_json_logs:
         formatter = StructuredJsonFormatter()
     else:
         formatter = logging.Formatter(
-            '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-            datefmt='%Y-%m-%d %H:%M:%S',
+            "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S",
         )
 
     handler = logging.StreamHandler(sys.stdout)

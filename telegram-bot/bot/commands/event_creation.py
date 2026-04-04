@@ -694,13 +694,14 @@ async def start_event_flow(
     mode: str = "public",
 ) -> None:
     """Initialize event creation flow for public/group or private events."""
-    if not update.message or not update.effective_chat:
+    message = update.effective_message
+    if not message or not update.effective_chat:
         return
 
     chat = update.effective_chat
     chat_type = chat.type
     if mode == "public" and chat_type not in {"group", "supergroup"}:
-        await update.message.reply_text(
+        await message.reply_text(
             "❌ This command can only be used in a Telegram group."
         )
         return
@@ -710,7 +711,7 @@ async def start_event_flow(
     telegram_user_id = update.effective_user.id if update.effective_user else None
 
     if not settings.db_url:
-        await update.message.reply_text("❌ Database configuration is unavailable.")
+        await message.reply_text("❌ Database configuration is unavailable.")
         return
 
     if mode == "public":
@@ -744,7 +745,7 @@ async def start_event_flow(
                     await session.commit()
 
     if context.user_data is None:
-        await update.message.reply_text("❌ User session data is unavailable.")
+        await message.reply_text("❌ User session data is unavailable.")
         return
 
     flow_key = "private_event_flow" if mode == "private" else "event_flow"
@@ -771,7 +772,7 @@ async def start_event_flow(
     context.user_data[flow_key] = flow_data
 
     if mode == "private":
-        await update.message.reply_text(
+        await message.reply_text(
             "📝 *Event Description*\n\n"
             "Send a short description for the event.\n\n"
             "Example: Friendly football match at the central field.",
@@ -779,11 +780,11 @@ async def start_event_flow(
     else:
         scheduling_mode = flow_data["data"].get("scheduling_mode", "fixed")
         mode_text = (
-            'Fixed date/time'
-            if scheduling_mode == 'fixed'
-            else 'Flexible (collect availability first)'
+            "Fixed date/time"
+            if scheduling_mode == "fixed"
+            else "Flexible (collect availability first)"
         )
-        await update.message.reply_text(
+        await message.reply_text(
             "📝 *Event Description*\n\n"
             "Send a short description for the event.\n"
             f"Mode: {mode_text}\n\n"
@@ -889,14 +890,15 @@ async def start_event_flow_from_prefill(
 
     event_flow["stage"] = "final"
     context.user_data[flow_key] = event_flow
-    if update.message:
+    msg = update.effective_message
+    if msg:
         prefix = "private_event" if mode == "private" else "event"
-        await update.message.reply_text(
+        await msg.reply_text(
             "🤖 I prepared an event draft from recent chat context.\n"
             "Review and confirm or modify:",
             reply_markup=build_final_confirmation_markup(prefix=prefix),
         )
-        await update.message.reply_text(
+        await msg.reply_text(
             build_event_summary_text(flow_data, is_private=mode == "private"),
             reply_markup=build_final_confirmation_markup(prefix=prefix),
         )
@@ -1427,9 +1429,9 @@ async def _handle_message_common(
             else "fixed"
         )
         scheduling_mode_text = (
-            'Fixed date/time'
-            if scheduling_mode == 'fixed'
-            else 'Flexible (collect availability first)'
+            "Fixed date/time"
+            if scheduling_mode == "fixed"
+            else "Flexible (collect availability first)"
         )
 
         if mode == "private":
@@ -1639,16 +1641,18 @@ async def finalize_event(
 
         # Create participant record for the organizer
         from bot.services import ParticipantService
+
         participant_service = ParticipantService(session)
         await participant_service.join(
             event_id=event.event_id,
             telegram_user_id=creator_id,
             source="creation",
-            role="organizer"
+            role="organizer",
         )
 
         # Check for event lineage (TODO-013) - prior events of same type
         from bot.services.event_memory_service import EventMemoryService
+
         memory_service = EventMemoryService(context.bot, session)
         prior_memories = await memory_service.get_recent_memories(group_id, limit=5)
 
@@ -1663,13 +1667,17 @@ async def finalize_event(
                     lineage_suggestion = {
                         "event_id": memory.event.event_id,
                         "event_type": memory.event.event_type,
-                        "weave_preview": memory.weave_text[:200] if memory.weave_text else None,
+                        "weave_preview": (
+                            memory.weave_text[:200] if memory.weave_text else None
+                        ),
                         "hashtags": memory.hashtags or [],
                     }
 
         # Store lineage if found
         if lineage_event_ids:
-            await memory_service.link_lineage(event.event_id, lineage_event_ids[:3])  # Max 3
+            await memory_service.link_lineage(
+                event.event_id, lineage_event_ids[:3]
+            )  # Max 3
             logger.info(
                 "Linked lineage for event %s: %s",
                 event.event_id,
@@ -2009,12 +2017,13 @@ async def finalize_private_event(
 
         # Create participant record for the organizer
         from bot.services import ParticipantService
+
         participant_service = ParticipantService(session)
         await participant_service.join(
             event_id=event.event_id,
             telegram_user_id=creator_id,
             source="creation",
-            role="organizer"
+            role="organizer",
         )
 
     # Send invitations to invitees (private events)

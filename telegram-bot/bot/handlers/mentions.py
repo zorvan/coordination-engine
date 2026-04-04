@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 import logging
 import re
@@ -39,13 +39,154 @@ from db.users import get_or_create_user_id, get_user_id_by_username
 
 logger = logging.getLogger("coord_bot.mentions")
 
+_PICK_CODE_TO_ACTION: dict[str, str] = {
+    "j": "join",
+    "c": "confirm",
+    "x": "cancel",
+    "l": "lock",
+    "r": "request_confirmations",
+}
+_ACTION_TO_PICK_CODE = {v: k for k, v in _PICK_CODE_TO_ACTION.items()}
+
 HISTORY_LIMIT = 40
 MENTION_PATTERN = re.compile(r"@([A-Za-z0-9_]{5,32})")
+
+
+def _escape_for_markdown(text: str) -> str:
+    """Escape Telegram Markdown v1 metacharacters in user-controlled text."""
+    return (
+        text.replace("[", "\\[")
+        .replace("]", "\\]")
+        .replace("_", "\\_")
+        .replace("*", "\\*")
+        .replace("`", "\\`")
+    )
+
+
 EVENT_ID_PATTERNS = (
     re.compile(r"\bevent\s*(?:id)?\s*[:#]?\s*(\d{1,9})\b", re.IGNORECASE),
     re.compile(r"\bid\s*[:#]?\s*(\d{1,9})\b", re.IGNORECASE),
     re.compile(r"\bevent_id\s*[:=]?\s*(\d{1,9})\b", re.IGNORECASE),
 )
+
+
+def _derive_collapse_at(
+    scheduled_time: datetime | None,
+    draft_collapse_iso: str | None,
+) -> datetime | None:
+    """Deadline for threshold auto-cancel (PRD collapse_at)."""
+    if isinstance(draft_collapse_iso, str) and draft_collapse_iso.strip():
+        try:
+            dt = datetime.fromisoformat(draft_collapse_iso.strip())
+            if dt > datetime.utcnow():
+                return dt
+        except ValueError:
+            pass
+    now = datetime.utcnow()
+    if scheduled_time:
+        candidate = scheduled_time - timedelta(hours=2)
+        return candidate if candidate > now else now + timedelta(hours=1)
+    return now + timedelta(days=7)
+
+
+async def _offer_event_selection(
+    message,
+    context: ContextTypes.DEFAULT_TYPE,
+    action_type: str,
+    chat_id: int,
+) -> None:
+    """Query active events in this group and offer tap targets for disambiguation."""
+    if not settings.db_url:
+        await message.reply_text("❌ Database configuration is unavailable.")
+        return
+
+    async with get_session(settings.db_url) as session:
+        result = await session.execute(
+            select(Event)
+            .join(Group, Event.group_id == Group.group_id)
+            .where(
+                Group.telegram_group_id == chat_id,
+                Event.state.in_(["proposed", "interested", "confirmed"]),
+            )
+            .order_by(Event.event_id.desc())
+            .limit(5)
+        )
+        events = result.scalars().all()
+
+    if not events:
+        await message.reply_text(
+            "No active events in this group yet. Mention me to create one, "
+            "or use /organize_event."
+        )
+        return
+
+    action_label = {
+        "join": "✅ Join",
+        "confirm": "🎯 Confirm",
+        "cancel": "❌ Cancel",
+        "lock": "🔒 Lock",
+        "request_confirmations": "📣 Ask confirmations",
+    }.get(action_type, action_type)
+    code = _ACTION_TO_PICK_CODE.get(action_type, "j")
+    buttons = []
+    for e in events:
+        desc = (e.description or "").strip().replace("\n", " ")
+        if len(desc) > 28:
+            desc = f"{desc[:25]}…"
+        buttons.append(
+            [
+                InlineKeyboardButton(
+                    f"{action_label} #{e.event_id}: {desc}",
+                    callback_data=f"mnpick_{e.event_id}_{code}",
+                )
+            ]
+        )
+    await message.reply_text(
+        f"Which event should I **{action_type}** for you?",
+        reply_markup=InlineKeyboardMarkup(buttons),
+        parse_mode="Markdown",
+    )
+
+
+async def _send_group_events_list(
+    context: ContextTypes.DEFAULT_TYPE,
+    chat_id: int,
+    reply_to_message,
+) -> None:
+    """Post a compact /events-style list for callback flows."""
+    if not settings.db_url:
+        await reply_to_message.reply_text("❌ Database configuration is unavailable.")
+        return
+    async with get_session(settings.db_url) as session:
+        q = (
+            select(Event, Group)
+            .join(Group, Event.group_id == Group.group_id, isouter=True)
+            .where(Group.telegram_group_id == chat_id)
+            .order_by(Event.created_at.desc())
+            .limit(15)
+        )
+        result = await session.execute(q)
+        rows = result.all()
+    if not rows:
+        await reply_to_message.reply_text("ℹ️ No events found in this group.")
+        return
+    lines: list[str] = ["📋 *Recent events in this group*", ""]
+    for event, group in rows:
+        group_name = (
+            group.group_name
+            if group and group.group_name
+            else str(group.telegram_group_id) if group else "Unknown Group"
+        )
+        description = (event.description or "No description").strip()
+        if len(description) > 80:
+            description = f"{description[:77]}..."
+        lines.append(f"• ID `{event.event_id}` | {event.event_type} | {event.state}")
+        lines.append(
+            f"  Group: {group_name} | Time: {event.scheduled_time or 'TBD'} | "
+            f"Duration: {event.duration_minutes or 120}m"
+        )
+        lines.append(f"  Description: {description}")
+    await reply_to_message.reply_text("\n".join(lines), parse_mode="Markdown")
 
 
 async def record_group_history(
@@ -137,16 +278,22 @@ async def handle_mention(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             await llm.close()
 
     action_type = str(action.get("action_type", "opinion")).strip().lower()
-    logger.debug(f"Mention inference: action_type={action_type}, event_id={action.get('event_id')}, text={text[:100]}")
+    logger.debug(
+        f"Mention inference: action_type={action_type}, event_id={action.get('event_id')}, text={text[:100]}"
+    )
 
     # Handle organize_event actions (these don't need event_id - they CREATE events)
     if action_type in {"organize_event", "organize_event_flexible"}:
         mode = "flexible" if action_type == "organize_event_flexible" else "public"
+        scheduling_mode = (
+            "flexible" if action_type == "organize_event_flexible" else "fixed"
+        )
         llm = LLMClient()
         try:
             draft = await llm.infer_event_draft_from_context(
                 message_text=text,
                 history=history,
+                scheduling_mode=scheduling_mode,
             )
         finally:
             await llm.close()
@@ -167,7 +314,54 @@ async def handle_mention(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 "I reviewed the context and suggest clarifying goals, constraints, "
                 "and expected attendees before deciding."
             )
-        await message.reply_text(f"🤖 {response}")
+        lowered = text.lower()
+        wants_event = any(
+            kw in lowered
+            for kw in (
+                "let's",
+                "let us",
+                "we should",
+                "how about",
+                "shall we",
+                "what if",
+                "can we",
+                "gather",
+                "meet",
+                "meetup",
+                "hangout",
+            )
+        )
+        if wants_event:
+            keyboard = InlineKeyboardMarkup(
+                [
+                    [
+                        InlineKeyboardButton(
+                            "🗓 Create an event from this",
+                            callback_data="mention_start_organize",
+                        )
+                    ],
+                    [
+                        InlineKeyboardButton(
+                            "📋 See current events",
+                            callback_data="mention_show_status",
+                        )
+                    ],
+                    [
+                        InlineKeyboardButton(
+                            "❓ How to ask",
+                            callback_data="mention_ask_help",
+                        )
+                    ],
+                ]
+            )
+            await message.reply_text(
+                f"🤖 {response}\n\n"
+                "_Want me to turn this into an event, or see what’s already planned?_",
+                reply_markup=keyboard,
+                parse_mode="Markdown",
+            )
+        else:
+            await message.reply_text(f"🤖 {response}")
         return
 
     # For actions that need an event_id, check if we have one
@@ -181,14 +375,19 @@ async def handle_mention(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     } and not action.get("event_id"):
         # Check if the message might be about organizing a new event
         lowered_text = text.lower()
-        if any(kw in lowered_text for kw in ["organize", "organise", "create", "plan", "new event"]):
+        if any(
+            kw in lowered_text
+            for kw in ["organize", "organise", "create", "plan", "new event"]
+        ):
             # User might be trying to organize - start that flow instead
             mode = "flexible" if "flexible" in lowered_text else "public"
+            scheduling_mode = "flexible" if "flexible" in lowered_text else "fixed"
             llm = LLMClient()
             try:
                 draft = await llm.infer_event_draft_from_context(
                     message_text=text,
                     history=history,
+                    scheduling_mode=scheduling_mode,
                 )
             finally:
                 await llm.close()
@@ -202,14 +401,11 @@ async def handle_mention(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             )
             return
 
-        await message.reply_text(
-            f"❌ I inferred you want to **{action_type}**, but I'm not sure which event.\n\n"
-            f"Please specify the event ID or mention it in your message.\n\n"
-            f"Examples:\n"
-            f"• `confirm event 12`\n"
-            f"• `@bot join 12`\n"
-            f"• `@bot cancel event 5`",
-            parse_mode="Markdown",
+        await _offer_event_selection(
+            message=message,
+            context=context,
+            action_type=action_type,
+            chat_id=chat.id,
         )
         return
 
@@ -328,6 +524,79 @@ async def handle_mention_callback(
     )
 
 
+async def handle_disambiguation_callbacks(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    """Inline actions from opinion disambiguation and event pick lists."""
+    query = update.callback_query
+    if not query or not query.data:
+        return
+    await query.answer()
+
+    data = query.data
+    user = query.from_user
+    if not user:
+        return
+
+    if data.startswith("mnpick_"):
+        rest = data[7:]
+        idx = rest.rfind("_")
+        if idx <= 0:
+            await query.edit_message_text("❌ Invalid selection.")
+            return
+        try:
+            event_id = int(rest[:idx])
+            code = rest[idx + 1 :]
+        except ValueError:
+            await query.edit_message_text("❌ Invalid selection.")
+            return
+        action_type = _PICK_CODE_TO_ACTION.get(code)
+        if not action_type:
+            await query.edit_message_text("❌ Unknown action.")
+            return
+        action = {
+            "action_type": action_type,
+            "event_id": event_id,
+            "target_username": None,
+            "constraint_type": None,
+            "assistant_response": "",
+        }
+        try:
+            await query.edit_message_text("⏳ Working…")
+        except Exception:
+            pass
+        if not query.message:
+            return
+        await _execute_inferred_action(
+            context=context,
+            action=action,
+            requester_id=user.id,
+            requester_display_name=user.full_name,
+            requester_username=user.username,
+            reply_message=query.message,
+        )
+        return
+
+    if data == "mention_start_organize":
+        await event_creation.start_event_flow(update, context, mode="public")
+        return
+
+    if data == "mention_show_status":
+        if query.message:
+            await _send_group_events_list(context, query.message.chat.id, query.message)
+        return
+
+    if data == "mention_ask_help":
+        await query.edit_message_text(
+            "❓ *Tips*\n"
+            "• Mention me with a clear ask.\n"
+            "• When I list events, tap a row to pick one.\n"
+            "• Use /organize_event to start a structured setup.",
+            parse_mode="Markdown",
+        )
+        return
+
+
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle callback queries for event-related actions."""
     query = update.callback_query
@@ -365,9 +634,11 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         modify_request = {
             "event_id": event_id,
             "event_description": event.description or "",
-            "event_scheduled_time": event.scheduled_time.isoformat()
-            if event and event.scheduled_time
-            else None,
+            "event_scheduled_time": (
+                event.scheduled_time.isoformat()
+                if event and event.scheduled_time
+                else None
+            ),
             "admin_id": admin_id,
             "requester_id": user.id if user else None,
             "requester_username": user.username if user else None,
@@ -489,7 +760,11 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                         "duration_minutes": int(event.duration_minutes or 120),
                         "threshold_attendance": int(event.threshold_attendance or 0),
                     }
-                    change_text = "Please suggest improvements to this event draft. Return a JSON object with a 'suggestion' key containing your recommendation."
+                    change_text = (
+                        "Please suggest improvements to this event draft. "
+                        "Return a JSON object with a 'suggestion' key containing "
+                        "your recommendation."
+                    )
                     patch = await llm.infer_event_draft_patch(draft, change_text)
                     suggestion = patch
                 finally:
@@ -755,7 +1030,9 @@ async def _execute_inferred_action(
     await reply_message.reply_text(f"🤖 {response}")
 
 
-async def _send_status(reply_message, event_id: int, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def _send_status(
+    reply_message, event_id: int, context: ContextTypes.DEFAULT_TYPE
+) -> None:
     """Send event status text in mention flow."""
     if not settings.db_url:
         await reply_message.reply_text("❌ Database configuration is unavailable.")
@@ -786,11 +1063,15 @@ async def _send_status(reply_message, event_id: int, context: ContextTypes.DEFAU
             ).scalar_one()
         )
     await reply_message.reply_text(
-        await format_status_message(event_id, event, log_count, constraint_count, context.bot)
+        await format_status_message(
+            event_id, event, log_count, constraint_count, context.bot
+        )
     )
 
 
-async def _send_event_details(reply_message, event_id: int, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def _send_event_details(
+    reply_message, event_id: int, context: ContextTypes.DEFAULT_TYPE
+) -> None:
     """Send event details in mention flow."""
     if not settings.db_url:
         await reply_message.reply_text("❌ Database configuration is unavailable.")
@@ -1054,7 +1335,9 @@ async def _apply_participation_action(
                         reason="Participant joined via mention",
                     )
                 except Exception as e:
-                    logger.error(f"Failed to transition event {event_id} to interested: {e}")
+                    logger.error(
+                        f"Failed to transition event {event_id} to interested: {e}"
+                    )
 
         elif action_type == "confirm":
             if event.state in {"locked", "completed", "cancelled"}:
@@ -1084,7 +1367,9 @@ async def _apply_participation_action(
                         reason="Participant confirmed via mention",
                     )
                 except Exception as e:
-                    logger.error(f"Failed to transition event {event_id} to confirmed: {e}")
+                    logger.error(
+                        f"Failed to transition event {event_id} to confirmed: {e}"
+                    )
 
         elif action_type == "cancel":
             if event.state == "locked":
@@ -1102,12 +1387,17 @@ async def _apply_participation_action(
                     source="mention",
                 )
             except Exception as e:
-                await reply_message.reply_text(f"❌ Failed to cancel attendance: {str(e)}")
+                await reply_message.reply_text(
+                    f"❌ Failed to cancel attendance: {str(e)}"
+                )
                 return
 
             # Update event state if needed
             confirmed_count = await participant_service.get_confirmed_count(event_id)
-            if event.state not in {"locked", "completed", "cancelled"} and confirmed_count == 0:
+            if (
+                event.state not in {"locked", "completed", "cancelled"}
+                and confirmed_count == 0
+            ):
                 new_state = "interested" if confirmed_count > 0 else "proposed"
                 lifecycle_service = EventLifecycleService(context.bot, session)
                 try:
@@ -1119,7 +1409,9 @@ async def _apply_participation_action(
                         reason="Last participant cancelled",
                     )
                 except Exception as e:
-                    logger.error(f"Failed to transition event {event_id} to {new_state}: {e}")
+                    logger.error(
+                        f"Failed to transition event {event_id} to {new_state}: {e}"
+                    )
 
         session.add(
             Log(
@@ -1219,12 +1511,16 @@ async def _start_interactive_event_flow(
             flow_data["event_type"] = event_type
     if draft.get("threshold_attendance"):
         try:
-            flow_data["threshold_attendance"] = max(1, int(draft.get("threshold_attendance", 3)))
+            flow_data["threshold_attendance"] = max(
+                1, int(draft.get("threshold_attendance", 3))
+            )
         except (TypeError, ValueError):
             pass
     if draft.get("duration_minutes"):
         try:
-            flow_data["duration_minutes"] = max(30, int(draft.get("duration_minutes", 120)))
+            flow_data["duration_minutes"] = max(
+                30, int(draft.get("duration_minutes", 120))
+            )
         except (TypeError, ValueError):
             pass
     if draft.get("scheduled_time") and isinstance(draft.get("scheduled_time"), str):
@@ -1279,7 +1575,9 @@ async def _start_interactive_event_flow(
 
     if inferred_items:
         inferred_msg += "\n".join(inferred_items)
-        inferred_msg += "\n\nI'll guide you through the remaining details to set up the event."
+        inferred_msg += (
+            "\n\nI'll guide you through the remaining details to set up the event."
+        )
         await update.message.reply_text(inferred_msg)
     else:
         await update.message.reply_text(
@@ -1409,6 +1707,14 @@ async def _handle_organize_event_direct(
         if scheduled_time:
             commit_by = event_creation.compute_commit_by_time(scheduled_time)
 
+        collapse_raw = draft.get("collapse_at")
+        collapse_iso = (
+            str(collapse_raw).strip()
+            if collapse_raw is not None and str(collapse_raw).strip()
+            else None
+        )
+        collapse_at_dt = _derive_collapse_at(scheduled_time, collapse_iso)
+
         conflict = await find_user_event_conflict(
             session=session,
             telegram_user_id=creator_id,
@@ -1432,6 +1738,7 @@ async def _handle_organize_event_direct(
             admin_telegram_user_id=creator_id,
             scheduled_time=scheduled_time,
             commit_by=commit_by,
+            collapse_at=collapse_at_dt,
             duration_minutes=duration,
             threshold_attendance=threshold,
             planning_prefs={
@@ -1454,7 +1761,7 @@ async def _handle_organize_event_direct(
             event_id=event.event_id,
             telegram_user_id=creator_id,
             source="mention",
-            role="organizer"
+            role="organizer",
         )
 
         group_members = group.member_list or []
@@ -1466,7 +1773,9 @@ async def _handle_organize_event_direct(
                 )
             ).scalar_one_or_none()
             organizer_username = organizer_user.username if organizer_user else None
-            organizer_display_name = organizer_user.display_name if organizer_user else None
+            organizer_display_name = (
+                organizer_user.display_name if organizer_user else None
+            )
 
             data_for_dm = {
                 "description": description,
@@ -1541,7 +1850,10 @@ async def _handle_organize_event_direct(
                                     int(event.event_id),
                                 )
                                 logger.info(
-                                    f"DM sent to user {invitee_user.telegram_user_id} (@{username}) for event {event.event_id} (private invitee)"
+                                    "DM sent to user %s (@%s) for event %s (private invitee)",
+                                    invitee_user.telegram_user_id,
+                                    username,
+                                    event.event_id,
                                 )
                                 dm_count += 1
                             else:
@@ -1608,7 +1920,7 @@ async def _handle_organize_event_direct(
             time_window_text = time_window.title()
 
             # Escape description for Markdown (avoid parsing errors with special chars)
-            escaped_description = description.replace("[", "\\[").replace("]", "\\]").replace("_", "\\_").replace("*", "\\*").replace("`", "\\`")
+            escaped_description = _escape_for_markdown(description)
 
             if creator_id:
                 # Send full details to admin via DM
@@ -1665,54 +1977,49 @@ async def _handle_organize_event_direct(
                     f"Full event details sent to admin {creator_id} via DM for event {event.event_id}"
                 )
 
-        # Prepare group message display texts
+        proposer = f"@{user.username}" if user and user.username else "the group"
         scheduled_time_group = (
             str(scheduled_time_raw).replace("T", " ")
             if scheduled_time_raw
-            else "TBD (flexible scheduling)"
-        )
-        commit_by_group = (
-            commit_by.isoformat(timespec="minutes").replace("T", " ")
-            if commit_by is not None
-            else "N/A"
-        )
-        invitees_group = (
-            "all group members" if invite_all else f"{len(invitees)} users"
+            else "⏳ Time TBD — flexible scheduling"
         )
         location_group = location_type.replace("_", " ").title()
-        budget_group = budget_level.replace("_", " ").title()
-        transport_group = transport_mode.replace("_", " ").title()
-        date_preset_group = event_creation.DATE_PRESET_LABELS.get(
-            date_preset,
-            date_preset.title(),
-        )
-        time_window_group = time_window.title()
+        threshold_call = f"We need {threshold} people on board to make this happen."
 
-        # Escape description for Markdown in group message too
-        escaped_desc_group = description.replace("[", "\\[").replace("]", "\\]").replace("_", "\\_").replace("*", "\\*").replace("`", "\\`")
+        escaped_desc_group = _escape_for_markdown(description)
 
         group_message = (
-            f"✅ *Event Created!*\n\n"
-            f"Event ID: {event.event_id}\n"
-            f"Type: {event_type}\n"
-            f"Description: {escaped_desc_group}\n"
-            f"Time: {scheduled_time_group}\n"
-            f"Commit-By: {commit_by_group}\n"
-            f"Date Preset: {date_preset_group}\n"
-            f"Time Window: {time_window_group}\n"
-            f"Duration: {duration} minutes\n"
-            f"Mode: {scheduling_mode}\n"
-            f"Location Type: {location_group}\n"
-            f"Budget: {budget_group}\n"
-            f"Transport: {transport_group}\n"
-            f"Threshold: {threshold}\n"
-            f"Invitees: {invitees_group}"
-            + "\n\n✅ Event ready for confirmation. Run /confirm <event_id> to lock it.\n"
-            + (
-                f"Event Admin: {organizer_username}"
-                if organizer_username
-                else f"Event Admin: {creator_id}"
-            )
+            f"🌱 *New event proposed by {proposer}*\n\n"
+            f"*{escaped_desc_group}*\n\n"
+            f"📅 {scheduled_time_group}\n"
+            f"⏱ {duration} min · 📍 {location_group}\n"
+            f"👥 {threshold_call}\n\n"
+            f"🎉 _Event #{event.event_id} · Tap below to respond_"
         )
 
-        await update.message.reply_text(group_message)
+        group_keyboard = InlineKeyboardMarkup(
+            [
+                [
+                    InlineKeyboardButton(
+                        "✅ I'm in",
+                        callback_data=f"event_join_{event.event_id}",
+                    ),
+                    InlineKeyboardButton(
+                        "📋 Details",
+                        callback_data=f"event_details_{event.event_id}",
+                    ),
+                ],
+                [
+                    InlineKeyboardButton(
+                        "📣 Share",
+                        switch_inline_query=f"event {event.event_id}",
+                    ),
+                ],
+            ]
+        )
+
+        await update.message.reply_text(
+            group_message,
+            reply_markup=group_keyboard,
+            parse_mode="Markdown",
+        )

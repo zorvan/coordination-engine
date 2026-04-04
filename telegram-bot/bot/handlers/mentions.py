@@ -23,6 +23,16 @@ from bot.services import ParticipantService, EventLifecycleService
 from bot.common.event_notifications import (
     send_event_invitation_dm,
 )
+from bot.common.event_formatters import (
+    format_date_preset,
+    format_time_window,
+    format_location_type,
+    format_budget_level,
+    format_transport_mode,
+    format_scheduled_time,
+    format_commit_by,
+    format_duration,
+)
 
 from bot.common.event_presenters import (
     format_event_details_message,
@@ -760,18 +770,37 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                         "duration_minutes": int(event.duration_minutes or 120),
                         "threshold_attendance": int(event.threshold_attendance or 0),
                     }
-                    change_text = (
-                        "Please suggest improvements to this event draft. "
-                        "Return a JSON object with a 'suggestion' key containing "
-                        "your recommendation."
+                    ai_prompt = (
+                        "Please suggest improvements to this event. "
+                        "Return a JSON patch with any of these fields you think should change: "
+                        "description, event_type, scheduled_time_iso, duration_minutes, "
+                        "threshold_attendance, clear_time. Be specific about what should change."
                     )
-                    patch = await llm.infer_event_draft_patch(draft, change_text)
-                    suggestion = patch
+                    patch = await llm.infer_event_draft_patch(draft, ai_prompt)
                 finally:
                     await llm.close()
 
-                change_text = suggestion.get(
-                    "suggestion", "Please review the AI suggestions for modifications."
+                # Build a human-readable summary of the AI's suggested changes
+                change_parts = []
+                if patch.get("description"):
+                    change_parts.append(f"Description: {patch['description'][:100]}")
+                if patch.get("event_type"):
+                    change_parts.append(f"Type: {patch['event_type']}")
+                if patch.get("scheduled_time_iso"):
+                    change_parts.append(f"Time: {patch['scheduled_time_iso']}")
+                if patch.get("clear_time"):
+                    change_parts.append("Clear scheduled time (set to TBD)")
+                if patch.get("duration_minutes"):
+                    change_parts.append(f"Duration: {patch['duration_minutes']} minutes")
+                if patch.get("threshold_attendance"):
+                    change_parts.append(f"Threshold: {patch['threshold_attendance']}")
+                if patch.get("scheduling_mode"):
+                    change_parts.append(f"Mode: {patch['scheduling_mode']}")
+
+                change_text = (
+                    "AI suggested improvements:\n" + "\n".join(change_parts)
+                    if change_parts
+                    else "AI review complete. Please review and approve if you agree with the suggested changes."
                 )
 
                 # Submit the request to admin
@@ -874,17 +903,23 @@ async def _submit_modify_request_via_message(
 
     from bot.common.event_notifications import send_event_modification_request_dm
 
-    await send_event_modification_request_dm(
+    adminDM_sent = await send_event_modification_request_dm(
         context=context,
         telegram_user_id=admin_id,
         event_data={
             "event_id": event_id,
             "change_text": change_text,
+            "requester": requester_username,
         },
         event_id=event_id,
-        deadline_info="Please review and approve the modification request",
+        deadline_info=f"Modification requested by @{requester_username or 'unknown'}: {change_text[:200]}",
         request_id=request_id,
     )
+
+    if not adminDM_sent:
+        logger.warning(
+            f"Could not send modification request DM to admin {admin_id} for event {event_id}"
+        )
 
 
 async def _submit_modify_request_via_callback(
@@ -921,17 +956,23 @@ async def _submit_modify_request_via_callback(
 
     from bot.common.event_notifications import send_event_modification_request_dm
 
-    await send_event_modification_request_dm(
+    adminDM_sent = await send_event_modification_request_dm(
         context=context,
         telegram_user_id=admin_id,
         event_data={
             "event_id": event_id,
             "change_text": change_text,
+            "requester": requester_username,
         },
         event_id=event_id,
-        deadline_info="Please review and approve the modification request",
+        deadline_info=f"Modification requested by @{requester_username or 'unknown'}: {change_text[:200]}",
         request_id=request_id,
     )
+
+    if not adminDM_sent:
+        logger.warning(
+            f"Could not send modification request DM to admin {admin_id} for event {event_id}"
+        )
 
 
 async def _resolve_mentioned_participants(text: str, bot_username: str) -> list[int]:
@@ -1653,25 +1694,52 @@ async def _handle_organize_event_direct(
     invitees_raw = draft.get("invitees", [])
     invitees = event_creation._normalize_patch_invitees(invitees_raw)
 
-    location_type = str(draft.get("location_type") or "cafe").strip().lower()
-    if location_type not in {value for _, value in event_creation.LOCATION_PRESETS}:
-        location_type = "cafe"
+    # Use LLM-inferred location_type only if explicitly set; otherwise leave empty
+    # The description should carry the actual location context (e.g., "Amin's house")
+    location_type_raw = draft.get("location_type")
+    if location_type_raw is not None:
+        location_type = str(location_type_raw).strip().lower()
+        valid_locations = {value for _, value in event_creation.LOCATION_PRESETS}
+        if location_type not in valid_locations:
+            location_type = None  # Let description carry the real location
+    else:
+        location_type = None
 
-    budget_level = str(draft.get("budget_level") or "medium").strip().lower()
-    if budget_level not in {value for _, value in event_creation.BUDGET_PRESETS}:
-        budget_level = "medium"
+    budget_level_raw = draft.get("budget_level")
+    if budget_level_raw is not None:
+        budget_level = str(budget_level_raw).strip().lower()
+        valid_budgets = {value for _, value in event_creation.BUDGET_PRESETS}
+        if budget_level not in valid_budgets:
+            budget_level = None
+    else:
+        budget_level = None
 
-    transport_mode = str(draft.get("transport_mode") or "any").strip().lower()
-    if transport_mode not in {value for _, value in event_creation.TRANSPORT_PRESETS}:
-        transport_mode = "any"
+    transport_mode_raw = draft.get("transport_mode")
+    if transport_mode_raw is not None:
+        transport_mode = str(transport_mode_raw).strip().lower()
+        valid_transport = {value for _, value in event_creation.TRANSPORT_PRESETS}
+        if transport_mode not in valid_transport:
+            transport_mode = None
+    else:
+        transport_mode = None
 
-    date_preset = str(draft.get("date_preset") or "custom").strip().lower()
-    if date_preset not in event_creation.DATE_PRESET_LABELS and date_preset != "custom":
-        date_preset = "custom"
+    # Use LLM-inferred date_preset only if explicitly set
+    date_preset_raw = draft.get("date_preset")
+    if date_preset_raw is not None:
+        date_preset = str(date_preset_raw).strip().lower()
+        if date_preset not in event_creation.DATE_PRESET_LABELS and date_preset != "custom":
+            date_preset = None  # Let the system infer from scheduled_time
+    else:
+        date_preset = None
 
-    time_window = str(draft.get("time_window") or "evening").strip().lower()
-    if time_window not in event_creation.TIME_WINDOWS:
-        time_window = "evening"
+    # Use LLM-inferred time_window only if explicitly set
+    time_window_raw = draft.get("time_window")
+    if time_window_raw is not None:
+        time_window = str(time_window_raw).strip().lower()
+        if time_window not in event_creation.TIME_WINDOWS:
+            time_window = None
+    else:
+        time_window = None
 
     notes = draft.get("planning_notes", [])
     planning_notes = (
@@ -1764,6 +1832,71 @@ async def _handle_organize_event_direct(
             role="organizer",
         )
 
+        # Save any LLM-inferred constraints
+        inferred_constraints = draft.get("inferred_constraints", [])
+        constraints_saved = 0
+        if isinstance(inferred_constraints, list):
+            # Get the creator's internal user_id
+            creator_user = (
+                await session.execute(
+                    select(User).where(User.telegram_user_id == creator_id)
+                )
+            ).scalar_one_or_none()
+            creator_internal_user_id = None
+            if creator_user:
+                creator_internal_user_id = creator_user.user_id
+            else:
+                creator_internal_user_id = await get_or_create_user_id(
+                    session,
+                    telegram_user_id=creator_id,
+                    display_name=user.full_name if user else None,
+                    username=user.username if user else None,
+                )
+
+            for ic in inferred_constraints:
+                if not isinstance(ic, dict):
+                    continue
+                ctype = str(ic.get("constraint_type", "")).strip().lower()
+                target_username = str(ic.get("target_username", "")).strip().lstrip("@")
+                note = str(ic.get("note", "")).strip()[:200]
+                if ctype not in {"if_joins", "if_attends", "unless_joins"}:
+                    continue
+                if not target_username:
+                    continue
+                # Resolve target user
+                target_input = f"@{target_username}"
+                target_user_id = await get_user_id_by_username(session, target_input)
+                if target_user_id is None:
+                    # Try to resolve via Telegram
+                    try:
+                        target_chat = await context.bot.get_chat(target_input)
+                        target_user_id = await get_or_create_user_id(
+                            session,
+                            telegram_user_id=target_chat.id,
+                            display_name=getattr(target_chat, "full_name", None),
+                            username=getattr(target_chat, "username", None),
+                        )
+                    except Exception:
+                        logger.warning(
+                            f"Could not resolve constraint target @{target_username} for event {event.event_id}"
+                        )
+                        continue
+                session.add(
+                    Constraint(
+                        user_id=creator_internal_user_id,
+                        target_user_id=target_user_id,
+                        event_id=event.event_id,
+                        type=ctype,
+                        confidence=0.6,
+                    )
+                )
+                constraints_saved += 1
+            if constraints_saved:
+                await session.commit()
+                logger.info(
+                    f"Saved {constraints_saved} inferred constraints for event {event.event_id}"
+                )
+
         group_members = group.member_list or []
 
         async with get_session(settings.db_url) as session:
@@ -1784,6 +1917,7 @@ async def _handle_organize_event_direct(
                 "duration_minutes": duration,
                 "threshold_attendance": threshold,
                 "invitees": invitees if not invite_all else [],
+                "key_attendees": draft.get("key_attendees", []),
                 "invite_all_members": invite_all,
                 "location_type": location_type,
                 "budget_level": budget_level,
@@ -1791,154 +1925,133 @@ async def _handle_organize_event_direct(
                 "date_preset": date_preset,
                 "time_window": time_window,
                 "planning_notes": planning_notes,
+                "inferred_constraints": inferred_constraints,
                 "organizer_telegram_user_id": creator_id,
                 "organizer_username": organizer_username,
                 "organizer_display_name": organizer_display_name,
             }
 
-            # Send invitations
+            # Build recipient set using UNION logic (not if/else)
+            # Start with empty set, then add from multiple sources
+            recipient_telegram_ids = set()
+            
+            # Source 1: Group members (if invite_all is true)
+            if invite_all:
+                for member_id in group_members:
+                    if member_id and member_id != creator_id:
+                        recipient_telegram_ids.add(int(member_id))
+                logger.info(
+                    f"Public event {event.event_id}: Adding {len(group_members)} group members to recipients"
+                )
+            
+            # Source 2: Explicit invitees (always added, regardless of invite_all)
+            invitee_telegram_ids = set()
+            for invite_handle in invitees:
+                if not invite_handle.startswith("@"):
+                    continue
+                username = invite_handle[1:]
+                try:
+                    user_id = await get_user_id_by_username(session, username)
+                    if user_id:
+                        result = await session.execute(
+                            select(User).where(User.user_id == int(user_id))
+                        )
+                        invitee_user = result.scalar_one_or_none()
+                        if invitee_user and invitee_user.telegram_user_id:
+                            telegram_id = int(invitee_user.telegram_user_id)
+                            if telegram_id != creator_id:  # Exclude creator (gets admin DM separately)
+                                invitee_telegram_ids.add(telegram_id)
+                                recipient_telegram_ids.add(telegram_id)
+                except Exception as e:
+                    logger.warning(f"Could not resolve @{username}: {e}")
+            
+            if invitee_telegram_ids:
+                logger.info(
+                    f"Event {event.event_id}: Adding {len(invitee_telegram_ids)} explicit invitees to recipients"
+                )
+            
+            # Fallback: If group is empty and no invitees, warn
+            if not group_members and not invitee_telegram_ids:
+                logger.warning(
+                    f"Event {event.event_id}: No group members and no invitees. "
+                    f"Only creator (ID: {creator_id}) will be notified."
+                )
+            
+            logger.info(
+                f"Event {event.event_id}: Final recipient count: {len(recipient_telegram_ids)} "
+                f"(group_members: {len(group_members)}, invitees: {len(invitee_telegram_ids)}, "
+                f"invite_all: {invite_all})"
+            )
+
+            # Send invitations to all recipients in the union set
             dm_count = 0
             dm_failed = 0
 
-            if invite_all:
-                # Public event: DM all group members (excluding creator who gets admin DM)
-                logger.info(
-                    f"Public event {event.event_id}: Sending DMs to all {len(group_members)} group members"
-                )
-                for telegram_user_id in group_members:
-                    if telegram_user_id and telegram_user_id != creator_id:
-                        try:
-                            await send_event_invitation_dm(
-                                context,
-                                int(telegram_user_id),
-                                data_for_dm,
-                                int(event.event_id),
-                            )
-                            logger.info(
-                                f"DM sent to user {telegram_user_id} for event {event.event_id} (public, all members)"
-                            )
-                            dm_count += 1
-                        except Exception as e:
-                            logger.error(
-                                f"Error sending DM to user {telegram_user_id}: {e}",
-                                exc_info=True,
-                            )
-                            dm_failed += 1
-            else:
-                # Private event: DM ONLY invitees + admin (NOT group members)
-                logger.info(
-                    f"Private event {event.event_id}: Sending DMs to {len(invitees)} invitees only"
-                )
-
-                # Send to all listed invitees
-                for invite_handle in invitees:
-                    if not invite_handle.startswith("@"):
-                        continue
-                    username = invite_handle[1:]
-                    try:
-                        user_id = await get_user_id_by_username(session, username)
-                        if user_id:
-                            result = await session.execute(
-                                select(User).where(User.user_id == int(user_id))
-                            )
-                            invitee_user = result.scalar_one_or_none()
-                            if invitee_user and invitee_user.telegram_user_id:
-                                await send_event_invitation_dm(
-                                    context,
-                                    int(invitee_user.telegram_user_id),
-                                    data_for_dm,
-                                    int(event.event_id),
-                                )
-                                logger.info(
-                                    "DM sent to user %s (@%s) for event %s (private invitee)",
-                                    invitee_user.telegram_user_id,
-                                    username,
-                                    event.event_id,
-                                )
-                                dm_count += 1
-                            else:
-                                logger.warning(
-                                    f"User @{username} not found or no telegram_user_id for event {event.event_id}"
-                                )
-                                dm_failed += 1
-                        else:
-                            logger.warning(
-                                f"No user_id found for handle @{username} in event {event.event_id}"
-                            )
-                            dm_failed += 1
-                    except Exception as e:
-                        logger.error(
-                            f"Error sending DM to @{username}: {e}", exc_info=True
-                        )
-                        dm_failed += 1
-
-                # Also send to admin/creator
-                if creator_id:
-                    try:
-                        await send_event_invitation_dm(
-                            context,
-                            int(creator_id),
-                            data_for_dm,
-                            int(event.event_id),
-                        )
-                        logger.info(
-                            f"DM sent to admin {creator_id} for event {event.event_id} (private event admin)"
-                        )
-                        dm_count += 1
-                    except Exception as e:
-                        logger.error(
-                            f"Error sending DM to admin {creator_id}: {e}",
-                            exc_info=True,
-                        )
-                        dm_failed += 1
+            for telegram_user_id in recipient_telegram_ids:
+                try:
+                    await send_event_invitation_dm(
+                        context,
+                        telegram_user_id,
+                        data_for_dm,
+                        int(event.event_id),
+                    )
+                    logger.info(
+                        f"DM sent to user {telegram_user_id} for event {event.event_id}"
+                    )
+                    dm_count += 1
+                except Exception as e:
+                    logger.error(
+                        f"Error sending DM to user {telegram_user_id}: {e}",
+                        exc_info=True,
+                    )
+                    dm_failed += 1
 
             logger.info(
                 f"Event {event.event_id} DM distribution complete: {dm_count} sent, {dm_failed} failed"
             )
 
-            # Prepare display texts for admin summary
-            scheduled_time_display = (
-                str(scheduled_time_raw).replace("T", " ")
-                if scheduled_time_raw
-                else "TBD (flexible scheduling)"
-            )
-            commit_by_text = (
-                commit_by.isoformat(timespec="minutes").replace("T", " ")
-                if commit_by is not None
-                else "N/A"
-            )
+            # Prepare display texts for admin summary using human-readable formatters
+            scheduled_time_display = format_scheduled_time(scheduled_time_raw)
+            commit_by_text = format_commit_by(commit_by)
             invitees_summary = (
                 "all group members" if invite_all else f"{len(invitees)} users"
             )
-            location_text = location_type.replace("_", " ").title()
-            budget_text = budget_level.replace("_", " ").title()
-            transport_text = transport_mode.replace("_", " ").title()
-            date_preset_text = event_creation.DATE_PRESET_LABELS.get(
-                date_preset,
-                date_preset.title(),
-            )
-            time_window_text = time_window.title()
+            location_text = format_location_type(location_type)
+            budget_text = format_budget_level(budget_level)
+            transport_text = format_transport_mode(transport_mode)
+            date_preset_text = format_date_preset(date_preset)
+            time_window_text = format_time_window(time_window)
 
             # Escape description for Markdown (avoid parsing errors with special chars)
             escaped_description = _escape_for_markdown(description)
 
             if creator_id:
                 # Send full details to admin via DM
+                # Escape formatted text for Markdown safety
+                scheduled_time_display_escaped = _escape_for_markdown(scheduled_time_display)
+                commit_by_text_escaped = _escape_for_markdown(commit_by_text)
+                date_preset_text_escaped = _escape_for_markdown(date_preset_text)
+                time_window_text_escaped = _escape_for_markdown(time_window_text)
+                duration_text = _escape_for_markdown(format_duration(duration))
+                location_text_escaped = _escape_for_markdown(location_text)
+                budget_text_escaped = _escape_for_markdown(budget_text)
+                transport_text_escaped = _escape_for_markdown(transport_text)
+                
                 full_admin_summary = (
                     f"✅ *Event Created Successfully!*\n\n"
                     f"Event ID: `{event.event_id}`\n"
                     f"State: proposed (awaiting confirmations)\n\n"
                     f"Type: {event_type}\n"
                     f"Description: {escaped_description}\n"
-                    f"Time: {scheduled_time_display}\n"
-                    f"Commit-By: {commit_by_text}\n"
-                    f"Date Preset: {date_preset_text}\n"
-                    f"Time Window: {time_window_text}\n"
-                    f"Duration: {duration} minutes\n"
+                    f"Time: {scheduled_time_display_escaped}\n"
+                    f"Commit-By: {commit_by_text_escaped}\n"
+                    f"Date Preset: {date_preset_text_escaped}\n"
+                    f"Time Window: {time_window_text_escaped}\n"
+                    f"Duration: {duration_text}\n"
                     f"Mode: {scheduling_mode}\n"
-                    f"Location Type: {location_text}\n"
-                    f"Budget: {budget_text}\n"
-                    f"Transport: {transport_text}\n"
+                    f"Location Type: {location_text_escaped}\n"
+                    f"Budget: {budget_text_escaped}\n"
+                    f"Transport: {transport_text_escaped}\n"
                     f"Threshold: {threshold}\n"
                     f"Invitees: {invitees_summary}\n\n"
                     f"✅ Event ready for confirmation. Run /confirm {event.event_id} to lock it."
@@ -1983,7 +2096,7 @@ async def _handle_organize_event_direct(
             if scheduled_time_raw
             else "⏳ Time TBD — flexible scheduling"
         )
-        location_group = location_type.replace("_", " ").title()
+        location_group = location_type.replace("_", " ").title() if location_type else "See description"
         threshold_call = f"We need {threshold} people on board to make this happen."
 
         escaped_desc_group = _escape_for_markdown(description)

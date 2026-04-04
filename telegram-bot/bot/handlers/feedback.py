@@ -7,6 +7,7 @@ from db.models import Event, Feedback, User, Reputation
 from db.connection import get_session
 from db.users import get_or_create_user_id
 from config.settings import settings
+from bot.common.rbac import check_event_visibility_and_get_event
 from ai.llm import LLMClient
 from bot.common.early_feedback import aggregate_early_feedback_for_user
 from datetime import datetime
@@ -38,14 +39,17 @@ async def collect_feedback(
 
     db_url = settings.db_url or ""
     async with get_session(db_url) as session:
-        result = await session.execute(
-            select(Event).where(Event.event_id == event_id)
+        user_id_num = user.id if user else None
+        chat_id = update.effective_chat.id if update.effective_chat else None
+        is_visible, event, group, error_msg = (
+            await check_event_visibility_and_get_event(
+                session, event_id, user_id_num,
+                telegram_chat_id=chat_id
+            )
         )
-        event = result.scalar_one_or_none()
 
-        if not event:
-            await update.message.reply_text("❌ Event not found.")
-
+        if not is_visible:
+            await update.message.reply_text(f"❌ {error_msg or 'Event not found.'}")
             return
 
         if event.state != "completed":
@@ -168,14 +172,16 @@ async def process_feedback(
 
     db_url = settings.db_url or ""
     async with get_session(db_url) as session:
-        result = await session.execute(
-            select(Event).where(Event.event_id == event_id)
+        chat_id = getattr(getattr(query, "message", None), "chat_id", None)
+        is_visible, event, group, error_msg = (
+            await check_event_visibility_and_get_event(
+                session, event_id, telegram_user_id,
+                telegram_chat_id=chat_id
+            )
         )
-        event = result.scalar_one_or_none()
 
-        if not event:
-            await query.edit_message_text("❌ Event not found.")
-
+        if not is_visible:
+            await query.edit_message_text(f"❌ {error_msg or 'Event not found.'}")
             return
 
         user_id = await get_or_create_user_id(

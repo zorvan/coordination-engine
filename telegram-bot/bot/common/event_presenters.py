@@ -5,6 +5,16 @@ from sqlalchemy import select
 
 from bot.common.event_states import STATE_EXPLANATIONS
 from bot.common.attendance import parse_attendance_with_status
+from bot.common.event_formatters import (
+    format_date_preset,
+    format_time_window,
+    format_location_type,
+    format_budget_level,
+    format_transport_mode,
+    format_scheduled_time,
+    format_commit_by,
+    format_duration,
+)
 from db.models import User
 from db.connection import get_session
 from config.settings import settings
@@ -283,11 +293,13 @@ async def format_event_details_message(
         if isinstance(getattr(event, "planning_prefs", None), dict)
         else {}
     )
-    location_type = str(planning_prefs.get("location_type", "n/a")).replace("_", " ")
-    budget_level = str(planning_prefs.get("budget_level", "n/a")).replace("_", " ")
-    transport_mode = str(planning_prefs.get("transport_mode", "n/a")).replace("_", " ")
-    time_window = str(planning_prefs.get("time_window", "n/a"))
-    date_preset = str(planning_prefs.get("date_preset", "n/a"))
+    
+    # Use human-readable formatters instead of raw values
+    location_type = format_location_type(planning_prefs.get("location_type"))
+    budget_level = format_budget_level(planning_prefs.get("budget_level"))
+    transport_mode = format_transport_mode(planning_prefs.get("transport_mode"))
+    time_window = format_time_window(planning_prefs.get("time_window"))
+    date_preset = format_date_preset(planning_prefs.get("date_preset"))
 
     next_step = "Run /join <event_id> to gather interest."
     if event.scheduled_time is None:
@@ -313,22 +325,22 @@ async def format_event_details_message(
     return (
         f"📋 *Event {event_id} Details*\n\n"
         f"Type: {event.event_type}\n"
-        f"Description: {event.description or 'N/A'}\n"
-        f"Time: {event.scheduled_time or 'TBD'}\n"
-        f"Commit-By: {event.commit_by or 'N/A'}\n"
+        f"Description: {event.description or 'Not provided'}\n"
+        f"Time: {format_scheduled_time(event.scheduled_time)}\n"
+        f"Commit-By: {format_commit_by(event.commit_by)}\n"
         f"Date Preset: {date_preset}\n"
         f"Time Window: {time_window}\n"
         f"Location Type: {location_type}\n"
         f"Budget: {budget_level}\n"
         f"Transport: {transport_mode}\n"
-        f"Duration: {event.duration_minutes or 120} minutes\n"
+        f"Duration: {format_duration(event.duration_minutes)}\n"
         f"Threshold: {threshold}\n"
         f"State: {event.state}\n"
         f"State Meaning: {STATE_EXPLANATIONS.get(event.state, 'Unknown state')}\n"
         f"AI Score: {event.ai_score:.2f}\n"
         f"Created: {event.created_at}\n"
-        f"Locked: {event.locked_at or 'N/A'}\n"
-        f"Completed: {event.completed_at or 'N/A'}\n\n"
+        f"Locked: {event.locked_at or 'Not locked'}\n"
+        f"Completed: {event.completed_at or 'Not completed'}\n\n"
         f"Admin: {admin_text}\n\n"
         f"Progress:\n"
         f"- Interested: {interested_count}\n"
@@ -441,7 +453,7 @@ async def format_status_message(
         f"📊 *Event {event_id} Status*\n\n"
         f"Type: {event.event_type}\n"
         f"Description: {description}\n"
-        f"Time: {event.scheduled_time or 'TBD'}\n"
+        f"Time: {format_scheduled_time(event.scheduled_time, include_flexible_note=False)}\n"
         f"Threshold: {threshold}\n"
         f"State: {event.state}\n"
         f"{fragility_text}"

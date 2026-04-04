@@ -2,6 +2,7 @@
 """Modify existing event command handler."""
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -16,11 +17,14 @@ from bot.common.confirmation import (
 from bot.common.event_access import (
     get_event_admin_telegram_id,
 )
+from bot.common.rbac import check_event_visibility_and_get_event
 from bot.common.event_notifications import send_event_modification_request_dm
 from config.settings import settings
 from db.connection import get_session
 from db.models import Event
 import uuid as uuid_lib
+
+logger = logging.getLogger("coord_bot.modify_event")
 
 
 async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -45,11 +49,16 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
     async with get_session(settings.db_url) as session:
-        event = (
-            await session.execute(select(Event).where(Event.event_id == event_id))
-        ).scalar_one_or_none()
-        if not event:
-            await update.message.reply_text("❌ Event not found.")
+        requester_id = int(update.effective_user.id)
+        chat_id = update.effective_chat.id if update.effective_chat else None
+        is_visible, event, group, error_msg = (
+            await check_event_visibility_and_get_event(
+                session, event_id, requester_id,
+                telegram_chat_id=chat_id
+            )
+        )
+        if not is_visible:
+            await update.message.reply_text(f"❌ {error_msg or 'Event not found.'}")
             return
         if event.state in {"locked", "completed", "cancelled"}:
             await update.message.reply_text(
@@ -142,6 +151,24 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             except ValueError:
                 pass
 
+        # Handle planning preferences (location_type, budget_level, transport_mode)
+        planning_prefs = event.planning_prefs if isinstance(event.planning_prefs, dict) else {}
+        planning_changed = False
+        
+        for pref_key in ["location_type", "budget_level", "transport_mode"]:
+            new_value = patch.get(pref_key)
+            if isinstance(new_value, str) and new_value.strip():
+                new_value = new_value.strip().lower()
+                old_value = planning_prefs.get(pref_key)
+                if old_value != new_value:
+                    planning_prefs[pref_key] = new_value
+                    planning_changed = True
+                    changed_fields.append(pref_key)
+                    reason_parts.append(f"{pref_key} changed to {new_value}")
+        
+        if planning_changed:
+            event.planning_prefs = planning_prefs
+
         if not changed_fields:
             await update.message.reply_text(
                 "⚠️ No valid event change inferred from your message."
@@ -183,7 +210,7 @@ async def _submit_modify_request(
         return
 
     request_id = uuid_lib.uuid4().hex[:8]
-    pending_key = f"modify_request_{request_id}"
+    pending_key = f"modreq_{request_id}"
     context.bot_data.setdefault("pending_modify_requests", {})[pending_key] = {
         "event_id": event.event_id,
         "requester_id": requester_id,
@@ -222,9 +249,12 @@ async def _submit_modify_request(
             ),
             "duration_minutes": int(event.duration_minutes or 120),
             "threshold_attendance": int(event.threshold_attendance or 0),
+            "location_type": (event.planning_prefs or {}).get("location_type") if hasattr(event, "planning_prefs") else None,
+            "change_text": change_text,
+            "requester": update.effective_user.username or update.effective_user.full_name,
         },
         event_id=int(event.event_id),
-        deadline_info="Please review and approve the modification request",
+        deadline_info=f"Modification requested by @{update.effective_user.username or update.effective_user.full_name}: {change_text[:200]}",
         request_id=request_id,
     )
 
@@ -276,14 +306,28 @@ async def handle_modify_request_callback(
         await query.edit_message_text(
             f"❌ Modify request for event {event_id} was rejected by admin."
         )
+        # Notify requester of rejection
+        if requester_id:
+            try:
+                await context.bot.send_message(
+                    chat_id=requester_id,
+                    text=f"❌ Your modify request for event {event_id} was rejected by the event admin."
+                )
+            except Exception as e:
+                logger.warning(f"Could not notify requester ({requester_id}) of rejection: {e}")
         return
 
     async with get_session(settings.db_url) as session:
-        event = (
-            await session.execute(select(Event).where(Event.event_id == event_id))
-        ).scalar_one_or_none()
-        if not event:
-            await query.edit_message_text("❌ Event not found.")
+        # Admin is already authorized via pending request check above
+        chat_id = getattr(getattr(query, "message", None), "chat_id", None)
+        is_visible, event, group, error_msg = (
+            await check_event_visibility_and_get_event(
+                session, event_id, query.from_user.id,
+                telegram_chat_id=chat_id
+            )
+        )
+        if not is_visible:
+            await query.edit_message_text(f"❌ {error_msg or 'Event not found.'}")
             return
         if event.state in {"locked", "completed", "cancelled"}:
             await query.edit_message_text(
@@ -365,6 +409,24 @@ async def handle_modify_request_callback(
             except ValueError:
                 pass
 
+        # Handle planning preferences (location_type, budget_level, transport_mode)
+        planning_prefs = event.planning_prefs if isinstance(event.planning_prefs, dict) else {}
+        planning_changed = False
+        
+        for pref_key in ["location_type", "budget_level", "transport_mode"]:
+            new_value = patch.get(pref_key)
+            if isinstance(new_value, str) and new_value.strip():
+                new_value = new_value.strip().lower()
+                old_value = planning_prefs.get(pref_key)
+                if old_value != new_value:
+                    planning_prefs[pref_key] = new_value
+                    planning_changed = True
+                    changed_fields.append(pref_key)
+                    reason_parts.append(f"{pref_key} changed to {new_value}")
+        
+        if planning_changed:
+            event.planning_prefs = planning_prefs
+
         if not changed_fields:
             await query.edit_message_text(
                 "⚠️ No valid event change inferred from your approval."
@@ -390,7 +452,15 @@ async def handle_modify_request_callback(
         f"Confirmations reset: {reconfirm_needed}"
     )
 
-    await context.bot.send_message(
-        chat_id=requester_id,
-        text=f"✅ Your modify request for event {event_id} was approved by admin."
-    )
+    # Notify requester of approval
+    if requester_id:
+        try:
+            await context.bot.send_message(
+                chat_id=requester_id,
+                text=(
+                    f"✅ Your modify request for event {event_id} was approved by the event admin.\n"
+                    f"Changed fields: {', '.join(changed_fields)}"
+                )
+            )
+        except Exception as e:
+            logger.warning(f"Could not notify requester ({requester_id}) of approval: {e}")

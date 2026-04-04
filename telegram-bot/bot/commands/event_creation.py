@@ -19,7 +19,18 @@ from sqlalchemy import select
 from ai.llm import LLMClient
 from config.settings import settings
 from bot.common.event_notifications import (
+    DATE_PRESET_LABELS,
     send_event_invitation_dm,
+)
+from bot.common.event_formatters import (
+    format_date_preset,
+    format_time_window,
+    format_location_type,
+    format_budget_level,
+    format_transport_mode,
+    format_scheduled_time,
+    format_commit_by,
+    format_duration,
 )
 from bot.common.keyboards import build_threshold_markup
 from bot.common.scheduling import find_user_event_conflict
@@ -61,13 +72,12 @@ TRANSPORT_PRESETS = [
     ("🚗 Drive", "drive"),
     ("🤝 Any", "any"),
 ]
-DATE_PRESET_LABELS = {
-    "today": "Today",
-    "tomorrow": "Tomorrow",
-    "weekend": "Weekend",
-    "nextweek": "Next Week",
-}
 WEEKDAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+
+
+def _escape_md(text: str) -> str:
+    """Escape text for safe Telegram Markdown parsing."""
+    return str(text).replace("_", "\\_").replace("*", "\\*").replace("[", "\\[").replace("]", "\\]")
 
 
 def compute_commit_by_time(scheduled_time: datetime | None) -> datetime | None:
@@ -373,11 +383,8 @@ def build_final_confirmation_markup(prefix: str = "event") -> InlineKeyboardMark
 
 def build_event_summary_text(data: dict[str, Any], is_private: bool = False) -> str:
     """Build event draft summary text."""
-    scheduled_time = (
-        str(data.get("scheduled_time", "TBD")).replace("T", " ")
-        if data.get("scheduled_time")
-        else "TBD (flexible scheduling)"
-    )
+    # Use human-readable formatters
+    scheduled_time = format_scheduled_time(data.get("scheduled_time"))
     invitees = data.get("invitees", [])
     if not isinstance(invitees, list):
         invitees = []
@@ -388,25 +395,14 @@ def build_event_summary_text(data: dict[str, Any], is_private: bool = False) -> 
         else f"{len(invitees)} users ({', '.join(invitees) if invitees else 'none'})"
     )
     notes = data.get("planning_notes", [])
-    date_preset = str(data.get("date_preset", "custom")).lower()
-    time_window = str(data.get("time_window", "custom")).lower()
-    location_type = str(data.get("location_type", "any")).replace("_", " ")
-    budget_level = str(data.get("budget_level", "any")).replace("_", " ")
-    transport_mode = str(data.get("transport_mode", "any")).replace("_", " ")
-    date_preset_label = DATE_PRESET_LABELS.get(date_preset, date_preset.title())
-    time_window_label = time_window.title()
-    commit_by_text = "N/A"
-    if isinstance(data.get("commit_by"), str):
-        commit_by_text = str(data["commit_by"]).replace("T", " ")
-    elif data.get("scheduled_time"):
-        try:
-            derived = compute_commit_by_time(
-                datetime.fromisoformat(str(data["scheduled_time"]))
-            )
-            if derived is not None:
-                commit_by_text = derived.isoformat(timespec="minutes").replace("T", " ")
-        except ValueError:
-            commit_by_text = "N/A"
+    
+    # Use human-readable formatters for planning preferences
+    date_preset_label = format_date_preset(data.get("date_preset"))
+    time_window_label = format_time_window(data.get("time_window"))
+    location_type_label = format_location_type(data.get("location_type"))
+    budget_level_label = format_budget_level(data.get("budget_level"))
+    transport_mode_label = format_transport_mode(data.get("transport_mode"))
+    commit_by_text = format_commit_by(data.get("commit_by"))
 
     notes_text = ""
     if isinstance(notes, list) and notes:
@@ -416,35 +412,35 @@ def build_event_summary_text(data: dict[str, Any], is_private: bool = False) -> 
     if is_private:
         return (
             f"✨ *Event Summary*\n\n"
-            f"Type: {data.get('event_type', 'N/A')}\n"
-            f"Description: {data.get('description', 'N/A')}\n"
+            f"Type: {data.get('event_type', 'Not specified')}\n"
+            f"Description: {data.get('description', 'Not provided')}\n"
             f"Time: {scheduled_time}\n"
             f"Date Preset: {date_preset_label}\n"
             f"Time Window: {time_window_label}\n"
             f"Commit-By: {commit_by_text}\n"
-            f"Duration: {data.get('duration_minutes', 120)} minutes\n"
-            f"Location Type: {location_type.title()}\n"
-            f"Budget: {budget_level.title()}\n"
-            f"Transport: {transport_mode.title()}\n"
-            f"Threshold: {data.get('threshold_attendance', 'N/A')}\n"
+            f"Duration: {format_duration(data.get('duration_minutes'))}\n"
+            f"Location Type: {location_type_label}\n"
+            f"Budget: {budget_level_label}\n"
+            f"Transport: {transport_mode_label}\n"
+            f"Threshold: {data.get('threshold_attendance', 'Not set')}\n"
             f"Invitees: {invitees_summary}\n\n"
             "Press *Confirm & Lock* to finalize and lock this event."
         )
 
     return (
         f"✨ *Event Summary*\n\n"
-        f"Type: {data.get('event_type', 'N/A')}\n"
-        f"Description: {data.get('description', 'N/A')}\n"
+        f"Type: {data.get('event_type', 'Not specified')}\n"
+        f"Description: {data.get('description', 'Not provided')}\n"
         f"Time: {scheduled_time}\n"
         f"Date Preset: {date_preset_label}\n"
         f"Time Window: {time_window_label}\n"
         f"Commit-By: {commit_by_text}\n"
-        f"Duration: {data.get('duration_minutes', 120)} minutes\n"
+        f"Duration: {format_duration(data.get('duration_minutes'))}\n"
         f"Mode: {data.get('scheduling_mode', 'fixed')}\n"
-        f"Location Type: {location_type}\n"
-        f"Budget: {budget_level}\n"
-        f"Transport: {transport_mode}\n"
-        f"Threshold: {data.get('threshold_attendance', 'N/A')}\n"
+        f"Location Type: {location_type_label}\n"
+        f"Budget: {budget_level_label}\n"
+        f"Transport: {transport_mode_label}\n"
+        f"Threshold: {data.get('threshold_attendance', 'Not set')}\n"
         f"Invitees: {invitees_summary}"
         f"{notes_text}\n\n"
         "Create this event?\n"
@@ -1846,35 +1842,25 @@ async def finalize_event(
             dm_count,
             dm_failed,
         )
-    scheduled_time = (
-        str(data.get("scheduled_time", "TBD")).replace("T", " ")
-        if data.get("scheduled_time")
-        else "TBD (flexible scheduling)"
-    )
-    commit_by_text = (
-        commit_by.isoformat(timespec="minutes").replace("T", " ")
-        if commit_by is not None
-        else "N/A"
-    )
+    # Use human-readable formatters
+    scheduled_time = format_scheduled_time(data.get("scheduled_time"))
+    commit_by_text = format_commit_by(commit_by)
     invitees_summary = (
         "all group members"
         if data.get("invite_all_members")
         else f"{len(data.get('invitees', []))} users"
     )
-    location_text = str(data.get("location_type", "any")).replace("_", " ").title()
-    budget_text = str(data.get("budget_level", "any")).replace("_", " ").title()
-    transport_text = str(data.get("transport_mode", "any")).replace("_", " ").title()
-    date_preset_text = DATE_PRESET_LABELS.get(
-        str(data.get("date_preset", "custom")),
-        str(data.get("date_preset", "custom")).title(),
-    )
-    time_window_text = str(data.get("time_window", "custom")).title()
+    location_text = format_location_type(data.get("location_type"))
+    budget_text = format_budget_level(data.get("budget_level"))
+    transport_text = format_transport_mode(data.get("transport_mode"))
+    date_preset_text = format_date_preset(data.get("date_preset"))
+    time_window_text = format_time_window(data.get("time_window"))
 
     # Minimal summary for group - just event ID and key info
     group_summary = (
         f"✅ *Event Created!*\n\n"
         f"Event ID: `{event.event_id}`\n"
-        f"Type: {data.get('event_type', 'N/A')}\n"
+        f"Type: {data.get('event_type', 'Not specified')}\n"
         f"Invitees: {invitees_summary}\n"
         f"Admin: {organizer_username if organizer_username else creator_id}"
     )
@@ -1886,19 +1872,19 @@ async def finalize_event(
         f"✅ *Event Created Successfully!*\n\n"
         f"Event ID: `{event.event_id}`\n"
         f"State: proposed (awaiting confirmations)\n\n"
-        f"Type: {data.get('event_type', 'N/A')}\n"
-        f"Description: {data.get('description', 'N/A')}\n"
-        f"Time: {scheduled_time}\n"
-        f"Commit-By: {commit_by_text}\n"
-        f"Date Preset: {date_preset_text}\n"
-        f"Time Window: {time_window_text}\n"
-        f"Duration: {data.get('duration_minutes', 120)} minutes\n"
-        f"Mode: {scheduling_mode}\n"
-        f"Location Type: {location_text}\n"
-        f"Budget: {budget_text}\n"
-        f"Transport: {transport_text}\n"
-        f"Threshold: {data.get('threshold_attendance', 'N/A')}\n"
-        f"Invitees: {invitees_summary}\n\n"
+        f"Type: {_escape_md(data.get('event_type', 'Not specified'))}\n"
+        f"Description: {_escape_md(data.get('description', 'Not provided'))}\n"
+        f"Time: {_escape_md(scheduled_time)}\n"
+        f"Commit-By: {_escape_md(commit_by_text)}\n"
+        f"Date Preset: {_escape_md(date_preset_text)}\n"
+        f"Time Window: {_escape_md(time_window_text)}\n"
+        f"Duration: {_escape_md(format_duration(data.get('duration_minutes')))}\n"
+        f"Mode: {_escape_md(scheduling_mode)}\n"
+        f"Location Type: {_escape_md(location_text)}\n"
+        f"Budget: {_escape_md(budget_text)}\n"
+        f"Transport: {_escape_md(transport_text)}\n"
+        f"Threshold: {_escape_md(data.get('threshold_attendance', 'Not set'))}\n"
+        f"Invitees: {_escape_md(invitees_summary)}\n\n"
         f"✅ Event ready for confirmation. Run /confirm {event.event_id} to lock it."
         + (
             "\n\nFlexible flow tip:\n"
@@ -2153,49 +2139,36 @@ async def finalize_private_event(
 
     reply_markup = InlineKeyboardMarkup(keyboard)
 
-    scheduled_time = (
-        str(data.get("scheduled_time", "TBD")).replace("T", " ")
-        if data.get("scheduled_time")
-        else "TBD (flexible scheduling)"
-    )
-
-    commit_by_text = (
-        commit_by.isoformat(timespec="minutes").replace("T", " ")
-        if commit_by is not None
-        else "N/A"
-    )
-
+    # Use human-readable formatters
+    scheduled_time = format_scheduled_time(data.get("scheduled_time"))
+    commit_by_text = format_commit_by(commit_by)
     invitees_summary = (
         "all group members"
         if data.get("invite_all_members")
         else f"{len(invitees)} users"
     )
-
-    location_text = str(data.get("location_type", "any")).replace("_", " ").title()
-    budget_text = str(data.get("budget_level", "any")).replace("_", " ").title()
-    transport_text = str(data.get("transport_mode", "any")).replace("_", " ").title()
-    date_preset_text = DATE_PRESET_LABELS.get(
-        str(data.get("date_preset", "custom")),
-        str(data.get("date_preset", "custom")).title(),
-    )
-    time_window_text = str(data.get("time_window", "custom")).title()
+    location_text = format_location_type(data.get("location_type"))
+    budget_text = format_budget_level(data.get("budget_level"))
+    transport_text = format_transport_mode(data.get("transport_mode"))
+    date_preset_text = format_date_preset(data.get("date_preset"))
+    time_window_text = format_time_window(data.get("time_window"))
 
     await query.edit_message_text(
         f"✅ *Event Created!*\n\n"
         f"Event ID: {event.event_id}\n"
-        f"Type: {data.get('event_type', 'N/A')}\n"
-        f"Description: {data.get('description', 'N/A')}\n"
-        f"Time: {scheduled_time}\n"
-        f"Commit-By: {commit_by_text}\n"
-        f"Date Preset: {date_preset_text}\n"
-        f"Time Window: {time_window_text}\n"
-        f"Duration: {data.get('duration_minutes', 120)} minutes\n"
-        f"Mode: {scheduling_mode}\n"
-        f"Location Type: {location_text}\n"
-        f"Budget: {budget_text}\n"
-        f"Transport: {transport_text}\n"
-        f"Threshold: {data.get('threshold_attendance', 'N/A')}\n"
-        f"Invitees: {invitees_summary}\n\n"
+        f"Type: {_escape_md(data.get('event_type', 'Not specified'))}\n"
+        f"Description: {_escape_md(data.get('description', 'Not provided'))}\n"
+        f"Time: {_escape_md(scheduled_time)}\n"
+        f"Commit-By: {_escape_md(commit_by_text)}\n"
+        f"Date Preset: {_escape_md(date_preset_text)}\n"
+        f"Time Window: {_escape_md(time_window_text)}\n"
+        f"Duration: {_escape_md(format_duration(data.get('duration_minutes')))}\n"
+        f"Mode: {_escape_md(scheduling_mode)}\n"
+        f"Location Type: {_escape_md(location_text)}\n"
+        f"Budget: {_escape_md(budget_text)}\n"
+        f"Transport: {_escape_md(transport_text)}\n"
+        f"Threshold: {_escape_md(data.get('threshold_attendance', 'Not set'))}\n"
+        f"Invitees: {_escape_md(invitees_summary)}\n\n"
         f"✅ Event has been automatically locked.\n"
         f"Status: Locked - No further changes allowed.\n\n"
         + (

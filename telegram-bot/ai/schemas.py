@@ -91,6 +91,9 @@ class EventDraftPatch(BaseModel):
     invitees_remove: List[str] = Field(default_factory=list)
     invite_all_members: Optional[bool] = None
     scheduling_mode: Optional[Literal["fixed", "flexible"]] = None
+    location_type: Optional[Literal["home", "outdoor", "cafe", "office", "gym"]] = None
+    budget_level: Optional[Literal["free", "low", "medium", "high"]] = None
+    transport_mode: Optional[Literal["walk", "public_transit", "drive", "any"]] = None
     note: Optional[str] = Field(max_length=500, default=None)
 
     @validator("invitees_add", "invitees_remove")
@@ -112,6 +115,14 @@ class EventDraftPatch(BaseModel):
 # ============================================================================
 
 
+class InferredConstraint(BaseModel):
+    """Schema for a single inferred constraint from chat context."""
+
+    constraint_type: Literal["if_joins", "if_attends", "unless_joins"]
+    target_username: str = Field(max_length=50, min_length=1)
+    note: str = Field(max_length=200, default="")
+
+
 class EventDraftFromContext(BaseModel):
     """Schema for event draft generated from chat context."""
 
@@ -123,6 +134,12 @@ class EventDraftFromContext(BaseModel):
     invite_all_members: bool = True
     invitees: List[str] = Field(default_factory=list)
     planning_notes: List[str] = Field(default_factory=list)
+    date_preset: Optional[Literal["today", "tomorrow", "weekend", "nextweek", "custom"]] = None
+    time_window: Optional[Literal["early-morning", "morning", "afternoon", "evening", "night"]] = None
+    location_type: Optional[Literal["home", "outdoor", "cafe", "office", "gym"]] = None
+    budget_level: Optional[Literal["free", "low", "medium", "high"]] = None
+    transport_mode: Optional[Literal["walk", "public_transit", "drive", "any"]] = None
+    inferred_constraints: List[InferredConstraint] = Field(default_factory=list)
 
     @validator("invitees")
     def normalize_invitees(cls, v: List[str]) -> List[str]:

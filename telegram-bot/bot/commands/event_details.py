@@ -9,6 +9,7 @@ from telegram.ext import ContextTypes
 from sqlalchemy import select
 from db.models import Event, User, ParticipantStatus
 from bot.common.attendance import has_attendee
+from bot.common.rbac import check_event_visibility_and_get_event
 from db.connection import get_session
 from config.settings import settings
 from bot.common.deeplinks import build_start_link
@@ -46,14 +47,17 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
     async with get_session(settings.db_url) as session:
-        result = await session.execute(
-            select(Event).where(Event.event_id == event_id)
+        user_id = user.id if user else None
+        chat_id = update.effective_chat.id if update.effective_chat else None
+        is_visible, event, group, error_msg = (
+            await check_event_visibility_and_get_event(
+                session, event_id, user_id,
+                telegram_chat_id=chat_id
+            )
         )
-        event = result.scalar_one_or_none()
 
-        if not event:
-            await update.message.reply_text("❌ Event not found.")
-
+        if not is_visible:
+            await update.message.reply_text(f"❌ {error_msg or 'Event not found.'}")
             return
 
         logs = await _get_event_logs(session, event_id)
@@ -99,14 +103,18 @@ async def handle_callback(
 
 async def show_details(query, context: ContextTypes.DEFAULT_TYPE, event_id: int) -> None:
     """Show full event details for callback-based navigation."""
+    user_id = query.from_user.id if query.from_user else None
+    chat_id = getattr(getattr(query, "message", None), "chat_id", None)
     async with get_session(settings.db_url) as session:
-        result = await session.execute(
-            select(Event).where(Event.event_id == event_id)
+        is_visible, event, group, error_msg = (
+            await check_event_visibility_and_get_event(
+                session, event_id, user_id,
+                telegram_chat_id=chat_id
+            )
         )
-        event = result.scalar_one_or_none()
 
-        if not event:
-            await query.edit_message_text("❌ Event not found.")
+        if not is_visible:
+            await query.edit_message_text(f"❌ {error_msg or 'Event not found.'}")
             return
 
         logs = await _get_event_logs(session, event_id)
@@ -131,14 +139,18 @@ async def show_details(query, context: ContextTypes.DEFAULT_TYPE, event_id: int)
 
 async def show_status(query, context: ContextTypes.DEFAULT_TYPE, event_id: int) -> None:
     """Show event status for callback-based navigation."""
+    user_id = query.from_user.id if query.from_user else None
+    chat_id = getattr(getattr(query, "message", None), "chat_id", None)
     async with get_session(settings.db_url) as session:
-        result = await session.execute(
-            select(Event).where(Event.event_id == event_id)
+        is_visible, event, group, error_msg = (
+            await check_event_visibility_and_get_event(
+                session, event_id, user_id,
+                telegram_chat_id=chat_id
+            )
         )
-        event = result.scalar_one_or_none()
 
-        if not event:
-            await query.edit_message_text("❌ Event not found.")
+        if not is_visible:
+            await query.edit_message_text(f"❌ {error_msg or 'Event not found.'}")
             return
 
         log_count = await _get_event_log_count(session, event_id)

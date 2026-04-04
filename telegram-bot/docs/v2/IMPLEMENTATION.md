@@ -1,14 +1,14 @@
-# Implementation Notes — Coordination Engine Bot v2
+# Implementation Notes — Coordination Engine Bot v3
 
-**Document Version:** 5.0
-**Date:** 2026-04-02
-**Status:** Phase 5 Complete — Production Features & Polish
+**Document Version:** 6.0
+**Date:** 2026-04-04
+**Status:** Phase 6 Complete — Clean Architecture Refactoring
 
 ---
 
 ## Executive Summary
 
-This document tracks the comprehensive refactoring and implementation of the Coordination Engine Telegram Bot according to PRD v2 specifications.
+This document tracks the comprehensive refactoring and implementation of the Coordination Engine Telegram Bot according to PRD v2 specifications and Clean Architecture principles.
 
 ### Phase 1 Completed ✅
 
@@ -52,7 +52,7 @@ This document tracks the comprehensive refactoring and implementation of the Coo
 - **24h Event Reminders** — Daily group reminders for upcoming events
 - **Scheduler Integration** — Job queue for periodic background tasks
 
-### Phase 5 Completed ✅ (Current)
+### Phase 5 Completed ✅
 
 **Production Features & Polish:**
 - **LLM Schema Validation** — Pydantic-based output validation (TODO-016)
@@ -60,6 +60,36 @@ This document tracks the comprehensive refactoring and implementation of the Coo
 - **Waitlist Support** — Automatic waitlist for oversubscribed events (TODO-023)
 - **/my_history Command** — Privacy-preserving personal timeline (TODO-032)
 - **Organizer Rotation** — Prevents coordination authority accumulation (TODO-011)
+
+### Phase 6 Completed ✅ (Current)
+
+**Clean Architecture Refactoring:**
+- **Domain Layer** — `coordination_engine/domain/` with ZERO external dependencies
+  - Event aggregate root with full state machine, invariants, optimistic concurrency
+  - 6 value objects (EventType, EventState, ConstraintType, etc.)
+  - 14 domain events (EventCreated, ParticipantJoined, ThresholdReached, etc.)
+  - 8 repository interfaces (ports)
+  - 3 pure domain services (EventStateService, ParticipantService, ScheduleConflictService)
+  - 8 domain exceptions
+- **Application Layer** — `coordination_engine/application/` with CQRS-lite
+  - 8 command handlers (CreateEvent, JoinEvent, ConfirmAttendance, etc.)
+  - 4 query handlers (GetEvent, GetEventsForGroup, GetEventsForUser, GetParticipant)
+  - EventBus with pub/sub and exception isolation
+  - EventApplicationService facade for presentation layer
+  - 4 service interface ports (IMessage, ILLM, IScheduler, INotification)
+- **Infrastructure Layer** — `coordination_engine/infrastructure/`
+  - SQLAlchemyEventStore (Unit of Work) with 6 repository implementations
+  - Bidirectional ORM ↔ Domain entity mappers
+  - TelegramMessageService + TelegramNotificationService
+  - LLMServiceAdapter wrapping existing ai.llm.LLMClient
+- **Presentation Layer** — `coordination_engine/presentation/`
+  - Thin handlers delegating to EventApplicationService
+  - Presenters for formatting EventDTO → Telegram Markdown
+  - MentionHandler with LLM inference + constraint extraction
+  - Command handlers for /join, /confirm, /lock, /modify_event
+- **Shared** — DI container, bootstrap composition root
+- **59 tests** passing with 0 warnings
+- **Timezone safety** — All datetime uses `datetime.now(timezone.utc)`
 
 ---
 
@@ -97,6 +127,11 @@ This document tracks the comprehensive refactoring and implementation of the Coo
 | Optimistic concurrency | ✅ Complete | `Event.version` field |
 | Hybrid AI engine | ✅ Complete | Rules-first, LLM fallback |
 | Mention-driven orchestration | ✅ Complete | Natural language inference |
+| **Clean Architecture** | ✅ Complete | `coordination_engine/` package |
+| Domain Event Aggregate | ✅ Complete | State machine, invariants, concurrency |
+| CQRS-lite Command Handlers | ✅ Complete | 8 commands + 4 queries |
+| EventBus Pub/Sub | ✅ Complete | Exception isolation |
+| Repository Implementations | ✅ Complete | 6 repos + Unit of Work |
 | Memory layer commands | ✅ Complete | `/memory`, `/recall`, `/remember` |
 | State-aware navigation | ✅ Complete | Menus respect user status |
 

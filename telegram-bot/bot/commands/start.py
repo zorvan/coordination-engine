@@ -3,6 +3,7 @@
 from telegram import Update
 from telegram.ext import ContextTypes
 
+from bot.common.menus import build_main_menu
 from bot.handlers import feedback
 
 
@@ -13,6 +14,8 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     args = context.args or []
     payload = args[0] if args else ""
+    
+    # Handle deep links
     if payload.startswith("avail_"):
         try:
             event_id = int(payload.replace("avail_", ""))
@@ -41,6 +44,7 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             await feedback.collect_feedback(update, context)
             return
 
+    # Show main menu with buttons
     display_name = (
         update.effective_user.full_name
         if update.effective_user
@@ -48,14 +52,16 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     )
 
     await update.message.reply_text(
-        f"👋 Hello, {display_name}!\n\n"
+        f"👋 *Welcome, {display_name}!*\n\n"
         "I'm your coordination bot. I help organize group events with "
         "AI-powered scheduling.\n\n"
-        "Available commands:\n"
+        "💡 *Use the menu buttons below* to navigate instead of typing commands!\n\n"
+        "Quick commands:\n"
         "/organize_event - Create a new event\n"
-        "/events - List recent events with IDs\n"
+        "/events - List recent events\n"
         "/my_groups - List your groups\n"
         "/profile - View your profile\n"
-        "/reputation - Check your reputation\n"
-        "/help - Show this help message"
+        "/reputation - Check your reputation",
+        reply_markup=build_main_menu(),
+        parse_mode="Markdown",
     )

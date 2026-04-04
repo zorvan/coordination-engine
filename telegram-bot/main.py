@@ -22,31 +22,11 @@ from telegram.ext import (
 from config.settings import Settings
 from config.logging import setup_logging
 from bot.commands import (
-    start,
-    my_groups,
-    profile,
-    reputation,
-    organize_event,
-    private_organize_event,
-    join,
-    confirm,
-    back,
-    cancel,
-    lock,
-    request_confirmations,
-    early_feedback,
-    event_note,
-    modify_event,
-    constraints,
-    suggest_time,
-    status,
-    event_details,
-    events,
-    check_deadlines,
-    memory,
-    my_history,
+    start, my_groups, profile, reputation, organize_event, private_organize_event,
+    join, confirm, back, cancel, lock, request_confirmations, early_feedback, event_note, modify_event, constraints, suggest_time, status,
+    event_details, events, check_deadlines, memory, my_history,
 )
-from bot.handlers import event_flow, feedback, membership, mentions
+from bot.handlers import event_flow, feedback, membership, mentions, menus
 from ai.llm import LLMClient
 from db.connection import check_db_connection, create_engine, init_db
 
@@ -54,9 +34,9 @@ from db.connection import check_db_connection, create_engine, init_db
 async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Log full traceback for uncaught update handling errors."""
     logger = logging.getLogger("coord_bot.bot")
-    logger.exception(
-        "Unhandled Telegram update error. update=%r", update, exc_info=context.error
-    )
+    logger.exception("Unhandled Telegram update error. update=%r",
+                     update,
+                     exc_info=context.error)
 
 
 async def check_llm_availability(logger: logging.Logger) -> None:
@@ -115,9 +95,7 @@ def main():
     loop.run_until_complete(check_llm_availability(logger))
     if settings.db_url:
         if not settings.db_url.startswith("postgresql+asyncpg://"):
-            db_url = settings.db_url.replace(
-                "postgresql://", "postgresql+asyncpg://", 1
-            )
+            db_url = settings.db_url.replace("postgresql://", "postgresql+asyncpg://", 1)
         else:
             db_url = settings.db_url
         loop.run_until_complete(check_db_availability(logger, db_url))
@@ -128,7 +106,11 @@ def main():
         logger.info("Database initialization complete")
 
     # Build application with job queue for scheduled tasks
-    application = ApplicationBuilder().token(settings.telegram_token).build()
+    application = (
+        ApplicationBuilder()
+        .token(settings.telegram_token)
+        .build()
+    )
 
     # Store settings in bot_data for access by handlers and jobs
     application.bot_data["settings"] = settings
@@ -203,29 +185,24 @@ def main():
     # Register callback query handlers
     # NOTE: Order matters! More specific patterns must come before general ones.
     callback_handlers = [
+        # Menu handlers (must come before general patterns)
+        (r"^menu_", menus.handle_menu_callback),
+        
         # Event flow handlers (more specific, must come before general event_)
         (r"^event_(join|confirm|back|cancel|lock)_", event_flow.handle_event_flow),
-        (
-            r"^event_unconfirm_",
-            event_flow.handle_event_flow,
-        ),  # Uncommit (separate from back)
-        (
-            r"^event_(details|status|logs|constraints|close)_",
-            event_details.handle_callback,
-        ),
+        (r"^event_unconfirm_", event_flow.handle_event_flow),  # Uncommit (separate from back)
+        (r"^event_(details|status|logs|constraints|close)_", event_details.handle_callback),
         (r"^event_modify_", mentions.handle_callback),
+
         # Event creation handlers (general, comes after specific ones)
         (r"^event_", organize_event.handle_callback),
         (r"^private_event_", organize_event.private_handle_callback),
+
         # Modify input handlers
         (r"^modinput_", mentions.handle_callback),
+
         # Other handlers
         (r"^constraint_nl_", constraints.handle_callback),
-        (r"^mnpick_", mentions.handle_disambiguation_callbacks),
-        (
-            r"^mention_(start_organize|show_status|ask_help)$",
-            mentions.handle_disambiguation_callbacks,
-        ),
         (r"^mentionact_", mentions.handle_mention_callback),
         (r"^suggest_time_retry_", suggest_time.handle_callback),
         (r"^feedback_", feedback.handle_feedback_callback),
@@ -272,11 +249,7 @@ def main():
     logger.info("Bot started. Press Ctrl+C to stop.")
 
     # Check if webhook mode is enabled
-    if (
-        settings.environment == "production"
-        and hasattr(settings, "webhook_url")
-        and settings.webhook_url
-    ):
+    if settings.environment == "production" and hasattr(settings, 'webhook_url') and settings.webhook_url:
         # Production: Use webhook with worker queue
         logger.info("Starting in webhook mode: %s", settings.webhook_url)
         from bot.common.webhook import setup_webhook, shutdown_webhook
@@ -285,8 +258,8 @@ def main():
             await setup_webhook(
                 application,
                 webhook_url=settings.webhook_url,
-                webhook_port=int(getattr(settings, "webhook_port", 8443)),
-                webhook_secret=getattr(settings, "webhook_secret", None),
+                webhook_port=int(getattr(settings, 'webhook_port', 8443)),
+                webhook_secret=getattr(settings, 'webhook_secret', None),
             )
 
         try:

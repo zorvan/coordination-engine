@@ -18,6 +18,7 @@ from db.connection import get_session
 from db.users import get_or_create_user_id
 from config.settings import settings
 from bot.common.scheduling import find_user_event_conflict
+from bot.common.rbac import check_event_visibility_and_get_event
 from bot.services import (
     ParticipantService,
     EventLifecycleService,
@@ -69,14 +70,17 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
     async with get_session(settings.db_url) as session:
-        # Fetch event
-        result = await session.execute(
-            select(Event).where(Event.event_id == event_id)
+        # Check event visibility based on group membership
+        chat_id = message.chat_id if message.chat else None
+        is_visible, event, group, error_msg = (
+            await check_event_visibility_and_get_event(
+                session, event_id, telegram_user_id,
+                telegram_chat_id=chat_id
+            )
         )
-        event = result.scalar_one_or_none()
 
-        if not event:
-            await message.reply_text("❌ Event not found.")
+        if not is_visible:
+            await message.reply_text(f"❌ {error_msg or 'Event not found.'}")
             return
 
         # Validate event state

@@ -10,7 +10,25 @@ from telegram.ext import ContextTypes
 
 from bot.common.deeplinks import build_start_link
 from bot.common.event_presenters import format_user_display
+from bot.common.event_formatters import (
+    format_date_preset,
+    format_time_window,
+    format_location_type,
+    format_budget_level,
+    format_transport_mode,
+    format_scheduled_time,
+    format_duration,
+)
 from config.settings import settings
+
+
+# Date preset labels for display purposes
+DATE_PRESET_LABELS = {
+    "today": "Today",
+    "tomorrow": "Tomorrow",
+    "weekend": "Weekend",
+    "nextweek": "Next Week",
+}
 
 
 logger = logging.getLogger("coord_bot.event_notifications")
@@ -80,10 +98,10 @@ async def send_event_invitation_dm(
 
     bot_username = context.bot.username
 
-    scheduled_time = (
-        str(event_data.get("scheduled_time", "TBD")).replace("T", " ")
-        if event_data.get("scheduled_time")
-        else "TBD (flexible scheduling)"
+    # Use human-readable formatters
+    scheduled_time = format_scheduled_time(
+        event_data.get("scheduled_time"),
+        include_flexible_note=True
     )
 
     invitees = event_data.get("invitees", [])
@@ -93,11 +111,12 @@ async def send_event_invitation_dm(
         if invite_all else f"{len(invitees)} users"
     )
 
-    location_text = str(event_data.get("location_type", "any")).replace("_", " ").title()
-    budget_text = str(event_data.get("budget_level", "any")).replace("_", " ").title()
-    transport_text = str(event_data.get("transport_mode", "any")).replace("_", " ").title()
-    date_preset_text = str(event_data.get("date_preset", "custom")).title()
-    time_window_text = str(event_data.get("time_window", "custom")).title()
+    # Use human-readable formatters for planning preferences
+    location_text = format_location_type(event_data.get("location_type"))
+    budget_text = format_budget_level(event_data.get("budget_level"))
+    transport_text = format_transport_mode(event_data.get("transport_mode"))
+    date_preset_text = format_date_preset(event_data.get("date_preset"))
+    time_window_text = format_time_window(event_data.get("time_window"))
 
     # Escape description for Markdown (avoid parsing errors with special chars)
     description_raw = event_data.get("description", "N/A")
@@ -142,22 +161,31 @@ async def send_event_invitation_dm(
         )
 
     try:
+        # Escape formatted text for Markdown safety
+        scheduled_time_escaped = str(scheduled_time).replace("_", "\\_").replace("*", "\\*").replace("[", "\\[").replace("]", "\\]")
+        date_preset_escaped = str(date_preset_text).replace("_", "\\_").replace("*", "\\*").replace("[", "\\[").replace("]", "\\]")
+        time_window_escaped = str(time_window_text).replace("_", "\\_").replace("*", "\\*").replace("[", "\\[").replace("]", "\\]")
+        duration_escaped = str(format_duration(event_data.get('duration_minutes'))).replace("_", "\\_").replace("*", "\\*").replace("[", "\\[").replace("]", "\\]")
+        location_escaped = str(location_text).replace("_", "\\_").replace("*", "\\*").replace("[", "\\[").replace("]", "\\]")
+        budget_escaped = str(budget_text).replace("_", "\\_").replace("*", "\\*").replace("[", "\\[").replace("]", "\\]")
+        transport_escaped = str(transport_text).replace("_", "\\_").replace("*", "\\*").replace("[", "\\[").replace("]", "\\]")
+        
         await context.bot.send_message(
             chat_id=telegram_user_id,
             text=(
                 f"✨ *Event Invitation*\n\n"
                 f"Event ID: {event_id}\n"
                 f"Organized by: {organizer_text}\n"
-                f"Type: {event_data.get('event_type', 'N/A')}\n"
+                f"Type: {event_data.get('event_type', 'Not specified')}\n"
                 f"Description: {escaped_description}\n"
-                f"Time: {scheduled_time}\n"
-                f"Date Preset: {date_preset_text}\n"
-                f"Time Window: {time_window_text}\n"
-                f"Duration: {event_data.get('duration_minutes', 120)} minutes\n"
-                f"Location Type: {location_text}\n"
-                f"Budget: {budget_text}\n"
-                f"Transport: {transport_text}\n"
-                f"Threshold: {event_data.get('threshold_attendance', 'N/A')}\n"
+                f"Time: {scheduled_time_escaped}\n"
+                f"Date Preset: {date_preset_escaped}\n"
+                f"Time Window: {time_window_escaped}\n"
+                f"Duration: {duration_escaped}\n"
+                f"Location Type: {location_escaped}\n"
+                f"Budget: {budget_escaped}\n"
+                f"Transport: {transport_escaped}\n"
+                f"Threshold: {event_data.get('threshold_attendance', 'Not set')}\n"
                 f"Invitees: {invitees_summary}"
             ),
             reply_markup=build_event_invitation_keyboard(bot_username, event_id),
@@ -201,22 +229,37 @@ async def send_event_modification_request_dm(
         else "TBD (flexible scheduling)"
     )
 
-    location_text = str(event_data.get("location_type", "any")).replace("_", " ").title()
+    location_type_val = event_data.get("location_type")
+    location_text = location_type_val.replace("_", " ").title() if location_type_val else "As discussed"
+
+    change_text = event_data.get("change_text", "")
+    requester = event_data.get("requester", "Unknown")
+
+    escaped_change = (
+        str(change_text)
+        .replace("[", "\\[")
+        .replace("]", "\\]")
+        .replace("_", "\\_")
+        .replace("*", "\\*")
+        .replace("`", "\\`")
+    )[:500]
 
     try:
         await context.bot.send_message(
             chat_id=telegram_user_id,
             text=(
-                f"📅 *Event Modification Request*\n\n"
-                f"Event ID: {event_id}\n"
+                f"🔧 *Event Modification Request*\n\n"
+                f"Event ID: `{event_id}`\n"
+                f"Requested by: {requester}\n"
                 f"Description: {event_data.get('description', 'N/A')}\n"
                 f"Time: {scheduled_time}\n"
                 f"Location: {location_text}\n\n"
-                f"Deadline: {deadline_info}\n\n"
-                "Please review the event and let the organizer know if you can attend "
-                "or if you need to modify your availability."
+                f"*Requested changes:*\n{escaped_change}\n\n"
+                f"⏰ {deadline_info}\n\n"
+                "Please review and approve or reject the requested changes."
             ),
             reply_markup=build_event_modification_keyboard(bot_username, event_id, request_id),
+            parse_mode="Markdown",
         )
         logger.info(f"Event modification request DM sent to user {telegram_user_id} for event {event_id}")
         return True

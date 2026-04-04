@@ -2,20 +2,23 @@
 
 Telegram group coordination bot with hybrid AI + deterministic command flows.
 
-**Version 2.0** — Three-layer architecture with normalized participant management, automated lifecycle events, and comprehensive service integration.
+**Version 3.0** — Clean Architecture with domain-driven design, normalized participant management, automated lifecycle events, and comprehensive service integration.
 
-> **Phase 2 Complete** ✅ — Service-oriented architecture, RBAC, threshold enforcement, and mutual dependence visibility implemented. See [IMPLEMENTATION.md](docs/v2/IMPLEMENTATION.md) for details.
+> **Phase 6 Complete** ✅ — Clean Architecture refactoring: domain layer with rich aggregates, application layer with CQRS-lite use cases, infrastructure layer with repository implementations, and presentation layer with thin handlers. See [docs/v2/IMPLEMENTATION.md](docs/v2/IMPLEMENTATION.md) for details.
 
-This README reflects the **current v2 implementation** with normalized database schema and service-oriented architecture.
+This README reflects the **current v3 implementation** with Clean Architecture, normalized database schema, and service-oriented design.
 
 ## What This Bot Does
 
 The bot helps groups coordinate events with:
 
+- **Clean Architecture**: Domain → Application → Infrastructure → Presentation, with dependency rule enforced
 - **Three-layer architecture**: Coordination (state management), Materialization (announcements), Memory (post-event narratives)
 - **Normalized participant management**: EventParticipant table replaces JSON attendance_list
 - **Automated lifecycle events**: Materialization announcements and memory collection triggers
-- **Service-oriented design**: Single write paths for all operations with proper validation
+- **Domain-driven design**: Event aggregate root with state machine, invariants, and optimistic concurrency
+- **CQRS-lite**: Separate command handlers (write) and query handlers (read)
+- **Event-driven**: Domain events published via EventBus → notifications
 - **Idempotency framework**: Prevents duplicate command execution (feature-flagged)
 - **Optimistic concurrency control**: Version-based conflict detection for state transitions
 - Structured slash-command workflows for speed and reliability
@@ -45,7 +48,44 @@ python main.py
 
 ## Architecture Overview
 
-### Three-Layer Architecture
+### Clean Architecture Layers
+
+```
+coordination_engine/
+├── domain/                    # Core — ZERO external dependencies
+│   ├── entities.py            # Event (aggregate root), User, Group, EventParticipant
+│   ├── value_objects.py       # EventType, EventState, ConstraintType, enums
+│   ├── events.py              # 14 domain events (EventCreated, ParticipantJoined, etc.)
+│   ├── services.py            # Pure domain logic: state checks, thresholds, conflicts
+│   ├── repositories.py        # 8 repository interfaces (ports)
+│   └── exceptions.py          # 8 domain exceptions
+│
+├── application/               # Use cases — orchestrates domain
+│   ├── dto.py                 # Commands, Queries, Result envelope
+│   ├── commands.py            # 8 command handlers (CreateEvent, Join, Confirm, etc.)
+│   ├── queries.py             # 4 query handlers (GetEvent, GetEventsForGroup, etc.)
+│   ├── event_bus.py           # Pub/sub with exception isolation
+│   ├── ports.py               # Service interfaces (IMessage, ILLM, IScheduler, INotification)
+│   └── services.py            # EventApplicationService facade
+│
+├── infrastructure/            # External implementations
+│   ├── persistence.py         # SQLAlchemy UoW + 6 repository implementations
+│   ├── telegram_adapter.py    # TelegramMessageService + TelegramNotificationService
+│   └── llm_adapter.py         # LLMServiceAdapter wrapping ai.llm.LLMClient
+│
+├── presentation/              # Input adapters
+│   ├── presenters.py          # format_event_card(), format_event_details()
+│   ├── command_handlers.py    # Telegram handlers using EventApplicationService
+│   ├── event_flow_handler.py  # Callback-based event interaction
+│   └── mention_handler.py     # MentionHandler with LLM inference
+│
+└── shared/
+    └── container.py           # Simple DI container
+```
+
+**Dependency Rule**: Inner layers know NOTHING about outer layers. All dependencies flow inward through interfaces (ports).
+
+### Three-Layer Business Architecture
 
 ```
 ┌─────────────────────────────────────────┐
@@ -92,11 +132,23 @@ python main.py
 
 ### Service Integration
 
-**Core Services (Single Write Paths):**
+**Clean Architecture Services:**
+
+| Layer | Component | Purpose |
+|-------|-----------|---------|
+| Domain | `Event` (aggregate) | State machine, invariants, optimistic concurrency |
+| Domain | `ParticipantService` | Pure domain logic: can_join, can_confirm, threshold checks |
+| Application | `EventApplicationService` | Facade: create_event, join_event, transition_event, etc. |
+| Application | `EventBus` | Domain event pub/sub → notification wiring |
+| Infrastructure | `SQLAlchemyEventStore` | Unit of Work + 6 repository implementations |
+| Infrastructure | `TelegramMessageService` | Telegram API adapter |
+| Infrastructure | `LLMServiceAdapter` | AI inference adapter |
+
+**Legacy Services (still functional):**
 
 | Service | Purpose |
 |---------|---------|
-| `ParticipantService` | All join/confirm/cancel operations |
+| `ParticipantService` (bot/) | All join/confirm/cancel operations |
 | `EventStateTransitionService` | State machine with validation + concurrency |
 | `EventLifecycleService` | Orchestrates transitions across all three layers |
 | `EventMaterializationService` | Group announcements and DM notifications |
@@ -112,8 +164,36 @@ All services use async SQLAlchemy with proper transaction management.
 | [QUICKSTART.md](docs/v2/QUICKSTART.md) | Get running in 15 minutes |
 | [USER_FLOWS.md](docs/v2/USER_FLOWS.md) | Complete user flow specifications |
 | [PRD v2](docs/v2/coordination-engine-PRD-v2.md) | Product requirements document |
-| [IMPLEMENTATION.md](docs/v2/IMPLEMENTATION.md) | Architecture decisions and TODOs |
-| [REFACTORING_SUMMARY.md](docs/v2/REFACTORING_SUMMARY.md) | Phase 1 & 2 refactoring summary |
+| [IMPLEMENTATION.md](docs/v2/IMPLEMENTATION.md) | Architecture decisions and TODOs (includes Phase 6 Clean Architecture) |
+| [REFACTORING_SUMMARY.md](docs/v2/REFACTORING_SUMMARY.md) | Refactoring summaries (Phase 1–6) |
+
+## Using the Clean Architecture
+
+The new `coordination_engine/` package provides a clean API for bot operations:
+
+```python
+from coordination_engine.bootstrap import build_container
+from coordination_engine.application.dto import CreateEventCommand, JoinEventCommand
+
+# Build the application (composition root)
+container = build_container(database_url, telegram_context, llm_client, notification_service)
+app = container.resolve("app_service")
+
+# Create an event
+result = await app.create_event(CreateEventCommand(
+    group_telegram_id=chat_id,
+    organizer_telegram_id=user_id,
+    description="Board game night",
+    threshold_attendance=5,
+))
+
+# Join an event
+result = await app.join_event(JoinEventCommand(
+    event_id=event_id,
+    telegram_user_id=user_id,
+    source="callback",
+))
+```
 
 ## Core Interaction Modes
 

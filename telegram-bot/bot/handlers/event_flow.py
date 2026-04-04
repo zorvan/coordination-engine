@@ -12,8 +12,13 @@ from config.settings import settings
 from bot.common.event_states import (
     STATE_EXPLANATIONS,
 )
+from bot.common.event_formatters import (
+    format_location_type,
+    format_scheduled_time,
+)
 from bot.common.scheduling import find_user_event_conflict
 from bot.common.event_access import get_event_admin_telegram_id, get_event_organizer_telegram_id
+from bot.common.rbac import check_event_visibility_and_get_event
 from bot.services import ParticipantService, EventLifecycleService
 
 logger = logging.getLogger(__name__)
@@ -58,13 +63,17 @@ async def handle_join(query, context: ContextTypes.DEFAULT_TYPE, event_id: int) 
 
     db_url = settings.db_url or ""
     async with get_session(db_url) as session:
-        result = await session.execute(
-            select(Event).where(Event.event_id == event_id)
+        # Check event visibility based on group membership
+        chat_id = getattr(getattr(query, "message", None), "chat_id", None)
+        is_visible, event, group, error_msg = (
+            await check_event_visibility_and_get_event(
+                session, event_id, telegram_user_id,
+                telegram_chat_id=chat_id
+            )
         )
-        event = result.scalar_one_or_none()
 
-        if not event:
-            await query.edit_message_text("❌ Event not found.")
+        if not is_visible:
+            await query.edit_message_text(f"❌ {error_msg or 'Event not found.'}")
             return
 
         if event.state in ["locked", "completed", "cancelled"]:
@@ -236,8 +245,8 @@ async def handle_join(query, context: ContextTypes.DEFAULT_TYPE, event_id: int) 
 
         # Build rich status message
         planning_prefs = event.planning_prefs if event.planning_prefs else {}
-        time_str = event.scheduled_time.strftime("%Y-%m-%d %H:%M") if event.scheduled_time else "TBD"
-        location = planning_prefs.get("location_type", "TBD").replace("_", " ").title()
+        time_str = format_scheduled_time(event.scheduled_time, include_flexible_note=False)
+        location = format_location_type(planning_prefs.get("location_type"))
 
         # Get attendee counts from participant service
         interested_count = await participant_service.get_interested_count(event_id)
@@ -271,14 +280,17 @@ async def handle_confirm(query, context: ContextTypes.DEFAULT_TYPE, event_id: in
 
     db_url = settings.db_url or ""
     async with get_session(db_url) as session:
-        result = await session.execute(
-            select(Event).where(Event.event_id == event_id)
+        # Check event visibility based on group membership
+        chat_id = getattr(getattr(query, "message", None), "chat_id", None)
+        is_visible, event, group, error_msg = (
+            await check_event_visibility_and_get_event(
+                session, event_id, telegram_user_id,
+                telegram_chat_id=chat_id
+            )
         )
-        event = result.scalar_one_or_none()
 
-        if not event:
-            await query.edit_message_text("❌ Event not found.")
-
+        if not is_visible:
+            await query.edit_message_text(f"❌ {error_msg or 'Event not found.'}")
             return
 
         if event.state in ["locked", "completed", "cancelled"]:
@@ -404,8 +416,8 @@ async def handle_confirm(query, context: ContextTypes.DEFAULT_TYPE, event_id: in
 
         # Build rich status message
         planning_prefs = event.planning_prefs if event.planning_prefs else {}
-        time_str = event.scheduled_time.strftime("%Y-%m-%d %H:%M") if event.scheduled_time else "TBD"
-        location = planning_prefs.get("location_type", "TBD").replace("_", " ").title()
+        time_str = format_scheduled_time(event.scheduled_time, include_flexible_note=False)
+        location = format_location_type(planning_prefs.get("location_type"))
 
         # Get attendee counts from participant service
         interested_count = await participant_service.get_interested_count(event_id)
@@ -434,12 +446,19 @@ async def handle_back(query, context: ContextTypes.DEFAULT_TYPE, event_id: int) 
     telegram_user_id = query.from_user.id
     db_url = settings.db_url or ""
     async with get_session(db_url) as session:
-        event = (
-            await session.execute(select(Event).where(Event.event_id == event_id))
-        ).scalar_one_or_none()
-        if not event:
-            await query.edit_message_text("❌ Event not found.")
+        # Check event visibility based on group membership
+        chat_id = getattr(getattr(query, "message", None), "chat_id", None)
+        is_visible, event, group, error_msg = (
+            await check_event_visibility_and_get_event(
+                session, event_id, telegram_user_id,
+                telegram_chat_id=chat_id
+            )
+        )
+
+        if not is_visible:
+            await query.edit_message_text(f"❌ {error_msg or 'Event not found.'}")
             return
+
         if event.state == "locked":
             await query.edit_message_text("❌ Event is locked. Cannot uncommit.")
             return
@@ -482,14 +501,17 @@ async def handle_cancel(query, context: ContextTypes.DEFAULT_TYPE, event_id: int
 
     db_url = settings.db_url or ""
     async with get_session(db_url) as session:
-        result = await session.execute(
-            select(Event).where(Event.event_id == event_id)
+        # Check event visibility based on group membership
+        chat_id = getattr(getattr(query, "message", None), "chat_id", None)
+        is_visible, event, group, error_msg = (
+            await check_event_visibility_and_get_event(
+                session, event_id, telegram_user_id,
+                telegram_chat_id=chat_id
+            )
         )
-        event = result.scalar_one_or_none()
 
-        if not event:
-            await query.edit_message_text("❌ Event not found.")
-
+        if not is_visible:
+            await query.edit_message_text(f"❌ {error_msg or 'Event not found.'}")
             return
 
         # Use ParticipantService for cancel operation
@@ -552,14 +574,17 @@ async def handle_lock(query, context: ContextTypes.DEFAULT_TYPE, event_id: int) 
 
     db_url = settings.db_url or ""
     async with get_session(db_url) as session:
-        result = await session.execute(
-            select(Event).where(Event.event_id == event_id)
+        # Check event visibility based on group membership
+        chat_id = getattr(getattr(query, "message", None), "chat_id", None)
+        is_visible, event, group, error_msg = (
+            await check_event_visibility_and_get_event(
+                session, event_id, telegram_user_id,
+                telegram_chat_id=chat_id
+            )
         )
-        event = result.scalar_one_or_none()
 
-        if not event:
-            await query.edit_message_text("❌ Event not found.")
-
+        if not is_visible:
+            await query.edit_message_text(f"❌ {error_msg or 'Event not found.'}")
             return
 
         if event.state != "confirmed":

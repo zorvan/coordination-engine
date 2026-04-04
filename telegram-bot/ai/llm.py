@@ -196,6 +196,9 @@ class LLMClient:
         Return JSON patch fields only when explicit in user request.
         Keep deterministic and conservative.
 
+        CRITICAL: If the user mentions a location (e.g., "at Amin's house", "move to the park"),
+        update the description to reflect it. Do NOT default to generic locations.
+
         Current draft:
         {current_draft}
 
@@ -204,7 +207,7 @@ class LLMClient:
 
         Output JSON only:
         {{
-          "description": "string or null",
+          "description": "string or null — include location if user mentions one",
           "event_type": "social|sports|work|null",
           "scheduled_time_iso": "YYYY-MM-DDTHH:MM or null",
           "clear_time": true/false,
@@ -214,6 +217,9 @@ class LLMClient:
           "invitees_remove": ["charlie"] or [],
           "invite_all_members": true/false/null,
           "scheduling_mode": "fixed|flexible|null",
+          "location_type": "home|outdoor|cafe|office|gym or null",
+          "budget_level": "free|low|medium|high or null",
+          "transport_mode": "walk|public_transit|drive|any or null",
           "note": "constraint/suggestion note or null"
         }}
         """
@@ -235,6 +241,9 @@ class LLMClient:
                 ),
                 "invite_all_members": parsed.get("invite_all_members"),
                 "scheduling_mode": parsed.get("scheduling_mode"),
+                "location_type": parsed.get("location_type"),
+                "budget_level": parsed.get("budget_level"),
+                "transport_mode": parsed.get("transport_mode"),
                 "note": parsed.get("note"),
             }
         except Exception:
@@ -251,6 +260,9 @@ class LLMClient:
                 "invite_all_members": None,
                 "scheduling_mode": None,
                 "note": None,
+                "location_type": None,
+                "budget_level": None,
+                "transport_mode": None,
             }
 
             if "flexible" in lowered:
@@ -308,6 +320,36 @@ class LLMClient:
                 else:
                     patch["event_type"] = "social"
 
+            # Location type detection
+            if any(token in lowered for token in ["my house", "your house", "their house", "someone's house", "amir's house", "john's house"]):
+                patch["location_type"] = "home"
+            elif any(token in lowered for token in ["park", "outdoor", "outside", "garden", "field"]):
+                patch["location_type"] = "outdoor"
+            elif any(token in lowered for token in ["cafe", "restaurant", "coffee shop", "diner"]):
+                patch["location_type"] = "cafe"
+            elif any(token in lowered for token in ["office", "workspace", "workplace", "meeting room"]):
+                patch["location_type"] = "office"
+            elif any(token in lowered for token in ["gym", "fitness", "workout place"]):
+                patch["location_type"] = "gym"
+
+            # Budget level detection
+            if any(token in lowered for token in ["free", "no cost", "cheap", "budget"]):
+                patch["budget_level"] = "free"
+            elif any(token in lowered for token in ["low cost", "inexpensive", "affordable"]):
+                patch["budget_level"] = "low"
+            elif any(token in lowered for token in ["moderate", "mid-range", "medium cost"]):
+                patch["budget_level"] = "medium"
+            elif any(token in lowered for token in ["expensive", "premium", "high-end", "luxury"]):
+                patch["budget_level"] = "high"
+
+            # Transport mode detection
+            if "walking" in lowered or "walk" in lowered:
+                patch["transport_mode"] = "walk"
+            elif any(token in lowered for token in ["public transit", "bus", "train", "metro", "subway"]):
+                patch["transport_mode"] = "public_transit"
+            elif any(token in lowered for token in ["driving", "drive", "car", "by car"]):
+                patch["transport_mode"] = "drive"
+
             return patch
 
     async def infer_event_draft_from_context(
@@ -324,12 +366,42 @@ class LLMClient:
         Be GENEROUS with inference — extract as much as possible from the conversation history.
         Even if time is uncertain, extract hints (e.g., "Saturday evening" → use next Saturday 19:00).
         If multiple people are mentioned, add them to invitees.
-        Never return null for description — summarize the intent.
-        Use defaults only where the conversation is silent:
-        - event_type: social
-        - threshold_attendance: 3
-        - duration_minutes: 120
-        - invite_all_members: true
+        NEVER return null for description — summarize the intent.
+
+        CRITICAL: Extract ALL parameters from the conversation. Do NOT use defaults unless the conversation is completely silent on that topic.
+        - event_type: "social" for hangouts/games/meetups, "sports" for athletic activities, "work" for professional/coding sessions
+        - threshold_attendance: If a minimum is discussed (e.g., "need at least 4"), use that. Otherwise infer from context (small gathering → 3, big party → 6+).
+        - duration_minutes: If duration is discussed (e.g., "for a couple hours" → 120, "quick meetup" → 60). Otherwise infer from context.
+        
+        CRITICAL RULES FOR invite_all_members:
+        - DEFAULT to TRUE unless the message EXPLICITLY excludes others
+        - Set FALSE ONLY for explicit privacy language: "just alice", "private meetup", "don't tell others", "only bob and me"
+        - Mentioning specific people does NOT mean private — it means they're emphasized/key attendees
+        - "@alice let's play games" → invite_all_members: TRUE (open invitation, Alice is just the organizer/contact)
+        - "Just alice and bob, private dinner" → invite_all_members: FALSE (explicit privacy)
+        
+        - invitees: List ALL people mentioned as potential attendees (with @ prefix, lowercase)
+        - key_attendees: List people who are emphasized/important to the event (organizers, contacts, conditional attendees). This is SEPARATE from privacy — mentions go here without affecting invite_all_members.
+        - date_preset: "today", "tomorrow", "weekend", "nextweek", or "custom" — infer from relative time references
+        - time_window: "early-morning", "morning", "afternoon", "evening", "night" — infer from time-of-day hints
+        - location_type: If a venue type is discussed (home, outdoor, cafe, office, gym), set it. Otherwise omit.
+        - budget_level: If cost is discussed (free, cheap, expensive), set it. Otherwise omit.
+        - transport_mode: If transport is discussed (walk, public_transit, drive), set it. Otherwise omit.
+        - scheduled_time_iso: If a specific date+time is discussed, set it as YYYY-MM-DDTHH:MM. Otherwise null.
+        - collapse_at_iso: Auto-cancel deadline. If scheduling_mode is flexible or time is unknown, set to ~7 days from now. Otherwise null.
+
+        CRITICAL: Extract location/context from the conversation.
+        - If a location is mentioned (e.g., "Amin's house", "the park", "gym downtown"), weave it into the description naturally.
+        - If a specific venue is discussed, include it in the description.
+        - Do NOT default to generic locations like "cafe" unless explicitly mentioned.
+        - The description should read like a natural invitation: "Board games at Amin's house" not "Social event at Cafe".
+
+        CRITICAL: Extract constraints from the conversation.
+        - If someone says "I'll come if X comes" → constraint: if_joins for X
+        - If someone says "I can only make it if Y is attending" → constraint: if_attends for Y
+        - If someone says "I won't go unless Z goes" → constraint: unless_joins for Z
+        - If someone says "I'm free Saturday" → note it in planning_notes
+        - Add inferred constraints to the constraints array with type, target_username, and a short note.
 
         User message:
         {message_text}
@@ -342,7 +414,7 @@ class LLMClient:
 
         Output JSON only:
         {{
-          "description": "short text",
+          "description": "short natural text with location if mentioned",
           "event_type": "social|sports|work",
           "scheduled_time_iso": "YYYY-MM-DDTHH:MM or null",
           "collapse_at_iso": "YYYY-MM-DDTHH:MM or null",
@@ -350,9 +422,24 @@ class LLMClient:
           "threshold_attendance": 3,
           "invite_all_members": true,
           "invitees": ["@alice", "@bob"],
-          "planning_notes": ["note 1", "note 2"]
+          "key_attendees": ["@alice"],
+          "planning_notes": ["note 1", "note 2"],
+          "date_preset": "today|tomorrow|weekend|nextweek|custom",
+          "time_window": "early-morning|morning|afternoon|evening|night",
+          "location_type": "home|outdoor|cafe|office|gym or null",
+          "budget_level": "free|low|medium|high or null",
+          "transport_mode": "walk|public_transit|drive|any or null",
+          "constraints": [
+            {{
+              "constraint_type": "if_joins|if_attends|unless_joins",
+              "target_username": "username_without_at",
+              "note": "short explanation"
+            }}
+          ]
         }}
 
+        The constraints array should be empty if no constraints are inferred.
+        The location_type, budget_level, and transport_mode should be null if not discussed.
         If scheduling mode is flexible or time is unknown, set scheduled_time_iso to null but still
         set collapse_at_iso to a reasonable deadline (e.g. 7 days from now at end of day) so the
         event can auto-cancel if interest stays low.
@@ -376,6 +463,20 @@ class LLMClient:
                 if not s.startswith("@"):
                     s = f"@{s}"
                 normalized_invitees.append(s.lower())
+            
+            # Normalize key_attendees (emphasized people, separate from privacy)
+            key_attendees_raw = parsed.get("key_attendees", [])
+            if not isinstance(key_attendees_raw, list):
+                key_attendees_raw = []
+            normalized_key_attendees = []
+            for raw in key_attendees_raw:
+                s = str(raw).strip()
+                if not s:
+                    continue
+                if not s.startswith("@"):
+                    s = f"@{s}"
+                normalized_key_attendees.append(s.lower())
+            
             notes = parsed.get("planning_notes", [])
             if not isinstance(notes, list):
                 notes = []
@@ -386,6 +487,79 @@ class LLMClient:
                     collapse_at = datetime.fromisoformat(collapse_raw.strip())
                 except ValueError:
                     collapse_at = None
+
+            # Extract inferred constraints
+            constraints_raw = parsed.get("constraints", [])
+            if not isinstance(constraints_raw, list):
+                constraints_raw = []
+            inferred_constraints = []
+            for c in constraints_raw:
+                if not isinstance(c, dict):
+                    continue
+                ctype = str(c.get("constraint_type", "")).strip().lower()
+                if ctype not in {"if_joins", "if_attends", "unless_joins"}:
+                    continue
+                target = c.get("target_username")
+                if target is not None:
+                    target = str(target).strip().lstrip("@")
+                    if not target:
+                        target = None
+                note = str(c.get("note", "")).strip()[:200]
+                if ctype and target:
+                    inferred_constraints.append({
+                        "constraint_type": ctype,
+                        "target_username": target,
+                        "note": note,
+                    })
+
+            # Extract optional location/budget/transport — only set if explicitly provided
+            location_type = parsed.get("location_type")
+            if isinstance(location_type, str) and location_type.strip():
+                location_type = location_type.strip().lower()
+                valid_locations = {"home", "outdoor", "cafe", "office", "gym"}
+                if location_type not in valid_locations:
+                    location_type = None
+            else:
+                location_type = None
+
+            budget_level = parsed.get("budget_level")
+            if isinstance(budget_level, str) and budget_level.strip():
+                budget_level = budget_level.strip().lower()
+                valid_budgets = {"free", "low", "medium", "high"}
+                if budget_level not in valid_budgets:
+                    budget_level = None
+            else:
+                budget_level = None
+
+            transport_mode = parsed.get("transport_mode")
+            if isinstance(transport_mode, str) and transport_mode.strip():
+                transport_mode = transport_mode.strip().lower()
+                valid_transport = {"walk", "public_transit", "drive", "any"}
+                if transport_mode not in valid_transport:
+                    transport_mode = None
+            else:
+                transport_mode = None
+
+            # Extract date_preset
+            date_preset = parsed.get("date_preset")
+            if isinstance(date_preset, str) and date_preset.strip():
+                date_preset = date_preset.strip().lower()
+                valid_presets = {"today", "tomorrow", "weekend", "nextweek", "custom"}
+                if date_preset not in valid_presets:
+                    date_preset = None
+            else:
+                date_preset = None
+
+            # Extract time_window
+            time_window = parsed.get("time_window")
+            if isinstance(time_window, str) and time_window.strip():
+                time_window = time_window.strip().lower()
+                valid_windows = {"early-morning", "morning", "afternoon", "evening", "night"}
+                if time_window not in valid_windows:
+                    time_window = None
+            else:
+                time_window = None
+
             return {
                 "description": str(
                     parsed.get("description", message_text or "Group planned event")
@@ -397,9 +571,16 @@ class LLMClient:
                 "threshold_attendance": max(1, min(200, threshold)),
                 "invite_all_members": bool(parsed.get("invite_all_members", True)),
                 "invitees": normalized_invitees,
+                "key_attendees": normalized_key_attendees,
                 "planning_notes": [
                     str(n).strip()[:300] for n in notes if str(n).strip()
                 ],
+                "date_preset": date_preset,
+                "time_window": time_window,
+                "location_type": location_type,
+                "budget_level": budget_level,
+                "transport_mode": transport_mode,
+                "inferred_constraints": inferred_constraints,
             }
         except Exception:
             return {
@@ -411,7 +592,14 @@ class LLMClient:
                 "threshold_attendance": 3,
                 "invite_all_members": True,
                 "invitees": ["@all"],
+                "key_attendees": [],
                 "planning_notes": ["Draft auto-generated from limited context."],
+                "date_preset": None,
+                "time_window": None,
+                "location_type": None,
+                "budget_level": None,
+                "transport_mode": None,
+                "inferred_constraints": [],
             }
 
     async def infer_early_feedback_from_text(
@@ -510,8 +698,16 @@ class LLMClient:
 
         If action is unclear, use opinion.
         If event_id is unknown, set event_id to null.
-        For constraint_add, infer target_username and constraint_type when possible.
-        Constraint types allowed: if_joins, if_attends, unless_joins.
+
+        CONSTRAINT INFERENCE:
+        When action_type is constraint_add, you MUST infer:
+        - target_username: the person the constraint is about (without @)
+        - constraint_type: "if_joins" (I'll come if X comes), "if_attends" (I'll come if X attends), or "unless_joins" (I won't go if X goes)
+        Look for conditional language: "if", "unless", "only if", "as long as"
+        Examples:
+          "I'll come if @alice comes" → constraint_add, target_username="alice", constraint_type="if_joins"
+          "I won't go unless @bob is there" → constraint_add, target_username="bob", constraint_type="unless_joins"
+          "Count me in if @carol joins" → constraint_add, target_username="carol", constraint_type="if_joins"
 
         Mention text:
         {text}
@@ -599,7 +795,13 @@ class LLMClient:
                 fallback_action = "event_details"
             elif "suggest" in lowered or "time" in lowered:
                 fallback_action = "suggest_time"
-            elif "constraint" in lowered or "if " in lowered:
+            elif (
+                "constraint" in lowered
+                or " if " in lowered
+                or "unless" in lowered
+                or "only if" in lowered
+                or "as long as" in lowered
+            ):
                 fallback_action = "constraint_add"
             elif (
                 "request confirmation" in lowered
@@ -625,15 +827,34 @@ class LLMClient:
                     event_id = int(token)
                     break
 
+            # Constraint type and target extraction for constraint_add
+            fallback_constraint_type = None
+            fallback_target_username = None
+            if fallback_action == "constraint_add":
+                # Detect constraint type
+                if "unless" in lowered or "won't" in lowered or "won t" in lowered:
+                    fallback_constraint_type = "unless_joins"
+                elif " if " in lowered or "only if" in lowered or "as long as" in lowered:
+                    fallback_constraint_type = "if_joins"
+                elif "attend" in lowered:
+                    fallback_constraint_type = "if_attends"
+                else:
+                    fallback_constraint_type = "if_joins"
+
+                # Extract @username
+                mention_match = re.search(r"@([A-Za-z][A-Za-z0-9_]{4,31})", text)
+                if mention_match:
+                    fallback_target_username = mention_match.group(1)
+
             logger.debug(
-                f"LLM fallback inference: action={fallback_action}, event_id={event_id}, text={text[:100]}"
+                f"LLM fallback inference: action={fallback_action}, event_id={event_id}, constraint_type={fallback_constraint_type}, target={fallback_target_username}, text={text[:100]}"
             )
 
             return {
                 "action_type": fallback_action,
                 "event_id": event_id,
-                "target_username": None,
-                "constraint_type": None,
+                "target_username": fallback_target_username,
+                "constraint_type": fallback_constraint_type,
                 "assistant_response": "I inferred a best-effort action from your mention.",
             }
 

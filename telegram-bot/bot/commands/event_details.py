@@ -52,7 +52,8 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         is_visible, event, group, error_msg = (
             await check_event_visibility_and_get_event(
                 session, event_id, user_id,
-                telegram_chat_id=chat_id
+                telegram_chat_id=chat_id,
+                bot=context.bot,
             )
         )
 
@@ -109,7 +110,8 @@ async def show_details(query, context: ContextTypes.DEFAULT_TYPE, event_id: int)
         is_visible, event, group, error_msg = (
             await check_event_visibility_and_get_event(
                 session, event_id, user_id,
-                telegram_chat_id=chat_id
+                telegram_chat_id=chat_id,
+                bot=context.bot,
             )
         )
 
@@ -145,7 +147,8 @@ async def show_status(query, context: ContextTypes.DEFAULT_TYPE, event_id: int) 
         is_visible, event, group, error_msg = (
             await check_event_visibility_and_get_event(
                 session, event_id, user_id,
-                telegram_chat_id=chat_id
+                telegram_chat_id=chat_id,
+                bot=context.bot,
             )
         )
 

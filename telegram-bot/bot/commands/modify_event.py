@@ -54,7 +54,8 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         is_visible, event, group, error_msg = (
             await check_event_visibility_and_get_event(
                 session, event_id, requester_id,
-                telegram_chat_id=chat_id
+                telegram_chat_id=chat_id,
+                bot=context.bot,
             )
         )
         if not is_visible:
@@ -323,7 +324,8 @@ async def handle_modify_request_callback(
         is_visible, event, group, error_msg = (
             await check_event_visibility_and_get_event(
                 session, event_id, query.from_user.id,
-                telegram_chat_id=chat_id
+                telegram_chat_id=chat_id,
+                bot=context.bot,
             )
         )
         if not is_visible:

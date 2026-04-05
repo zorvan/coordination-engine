@@ -71,11 +71,12 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     async with get_session(settings.db_url) as session:
         # Check event visibility based on group membership
-        chat_id = message.chat_id if message.chat else None
+        chat_id = update.effective_chat.id if update.effective_chat else None
         is_visible, event, group, error_msg = (
             await check_event_visibility_and_get_event(
                 session, event_id, telegram_user_id,
-                telegram_chat_id=chat_id
+                telegram_chat_id=chat_id,
+                bot=context.bot,
             )
         )
 

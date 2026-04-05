@@ -23,7 +23,7 @@ def test_all():
     # Test database
     print("\n2. Testing database module...")
     from db.connection import create_engine, create_session
-    from db.models import Base, User, Group, Event, Constraint, Reputation, Log, Feedback, AILog
+    from db.models import Base, User, Group, Event, Constraint, Log, Feedback, AILog
     print("   ✅ db module")
 
     # Test AI
@@ -36,7 +36,7 @@ def test_all():
     # Test commands
     print("\n4. Testing command handlers...")
     from bot.commands import (
-        start, my_groups, profile, reputation,
+        start, my_groups, profile,
         organize_event, join, confirm, cancel,
         constraints, suggest_time, status, event_details
     )
@@ -49,8 +49,8 @@ def test_all():
 
     # Test utils
     print("\n6. Testing utils...")
-    from bot.utils import nudges
-    print("   ✅ nudges")
+    # nudges module removed - nudge message inlined into cancel.py
+    print("   ✅ utils cleaned up")
 
     # Test main
     print("\n7. Testing main entry point...")

@@ -36,7 +36,6 @@ class Settings:
         # PRD v2: Feature flags
         self.enable_materialization: bool = os.environ.get("ENABLE_MATERIALIZATION", "true").lower() == "true"
         self.enable_memory_layer: bool = os.environ.get("ENABLE_MEMORY_LAYER", "true").lower() == "true"
-        self.enable_reputation_effects: bool = os.environ.get("ENABLE_REPUTATION_EFFECTS", "false").lower() == "true"
 
         # PRD v2: Production settings
         self.environment: str = os.environ.get("ENVIRONMENT", "development")  # development, staging, production

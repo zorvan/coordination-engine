@@ -4,7 +4,7 @@ import pytest
 from unittest.mock import MagicMock
 from telegram import Update, Message, User, Chat
 
-from bot.commands import start, my_groups, profile, reputation
+from bot.commands import start, my_groups, profile
 from bot.commands import organize_event, join, confirm, cancel
 from bot.commands import constraints, suggest_time, status, event_details
 
@@ -66,23 +66,6 @@ async def test_profile_command():
     context = ContextTypes.DEFAULT_TYPE()
 
     await profile.handle(update, context)
-
-
-@pytest.mark.asyncio
-async def test_reputation_command():
-    """Test /reputation command handler."""
-    update = Update(
-        update_id=1,
-        message=Message(
-            message_id=1,
-            date=None,
-            chat=Chat(id=123, type="private"),
-            from_user=User(id=456, first_name="Test", is_bot=False)
-        )
-    )
-    context = ContextTypes.DEFAULT_TYPE()
-
-    await reputation.handle(update, context)
 
 
 @pytest.mark.asyncio

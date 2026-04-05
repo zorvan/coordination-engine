@@ -13,7 +13,6 @@ from bot.common.attendance import (
 )
 from bot.common.confirmation import invalidate_confirmations_and_notify
 from bot.common.deeplinks import build_start_link
-from bot.common.early_feedback import add_early_feedback_signal, aggregate_early_feedback_for_user
 from bot.common.event_access import attendance_telegram_ids, get_event_organizer_telegram_id, is_attendee
 from bot.common.event_presenters import format_event_details_message, format_status_message
 from bot.common.event_states import can_transition, EVENT_STATE_TRANSITIONS, STATE_EXPLANATIONS
@@ -31,51 +30,20 @@ from bot.common.user_preferences import (
     refresh_expired_preferences,
     get_users_preferences,
 )
-from bot.common.reputation_trends import (
-    calculate_reliability_score,
-    get_user_reliability_trend,
-    get_user_attendance_history,
-    get_user_reputation_summary,
-    get_attendance_summary,
-)
-
-from bot.common.moderation import (
-    check_anti_bias,
-    get_evidence_count,
-    get_evidence_details,
-    add_moderation_log,
-    apply_warning,
-    apply_mute_recommendation,
-    apply_block_recommendation,
-    apply_warning_with_check,
-    apply_mute_with_check,
-    apply_block_with_check,
-    request_moderation_review,
-    generate_reputation_explanation,
-    enforce_anti_bias_check,
-    get_reputation_dashboard,
-)
-
-from bot.common.streaks_badges import (
-    get_badge_for_streak,
-    calculate_streak,
-    get_user_streak,
-    award_badges,
-    get_user_badges,
-    format_badge_display,
-)
-
-from bot.common.event_engagement import (
-    get_event_summary,
-    post_event_summary,
-    create_feedback_prompt,
-    create_schedule_next_prompt,
-    create_attendee_followup,
-    generate_suggestions_for_event,
-    create_reactivation_prompt,
+from bot.common.rbac import (
+    check_event_visibility_and_get_event,
+    check_group_membership,
+    check_can_lock_event,
+    check_event_organizer,
+    check_event_admin,
+    check_event_participant,
+    check_can_modify_event,
+    check_can_submit_private_note,
+    get_user_event_role,
 )
 
 __all__ = [
+    # attendance
     "derive_state_from_attendance",
     "has_attendee",
     "has_confirmed",
@@ -86,20 +54,25 @@ __all__ = [
     "remove_attendee",
     "parse_attendance",
     "parse_attendance_with_status",
+    # confirmation
     "invalidate_confirmations_and_notify",
+    # deeplinks
     "build_start_link",
-    "add_early_feedback_signal",
-    "aggregate_early_feedback_for_user",
+    # event access
     "attendance_telegram_ids",
     "get_event_organizer_telegram_id",
     "is_attendee",
+    # presenters
     "format_event_details_message",
     "format_status_message",
+    # states
     "can_transition",
     "EVENT_STATE_TRANSITIONS",
     "STATE_EXPLANATIONS",
+    # scheduling
     "events_overlap",
     "find_user_event_conflict",
+    # user preferences
     "get_user_preferences",
     "create_or_update_user_preferences",
     "delete_user_preferences",
@@ -111,36 +84,14 @@ __all__ = [
     "get_group_aggregate_preferences",
     "refresh_expired_preferences",
     "get_users_preferences",
-    "calculate_reliability_score",
-    "get_user_reliability_trend",
-    "get_user_attendance_history",
-    "get_user_reputation_summary",
-    "get_attendance_summary",
-    "check_anti_bias",
-    "get_evidence_count",
-    "get_evidence_details",
-    "add_moderation_log",
-    "apply_warning",
-    "apply_mute_recommendation",
-    "apply_block_recommendation",
-    "apply_warning_with_check",
-    "apply_mute_with_check",
-    "apply_block_with_check",
-    "request_moderation_review",
-    "generate_reputation_explanation",
-    "enforce_anti_bias_check",
-    "get_reputation_dashboard",
-    "get_badge_for_streak",
-    "calculate_streak",
-    "get_user_streak",
-    "award_badges",
-    "get_user_badges",
-    "format_badge_display",
-    "get_event_summary",
-    "post_event_summary",
-    "create_feedback_prompt",
-    "create_schedule_next_prompt",
-    "create_attendee_followup",
-    "generate_suggestions_for_event",
-    "create_reactivation_prompt",
+    # rbac
+    "check_event_visibility_and_get_event",
+    "check_group_membership",
+    "check_can_lock_event",
+    "check_event_organizer",
+    "check_event_admin",
+    "check_event_participant",
+    "check_can_modify_event",
+    "check_can_submit_private_note",
+    "get_user_event_role",
 ]

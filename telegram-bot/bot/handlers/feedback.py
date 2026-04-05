@@ -3,13 +3,12 @@
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from sqlalchemy import select
-from db.models import Event, Feedback, User, Reputation
+from db.models import Event, Feedback, User
 from db.connection import get_session
 from db.users import get_or_create_user_id
 from config.settings import settings
 from bot.common.rbac import check_event_visibility_and_get_event
 from ai.llm import LLMClient
-from bot.common.early_feedback import aggregate_early_feedback_for_user
 from datetime import datetime
 import random
 
@@ -44,7 +43,8 @@ async def collect_feedback(
         is_visible, event, group, error_msg = (
             await check_event_visibility_and_get_event(
                 session, event_id, user_id_num,
-                telegram_chat_id=chat_id
+                telegram_chat_id=chat_id,
+                bot=context.bot,
             )
         )
 
@@ -176,7 +176,8 @@ async def process_feedback(
         is_visible, event, group, error_msg = (
             await check_event_visibility_and_get_event(
                 session, event_id, telegram_user_id,
-                telegram_chat_id=chat_id
+                telegram_chat_id=chat_id,
+                bot=context.bot,
             )
         )
 
@@ -236,71 +237,6 @@ def generate_random_feedback_request(event_id: int) -> str:
     return random.choice(templates)
 
 
-async def _apply_reputation_updates(
-    session,
-    user_id: int,
-    activity_type: str,
-    score: float,
-    weight: float = 1.0,
-    expertise_adjustments: dict | None = None,
-) -> None:
-    """Update global and activity-specific reputation from feedback."""
-    user_result = await session.execute(
-        select(User).where(User.user_id == user_id)
-    )
-    user = user_result.scalar_one_or_none()
-    if not user:
-        return
-
-    clamped_weight = max(0.0, min(1.0, float(weight)))
-    current_global = float(user.reputation or 1.0)
-    user.reputation = round(
-        current_global * (1.0 - 0.2 * clamped_weight)
-        + score * (0.2 * clamped_weight),
-        4,
-    )
-
-    expertise = dict(user.expertise_per_activity or {})
-    current_exp = float(expertise.get(activity_type, 1.0))
-    expertise[activity_type] = round(
-        current_exp * (1.0 - 0.3 * clamped_weight)
-        + score * (0.3 * clamped_weight),
-        4,
-    )
-    if expertise_adjustments:
-        for key, delta in expertise_adjustments.items():
-            activity_key = str(key)
-            current_val = float(expertise.get(activity_key, 1.0))
-            expertise[activity_key] = round(
-                max(0.0, min(5.0, current_val + float(delta) * clamped_weight)),
-                4,
-            )
-    user.expertise_per_activity = expertise
-
-    rep_result = await session.execute(
-        select(Reputation).where(
-            Reputation.user_id == user_id,
-            Reputation.activity_type == activity_type,
-        )
-    )
-    rep_row = rep_result.scalar_one_or_none()
-    if not rep_row:
-        rep_row = Reputation(
-            user_id=user_id,
-            activity_type=activity_type,
-            score=score,
-            last_updated=datetime.utcnow(),
-        )
-        session.add(rep_row)
-    else:
-        rep_row.score = round(
-            float(rep_row.score or 1.0) * (1.0 - 0.3 * clamped_weight)
-            + score * (0.3 * clamped_weight),
-            4,
-        )
-        rep_row.last_updated = datetime.utcnow()
-
-
 async def _infer_feedback(event_type: str, text: str) -> dict:
     """Infer weighted structured feedback from free text."""
     llm = LLMClient()
@@ -319,46 +255,18 @@ async def _store_feedback_and_update_reputation(
     sanitized_comment: str,
     expertise_adjustments: dict,
 ) -> None:
-    """Persist feedback and apply weighted profile/reputation updates."""
-    blended_score = float(score)
-    blended_weight = float(weight)
-    early_avg, early_weight_total, early_count = await aggregate_early_feedback_for_user(
-        session,
-        event_id=event.event_id,
-        target_user_id=user_id,
-    )
-    if early_avg is not None and early_weight_total > 0:
-        early_influence = min(0.35, early_weight_total / 6.0)
-        blended_score = (
-            float(score) * (1.0 - early_influence)
-            + float(early_avg) * early_influence
-        )
-        blended_weight = min(1.0, float(weight) + min(0.25, early_weight_total / 12.0))
-
-    weight_marker = (
-        f"[ai_weight={float(weight):.2f}]"
-        f"[blended_weight={float(blended_weight):.2f}]"
-        f"[early_signals={int(early_count)}]"
-    )
+    """Persist feedback as a factual record."""
     persisted_comment = (
-        f"{weight_marker} {sanitized_comment}".strip()
+        f"[score={float(score):.2f}] {sanitized_comment}".strip()
         if sanitized_comment
-        else weight_marker
+        else f"[score={float(score):.2f}]"
     )
     feedback = Feedback(
         event_id=event.event_id,
         user_id=user_id,
         score_type="event_quality",
-        value=float(max(0.0, min(5.0, blended_score))),
+        value=float(max(0.0, min(5.0, score))),
         comment=persisted_comment[:2000],
         timestamp=datetime.utcnow()
     )
     session.add(feedback)
-    await _apply_reputation_updates(
-        session=session,
-        user_id=user_id,
-        activity_type=str(event.event_type or "general"),
-        score=float(max(0.0, min(5.0, blended_score))),
-        weight=float(max(0.0, min(1.0, blended_weight))),
-        expertise_adjustments=expertise_adjustments if isinstance(expertise_adjustments, dict) else {},
-    )

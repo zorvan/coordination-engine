@@ -1,12 +1,7 @@
 #!/usr/bin/env python3
 """Main entry point for the Telegram bot.
 
-PRD v2 Updates:
-- Optional webhook support for production
-- Worker queue for async tasks
-- Rate limiting middleware
-- Callback replay protection
-- Scheduled tasks (memory collection, log pruning, collapse checks, reminders)
+PRD v3: Pure mediation through timing, framing, visibility, language, sequence, and memory.
 """
 import asyncio
 import logging
@@ -22,9 +17,10 @@ from telegram.ext import (
 from config.settings import Settings
 from config.logging import setup_logging
 from bot.commands import (
-    start, my_groups, profile, reputation, organize_event, private_organize_event,
-    join, confirm, back, cancel, lock, request_confirmations, early_feedback, event_note, modify_event, constraints, suggest_time, status,
+    start, my_groups, profile, organize_event, private_organize_event,
+    join, confirm, back, cancel, lock, request_confirmations, modify_event, constraints, suggest_time, status,
     event_details, events, check_deadlines, memory, my_history,
+    personal_attendance_mirror, meaning_formation,
 )
 from bot.handlers import event_flow, feedback, membership, mentions, menus
 from ai.llm import LLMClient
@@ -148,7 +144,8 @@ def main():
         "help": start.handle,
         "my_groups": my_groups.handle,
         "profile": profile.handle,
-        "reputation": reputation.handle,
+        "how_am_i_doing": personal_attendance_mirror.handle,
+        "plan": meaning_formation.handle,
         "organize_event": organize_event.handle,
         "organize_event_flexible": organize_event.handle_flexible,
         "join": join.handle,
@@ -158,8 +155,6 @@ def main():
         "cancel": cancel.handle,
         "lock": lock.handle,
         "request_confirmations": request_confirmations.handle,
-        "early_feedback": early_feedback.handle,
-        "event_note": event_note.handle,
         "modify_event": modify_event.handle,
         "constraints": constraints.handle,
         "suggest_time": suggest_time.handle,
@@ -231,7 +226,7 @@ def main():
     # Schedule periodic tasks using job queue
     # Memory collection: every 30 minutes
     # Log pruning: weekly (checked in task)
-    # Collapse checks: hourly (checked in task)
+    # Threshold deadline checks: hourly (checked in task)
     # 24h reminders: daily at 9 AM (checked in task)
     job_queue = application.job_queue
     if job_queue:

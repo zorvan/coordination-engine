@@ -8,8 +8,7 @@ from sqlalchemy import select
 
 from config.settings import settings
 from db.connection import get_session
-from db.models import Event, User, EarlyFeedback
-from bot.common.event_access import get_event_organizer_telegram_id
+from db.models import Event, User
 from bot.services import ParticipantService
 
 
@@ -61,20 +60,6 @@ async def send_confirmation_request_message(
                 )
             ).scalars().all()
             users_by_tid = {int(u.telegram_user_id): u for u in users}
-        organizer_tg_id = get_event_organizer_telegram_id(event)
-        all_private_rows = (
-            await session.execute(
-                select(EarlyFeedback).where(
-                    EarlyFeedback.event_id == event_id,
-                    EarlyFeedback.source_type == "private_peer",
-                ).order_by(EarlyFeedback.created_at.desc()).limit(20)
-            )
-        ).scalars().all()
-        note_rows = [
-            row for row in all_private_rows
-            if isinstance(row.metadata_dict, dict)
-            and row.metadata_dict.get("role") == "event_note"
-        ]
 
     pending_labels = (
         ", ".join(_format_user_label(users_by_tid.get(uid), uid) for uid in pending)
@@ -142,22 +127,6 @@ async def send_confirmation_request_message(
     await reply_message.reply_text(
         f"ℹ️ Final-confirmation DM sent to {dm_sent}/{len(participants)} attendees."
     )
-    # Organizer gets private-note context summary if available.
-    if organizer_tg_id and note_rows:
-        note_lines = []
-        for row in note_rows[:8]:
-            source_label = f"user:{row.source_user_id}" if row.source_user_id else "unknown"
-            note_lines.append(f"- {source_label}: {row.sanitized_comment or 'N/A'}")
-        try:
-            await context.bot.send_message(
-                chat_id=organizer_tg_id,
-                text=(
-                    f"🧠 *Private Notes Context for Event {event_id}*\n\n"
-                    + "\n".join(note_lines)
-                ),
-            )
-        except Exception:
-            pass
 
 
 async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

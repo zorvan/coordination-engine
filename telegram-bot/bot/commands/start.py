@@ -57,11 +57,12 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "AI-powered scheduling.\n\n"
         "💡 *Use the menu buttons below* to navigate instead of typing commands!\n\n"
         "Quick commands:\n"
+        "/plan - Start planning an event\n"
         "/organize_event - Create a new event\n"
         "/events - List recent events\n"
         "/my_groups - List your groups\n"
         "/profile - View your profile\n"
-        "/reputation - Check your reputation",
+        "/how_am_i_doing - See your participation",
         reply_markup=build_main_menu(),
         parse_mode="Markdown",
     )

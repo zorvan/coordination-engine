@@ -1,17 +1,18 @@
 """
-EventMemoryService - Layer 3: Memory Layer.
-PRD v2 Section 2.3: Makes events mean something through shared narratives.
+EventMemoryService - Layer 3: Memory Layer (v3).
+PRD v3: Memory as pre-event input, not post-event output.
 
 This service manages:
-- Post-event memory collection via DM
-- Memory Weave generation (multi-narrative aggregation)
-- Event lineage (referencing prior events)
-- Memory storage and retrieval
+- Memory fragment collection (no deadline, receive indefinitely)
+- Fragment Mosaic (LLM rearranges only — no words added, no interpretation)
+- Event lineage (connecting related events)
+- Memory-first event creation support
 """
 from __future__ import annotations
 
 import logging
 import hashlib
+import json
 from datetime import datetime
 from typing import Optional, List, Dict, Any
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -25,24 +26,14 @@ logger = logging.getLogger("coord_bot.services.memory")
 
 class EventMemoryService:
     """
-    Manages the Memory Layer - transforming coordination into shared meaning.
+    Manages the Memory Layer — transforming coordination into shared meaning.
 
-    Design principles (PRD Section 1.3):
-    - Memory over Surveillance: Store what mattered, not everything
-    - Preserve plurality: Co-existing voices, not resolved narrative
-    - Bot as "absent friend": Relational, low-stakes contribution
-
-    Bot persona (PRD Section 5.2):
-    - "Absent friend" in memory flows
-    - Open-ended prompts, not structured forms
-    - No feedback/evaluation framing
+    v3 Design principles:
+    - Memory is infrastructure, not artifact
+    - Receive fragments indefinitely — no collection deadline
+    - Fragment Mosaic: LLM rearranges only, zero interpretation
+    - Bot as facilitator of meaning-formation, not author
     """
-
-    # Collection window: 24 hours post-event
-    COLLECTION_WINDOW_HOURS = 24
-
-    # Delay before starting collection: 1-3 hours post-event
-    COLLECTION_DELAY_HOURS = 2
 
     def __init__(self, bot: Bot, session: AsyncSession):
         self.bot = bot
@@ -50,16 +41,15 @@ class EventMemoryService:
 
     async def start_memory_collection(self, event: Event) -> None:
         """
-        Start memory collection flow after event completion.
+        Begin receiving memory fragments after event completion.
 
-        Triggered automatically when event state transitions to 'completed'.
-        Waits COLLECTION_DELAY_HOURS, then DMs each confirmed participant.
+        v3: No deadline. Fragments accepted indefinitely.
+        DMs each confirmed participant with an open-ended prompt.
         """
         if not event.completed_at:
             logger.warning("Attempted memory collection for incomplete event %s", event.event_id)
             return
 
-        # Get confirmed participants
         result = await self.session.execute(
             select(EventParticipant)
             .where(
@@ -82,7 +72,6 @@ class EventMemoryService:
             extra={"event_id": event.event_id}
         )
 
-        # DM each participant
         for participant in participants:
             await self._send_memory_request(participant, event)
 
@@ -91,18 +80,17 @@ class EventMemoryService:
         participant: EventParticipant,
         event: Event,
     ) -> None:
-        """Send DM requesting memory fragment."""
-        # Get user for chat_id
+        """Send DM requesting memory fragment — v3: no deadline, no structure."""
         user_result = await self.session.execute(
-            select(User).where(User.user_id == participant.user_id)
+            select(User).where(User.telegram_user_id == participant.telegram_user_id)
         )
         user = user_result.scalar_one_or_none()
 
         if not user or not user.telegram_user_id:
-            logger.warning("Cannot find user for participant %s", participant.user_id)
+            logger.warning("Cannot find user for participant %s", participant.telegram_user_id)
             return
 
-        # Craft open-ended prompt (PRD: not structured questions)
+        # v3: Open-ended prompt with no deadline or structured form
         message = (
             f"Hey — how was {event.event_type}?\n\n"
             f"Anything that stuck with you? A word, a moment, a photo is enough.\n\n"
@@ -115,16 +103,9 @@ class EventMemoryService:
                 text=message,
                 parse_mode="HTML",
             )
-            logger.info(
-                "Sent memory request",
-                extra={"event_id": event.event_id, "user": user.user_id}
-            )
+            logger.info("Sent memory request", extra={"event_id": event.event_id, "user": user.user_id})
         except Exception as e:
-            logger.error(
-                "Failed to send memory request to user %s: %s",
-                user.user_id,
-                e,
-            )
+            logger.error("Failed to send memory request to user %s: %s", user.user_id, e)
 
     async def collect_memory_fragment(
         self,
@@ -136,11 +117,8 @@ class EventMemoryService:
         """
         Collect a memory fragment from a participant.
 
-        Called when user replies to the DM or uses /remember command.
-
-        Returns fragment dict for storage.
+        v3: No deadline — fragments accepted weeks after event.
         """
-        # Generate anonymous contributor hash (PRD: anonymous by default)
         contributor_hash = hashlib.sha256(
             f"{event_id}:{user_id}:{datetime.utcnow().date()}".encode()
         ).hexdigest()[:8]
@@ -154,11 +132,7 @@ class EventMemoryService:
 
         logger.info(
             "Collected memory fragment",
-            extra={
-                "event_id": event_id,
-                "contributor_hash": contributor_hash,
-                "tone": fragment["tone_tag"],
-            }
+            extra={"event_id": event_id, "contributor_hash": contributor_hash, "tone": fragment["tone_tag"]},
         )
 
         return fragment
@@ -169,7 +143,6 @@ class EventMemoryService:
         fragment: Dict[str, Any],
     ) -> EventMemory:
         """Add fragment to event memory (create or update EventMemory)."""
-        # Get or create EventMemory
         result = await self.session.execute(
             select(EventMemory).where(EventMemory.event_id == event_id)
         )
@@ -185,12 +158,10 @@ class EventMemoryService:
             )
             self.session.add(memory)
 
-        # Add fragment
         if memory.fragments is None:
             memory.fragments = []
         memory.fragments.append(fragment)
 
-        # Update tone palette
         tone = fragment.get("tone_tag", "neutral")
         if memory.tone_palette is None:
             memory.tone_palette = []
@@ -199,17 +170,12 @@ class EventMemoryService:
 
         return memory
 
-    async def generate_memory_weave(
-        self,
-        event: Event,
-    ) -> Optional[str]:
+    async def generate_memory_weave(self, event: Event) -> Optional[str]:
         """
-        Generate Memory Weave from collected fragments.
+        Generate Fragment Mosaic from collected fragments.
 
-        PRD Design rule: Preserve plurality. Not a summary, not a log.
-        Co-existing voices, not resolved narrative.
-
-        Returns weave text (also stored in EventMemory).
+        v3 Constraint: LLM rearranges fragments only. No words added. No interpretation.
+        If LLM can't be constrained, fall back to chronological ordering.
         """
         result = await self.session.execute(
             select(EventMemory).where(EventMemory.event_id == event.event_id)
@@ -220,99 +186,85 @@ class EventMemoryService:
             logger.info("No fragments to weave", extra={"event_id": event.event_id})
             return None
 
-        # LLM-enhanced weave generation (TODO-012)
-        # Use LLM to generate plural-voice weave while preserving contradictions
         try:
             from ai.llm import LLMClient
             llm = LLMClient()
 
-            # Prepare fragments for LLM
-            fragments_text = []
-            for i, fragment in enumerate(memory.fragments, 1):
-                text = fragment.get("text", "")
-                tone = fragment.get("tone_tag", "neutral")
-                fragments_text.append(f"{i}. [{tone}] {text}")
+            fragments_json = json.dumps([
+                {"text": f.get("text", ""), "tone": f.get("tone_tag", "neutral")}
+                for f in memory.fragments
+            ], ensure_ascii=False)
 
-            event_anchor = f"{event.event_type} • {event.scheduled_time.strftime('%d %b %Y') if event.scheduled_time else 'TBD'}"
-
-            prompt = f"""
-Generate a memory weave from these fragments for: {event_anchor}
-
-Fragments:
-{chr(10).join(fragments_text)}
-
-PRD v2 Design rules:
-- DO NOT summarize or unify into single narrative
-- Preserve plural voices and contradictions
-- Hold contradictions without resolution
-- Keep fragments as distinct voices
-- Output format: HTML for Telegram
-
-Return weave text only (no JSON).
-"""
+            prompt = (
+                "You are arranging memory fragments. Your task is STRICTLY to reorder "
+                "the fragments below into a coherent sequence.\n\n"
+                "CONSTRAINTS (violation = failure):\n"
+                "- You MUST NOT add any words that are not already in the fragments.\n"
+                "- You MUST NOT interpret, summarize, or paraphrase any fragment.\n"
+                "- You MUST NOT change the text of any fragment.\n"
+                "- You MAY only add line breaks, bullet markers (•), and blank lines between fragments.\n"
+                "- Output the fragments exactly as given, just rearranged. Nothing else.\n\n"
+                f"Fragments (JSON):\n{fragments_json}\n\n"
+                "Output only the rearranged fragments with • bullets and line breaks. Nothing else."
+            )
             weave_text = await llm._call_llm(prompt)
 
-            # Validate and clean LLM output
             if not weave_text or len(weave_text.strip()) < 10:
-                raise ValueError("LLM returned empty or too short response")
+                raise ValueError("LLM returned empty response")
 
-            # Store tone palette from fragments
-            if memory.tone_palette is None:
-                memory.tone_palette = []
-            for fragment in memory.fragments:
-                tone = fragment.get("tone_tag", "neutral")
-                if tone not in memory.tone_palette and tone != "neutral":
-                    memory.tone_palette.append(tone)
+            # Sanity check: LLM must not have added substantive content
+            input_words = " ".join(f.get("text", "") for f in memory.fragments)
+            output_clean = weave_text.replace("•", "").replace("\n", " ").strip()
+            if len(output_clean) > len(input_words) * 1.5:
+                raise ValueError("LLM appears to have added content; falling back")
 
         except Exception as e:
             logger.warning(
-                "LLM weave generation failed, using template fallback: %s",
+                "LLM mosaic failed (%s), using chronological fallback",
                 e,
-                extra={"event_id": event.event_id}
+                extra={"event_id": event.event_id},
             )
+            weave_text = self._chronological_weave(memory.fragments)
 
-            # Fallback: Simple weave generation (template-based)
-            event_anchor = f"{event.event_type} • {event.scheduled_time.strftime('%d %b %Y') if event.scheduled_time else 'TBD'}"
+        event_anchor = f"{event.event_type} • {event.scheduled_time.strftime('%d %b %Y') if event.scheduled_time else 'TBD'}"
+        header = f"📿 <b>How people remember: {event_anchor}</b>\n\n"
+        full_weave = header + weave_text
 
-            weave_parts = [f"📿 <b>How people remember: {event_anchor}</b>\n"]
+        memory.weave_text = full_weave
 
-            for i, fragment in enumerate(memory.fragments, 1):
-                text = fragment.get("text", "")
-                tone = fragment.get("tone_tag", "")
-
-                if tone and tone != "neutral":
-                    weave_parts.append(f"• \"{text}\" <i>({tone})</i>")
-                else:
-                    weave_parts.append(f"• \"{text}\"")
-
-            # Add tone palette if diverse
-            if memory.tone_palette and len(memory.tone_palette) > 1:
-                tone_str = ", ".join(memory.tone_palette)
-                weave_parts.append(f"\n_Tones: {tone_str}_")
-
-            # Add hashtags if present
-            if memory.hashtags:
-                hashtag_str = " ".join(f"#{tag}" for tag in memory.hashtags)
-                weave_parts.append(f"\n{hashtag_str}")
-
-            weave_text = "\n\n".join(weave_parts)
-
-        # Store in memory
-        memory.weave_text = weave_text
+        if memory.tone_palette is None:
+            memory.tone_palette = []
+        for fragment in memory.fragments:
+            tone = fragment.get("tone_tag", "neutral")
+            if tone not in memory.tone_palette and tone != "neutral":
+                memory.tone_palette.append(tone)
 
         logger.info(
-            "Generated memory weave with %d fragments",
+            "Generated fragment mosaic with %d fragments",
             len(memory.fragments),
-            extra={"event_id": event.event_id}
+            extra={"event_id": event.event_id},
         )
 
-        return weave_text
+        return full_weave
 
-    async def post_memory_weave(
-        self,
-        event: Event,
-        group_chat_id: int,
-    ) -> bool:
+    def _chronological_weave(self, fragments: List[Dict[str, Any]]) -> str:
+        """Fallback: arrange fragments chronologically by submission time."""
+        parts = []
+        for fragment in fragments:
+            text = fragment.get("text", "")
+            tone = fragment.get("tone_tag", "")
+            if tone and tone != "neutral":
+                parts.append(f'• "{text}" <i>({tone})</i>')
+            else:
+                parts.append(f'• "{text}"')
+
+        tones = set(f.get("tone_tag", "neutral") for f in fragments if f.get("tone_tag", "neutral") != "neutral")
+        if len(tones) > 1:
+            parts.append(f"\n_Tones: {', '.join(tones)}_")
+
+        return "\n".join(parts)
+
+    async def post_memory_weave(self, event: Event, group_chat_id: int) -> bool:
         """Generate and post memory weave to group chat."""
         weave_text = await self.generate_memory_weave(event)
 
@@ -328,18 +280,10 @@ Return weave text only (no JSON).
             logger.info("Posted memory weave to group", extra={"event_id": event.event_id})
             return True
         except Exception as e:
-            logger.error(
-                "Failed to post memory weave to group %s: %s",
-                group_chat_id,
-                e,
-            )
+            logger.error("Failed to post memory weave to group %s: %s", group_chat_id, e)
             return False
 
-    async def add_hashtags(
-        self,
-        event_id: int,
-        hashtags: List[str],
-    ) -> EventMemory:
+    async def add_hashtags(self, event_id: int, hashtags: List[str]) -> EventMemory:
         """Add group hashtags to event memory."""
         result = await self.session.execute(
             select(EventMemory).where(EventMemory.event_id == event_id)
@@ -358,11 +302,7 @@ Return weave text only (no JSON).
         event_id: int,
         marker: Dict[str, Any],
     ) -> EventMemory:
-        """
-        Add outcome marker (e.g., "led to collaboration X").
-
-        Marker format: {type, description, related_event_id?, created_at}
-        """
+        """Add outcome marker (e.g., 'led to collaboration X')."""
         result = await self.session.execute(
             select(EventMemory).where(EventMemory.event_id == event_id)
         )
@@ -394,11 +334,7 @@ Return weave text only (no JSON).
             self.session.add(memory)
 
         memory.lineage_event_ids = prior_event_ids
-        logger.info(
-            "Linked lineage: %s -> %s",
-            current_event_id,
-            prior_event_ids,
-        )
+        logger.info("Linked lineage: %s -> %s", current_event_id, prior_event_ids)
         return memory
 
     async def get_memory_weave(self, event_id: int) -> Optional[EventMemory]:
@@ -408,11 +344,7 @@ Return weave text only (no JSON).
         )
         return result.scalar_one_or_none()
 
-    async def get_recent_memories(
-        self,
-        group_id: int,
-        limit: int = 10,
-    ) -> List[EventMemory]:
+    async def get_recent_memories(self, group_id: int, limit: int = 10) -> List[EventMemory]:
         """Get recent memory weaves for a group (for /recall)."""
         result = await self.session.execute(
             select(EventMemory)
@@ -445,7 +377,32 @@ Return weave text only (no JSON).
             if hashtags:
                 all_hashtags.extend(hashtags)
 
-        # Return most common (up to 3)
         from collections import Counter
         counts = Counter(all_hashtags)
         return [tag for tag, _ in counts.most_common(3)]
+
+    async def get_prior_event_memories(
+        self,
+        event_type: str,
+        group_id: int,
+        limit: int = 5,
+    ) -> List[EventMemory]:
+        """
+        v3: Get memories from prior events of the same type.
+
+        Used in memory-first event creation: when creating a new event,
+        surface memories from prior similar events first.
+        """
+        result = await self.session.execute(
+            select(EventMemory)
+            .join(Event)
+            .where(
+                Event.group_id == group_id,
+                Event.event_type == event_type,
+                Event.state == "completed",
+                EventMemory.weave_text.isnot(None),
+            )
+            .order_by(Event.created_at.desc())
+            .limit(limit)
+        )
+        return list(result.scalars().all())

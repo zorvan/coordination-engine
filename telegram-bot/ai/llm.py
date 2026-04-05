@@ -44,14 +44,13 @@ class LLMClient:
         self,
         event: Event,
         availability: Dict[int, float],
-        reliability: Dict[int, float],
         notes: list[str] | None = None,
     ) -> Dict[str, Any]:
         """Generate conflict resolution suggestions using LLM."""
         from ai.schemas import ConflictResolution, validate_llm_output
 
         prompt = self._build_conflict_prompt(
-            event, availability, reliability, notes or []
+            event, availability, notes or []
         )
 
         def fallback():
@@ -602,74 +601,6 @@ class LLMClient:
                 "inferred_constraints": [],
             }
 
-    async def infer_early_feedback_from_text(
-        self,
-        text: str,
-    ) -> Dict[str, Any]:
-        """Infer early behavioral feedback signal from free text."""
-        prompt = f"""
-        Convert this peer behavioral feedback into JSON.
-        Remove toxicity while preserving intent.
-        Output fields:
-        - signal_type: overall|reliability|cooperation|toxicity|commitment|trust
-        - score: 0..5
-        - weight: 0..1
-        - confidence: 0..1
-        - sanitized_comment: short clean summary
-
-        Feedback text:
-        {text}
-
-        Output JSON only:
-        {{
-          "signal_type": "overall",
-          "score": 3.0,
-          "weight": 0.6,
-          "confidence": 0.7,
-          "sanitized_comment": "summary"
-        }}
-        """
-        try:
-            response = await self._call_llm(prompt)
-            parsed = json.loads(response)
-            signal_type = str(parsed.get("signal_type", "overall")).strip().lower()
-            if signal_type not in {
-                "overall",
-                "reliability",
-                "cooperation",
-                "toxicity",
-                "commitment",
-                "trust",
-            }:
-                signal_type = "overall"
-            return {
-                "signal_type": signal_type,
-                "score": max(0.0, min(5.0, float(parsed.get("score", 3.0)))),
-                "weight": max(0.0, min(1.0, float(parsed.get("weight", 0.6)))),
-                "confidence": max(0.0, min(1.0, float(parsed.get("confidence", 0.7)))),
-                "sanitized_comment": str(parsed.get("sanitized_comment", text)).strip()[
-                    :500
-                ],
-            }
-        except Exception:
-            cleaned = _sanitize_toxic_text(text)
-            lowered = cleaned.lower()
-            signal_type = "overall"
-            score = _simple_sentiment_score(cleaned)
-            if "late" in lowered or "no show" in lowered or "unreliable" in lowered:
-                signal_type = "reliability"
-                score = max(0.0, score - 0.5)
-            elif "helpful" in lowered or "cooperate" in lowered:
-                signal_type = "cooperation"
-                score = min(5.0, score + 0.4)
-            return {
-                "signal_type": signal_type,
-                "score": score,
-                "weight": 0.55,
-                "confidence": 0.5,
-                "sanitized_comment": cleaned[:500],
-            }
-
     async def infer_group_mention_action(
         self,
         text: str,
@@ -901,22 +832,18 @@ class LLMClient:
         self,
         event: Event,
         availability: Dict[int, float],
-        reliability: Dict[int, float],
         notes: list[str],
     ) -> str:
         """Construct Qwen3 prompt for conflict resolution."""
         return f"""
-        You are a scheduling assistant. Resolve conflicts for this event.
+        You are a scheduling assistant. Resolve conflicts for this event using
+        only declared availability. No user history or behavioral inference.
 
         Event: {event.event_type}
         Participants: {len(event.attendance_list)}
         Threshold: {event.threshold_attendance}
 
-        Availability scores (0-1): {availability}
-        Reliability scores (0-5): {reliability}
-
-        Constraints:
-        - User A: "I join only if Jim joins" (confidence: 0.8)
+        Availability slots (users per slot): {availability}
 
         Private attendee notes:
         {notes}

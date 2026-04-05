@@ -10,6 +10,7 @@ from db.connection import get_session
 from db.models import Event, Log
 from db.users import get_or_create_user_id
 from bot.services import ParticipantService
+from bot.common.rbac import check_event_visibility_and_get_event
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
@@ -31,12 +32,17 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
     telegram_user_id = update.effective_user.id
+    chat_id = update.effective_chat.id if update.effective_chat else None
     async with get_session(settings.db_url) as session:
-        event = (
-            await session.execute(select(Event).where(Event.event_id == event_id))
-        ).scalar_one_or_none()
-        if not event:
-            await message.reply_text("❌ Event not found.")
+        is_visible, event, group, error_msg = (
+            await check_event_visibility_and_get_event(
+                session, event_id, telegram_user_id,
+                telegram_chat_id=chat_id,
+                bot=context.bot,
+            )
+        )
+        if not is_visible:
+            await message.reply_text(f"❌ {error_msg or 'Event not found.'}")
             return
         if event.state == "locked":
             await message.reply_text("❌ Event is locked. Cannot go back.")

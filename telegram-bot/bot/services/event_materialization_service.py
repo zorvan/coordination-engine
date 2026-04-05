@@ -1,9 +1,15 @@
 """
-EventMaterializationService - Layer 2: Makes events feel real.
-PRD v2 Section 2.2: Event Materialization Layer.
+EventMaterializationService — Layer 2: Event Materialization (v3).
 
-This service posts natural-language updates to the group chat at key state transitions,
+Posts natural-language updates to the group chat at key state transitions,
 transforming events from silent records to visible social objects.
+
+v3 Design:
+- Show reality, don't engineer response
+- All announcements identical regardless of user history
+- No fragility framing ("if one drops, collapse")
+- No reliability amplification
+- Cancellations stay private to organizer
 """
 from __future__ import annotations
 
@@ -23,15 +29,8 @@ class EventMaterializationService:
     """
     Posts materialization announcements to group chat.
 
-    Design principles (PRD Section 1.3):
-    - Recognition over Enforcement: Celebrate commitments, don't shame cancellations
-    - Gravity over Control: Make events feel real through visible momentum
-    - Memory over Surveillance: Store what mattered, not everything
-
-    Bot persona (PRD Section 5.2):
-    - Quiet facilitator in coordination flows
-    - Relational, not administrative
-    - No gamification language
+    v3 principle: Show what is. The bot reports reality; it does not try to
+    change behavior through framing.
     """
 
     def __init__(self, bot: Bot, session: AsyncSession):
@@ -45,17 +44,13 @@ class EventMaterializationService:
         group_chat_id: int,
     ) -> None:
         """
-        Announce first person joining the event.
+        v3: State the fact. No fragility framing.
 
-        Message: "[Name] just joined the [event]. We need [N] more for it to happen."
+        "Name joined. 1 person in."
         """
-        needed = (event.min_participants or 2) - 1
         name = self._get_display_name(user)
 
-        message = (
-            f"🌱 {name} just joined the {event.event_type}.\n"
-            f"We need {needed} more for it to happen."
-        )
+        message = f"{name} joined the {event.event_type}. 1 person in."
 
         await self._send_to_group(group_chat_id, message)
         logger.info("Announced first join", extra={"event_id": event.event_id, "user": user.user_id})
@@ -68,31 +63,16 @@ class EventMaterializationService:
         group_chat_id: int,
     ) -> None:
         """
-        Announce someone joining the event.
+        v3: Same format for every join. Just the count.
 
-        Message: "[Name] just joined the [event]. [N] people in."
+        "Name joined. N people in."
         """
         name = self._get_display_name(user)
-        min_required = event.min_participants or 2
-        still_needed = max(0, min_required - confirmed_count)
 
-        if still_needed > 0:
-            message = (
-                f"👋 {name} just joined the {event.event_type}.\n"
-                f"We need {still_needed} more for it to happen. {confirmed_count} people in."
-            )
-        else:
-            message = (
-                f"👋 {name} just joined the {event.event_type}.\n"
-                f"{confirmed_count} people in."
-            )
+        message = f"{name} joined the {event.event_type}. {confirmed_count} people in."
 
         await self._send_to_group(group_chat_id, message)
         logger.info("Announced join", extra={"event_id": event.event_id, "user": user.user_id})
-
-        # Check for near-collapse (TODO-025)
-        if still_needed == 1 and event.collapse_at:
-            await self.announce_near_collapse(event, confirmed_count, group_chat_id)
 
     async def announce_threshold_reached(
         self,
@@ -101,46 +81,16 @@ class EventMaterializationService:
         group_chat_id: int,
     ) -> None:
         """
-        Announce that threshold has been reached - event is now viable.
+        v3: State the threshold was met. No celebration framing.
 
-        Message: "We have enough for [event]. It's happening. [N] people in."
-
-        This is a key materialization moment - the event becomes "real".
+        "Threshold met. N people in."
         """
-        message = (
-            f"✨ We have enough for the {event.event_type}.\n"
-            f"It's happening! {confirmed_count} people in."
-        )
+        message = f"Threshold met for the {event.event_type}. {confirmed_count} people in."
 
         await self._send_to_group(group_chat_id, message)
         logger.info(
             "Announced threshold reached",
             extra={"event_id": event.event_id, "count": confirmed_count}
-        )
-
-    async def announce_high_reliability_join(
-        self,
-        event: Event,
-        user: User,
-        reliability_signal: str,
-        group_chat_id: int,
-    ) -> None:
-        """
-        Subtle signal amplification for high-reliability participants.
-
-        Message: "[Name] just confirmed." (Signal only - no explicit score)
-
-        PRD Design rule: Never show reliability score publicly.
-        """
-        name = self._get_display_name(user)
-
-        # Use reliability signal (e.g., "been to every session", "always confirms early")
-        message = f"🌟 {name} just confirmed{reliability_signal}."
-
-        await self._send_to_group(group_chat_id, message)
-        logger.info(
-            "Announced high-reliability confirmation",
-            extra={"event_id": event.event_id, "user": user.user_id}
         )
 
     async def announce_event_locked(
@@ -152,11 +102,10 @@ class EventMaterializationService:
         """
         Announce event is locked with participant list.
 
-        Message: "[Event] is locked. See you [date/time]. [participant list]"
+        "Event locked. Date/time. Who's in: names."
         """
         time_str = self._format_event_time(event)
 
-        # Build participant list (names only, no status distinction)
         names = []
         for p in participants:
             if p.status in {ParticipantStatus.confirmed, ParticipantStatus.joined}:
@@ -170,8 +119,8 @@ class EventMaterializationService:
         names_str = ", ".join(names) if names else "TBD"
 
         message = (
-            f"🔒 {event.event_type} is locked.\n"
-            f"See you {time_str}.\n\n"
+            f"{event.event_type} is locked.\n"
+            f"{time_str}.\n\n"
             f"Who's in: {names_str}"
         )
 
@@ -184,58 +133,24 @@ class EventMaterializationService:
         user: User,
         organizer_chat_id: int,
         remaining_count: int,
-        waitlist_count: int = 0,  # TODO: waitlist support
+        waitlist_count: int = 0,
     ) -> None:
         """
-        Privately inform organizer of cancellation.
+        Private notice to organizer only. No public announcement.
 
-        PRD Design constraint: No public shaming of cancellations.
-        No "[X] cancelled" posts in group.
-
-        Message to organizer: "[Name] had to drop. [N] still in. [Waitlist status]"
+        v3: Cancellation is a fact for the organizer, not the group.
         """
         name = self._get_display_name(user)
 
-        message = (
-            f"⚠️ {name} had to drop.\n"
-            f"{remaining_count} people still in."
-        )
+        message = f"{name} is no longer attending. {remaining_count} people still in."
 
-        # Add waitlist status when waitlist feature is implemented
         if waitlist_count > 0:
-            message += f"\n📋 {waitlist_count} people on waitlist."
+            message += f"\n{waitlist_count} people on waitlist."
 
         await self._send_dm(organizer_chat_id, message)
         logger.info(
             "Sent private cancellation notice",
             extra={"event_id": event.event_id, "cancelled_user": user.user_id}
-        )
-
-    async def announce_near_collapse(
-        self,
-        event: Event,
-        confirmed_count: int,
-        group_chat_id: int,
-    ) -> None:
-        """
-        Alert that event is at risk of collapse.
-
-        Message: "Heads up: [event] needs [N] more to stay alive. Deadline: [time]."
-
-        This creates threshold fragility awareness without penalties.
-        """
-        needed = (event.min_participants or 2) - confirmed_count
-        deadline_str = self._format_deadline(event.collapse_at)
-
-        message = (
-            f"⚠️ Heads up: the {event.event_type} needs {needed} more to stay alive.\n"
-            f"Deadline: {deadline_str}"
-        )
-
-        await self._send_to_group(group_chat_id, message)
-        logger.info(
-            "Announced near collapse",
-            extra={"event_id": event.event_id, "needed": needed}
         )
 
     async def announce_event_completed(
@@ -247,12 +162,9 @@ class EventMaterializationService:
         """
         Announce event completion.
 
-        Message: "[Event] is complete! Thanks to all [N] who joined."
+        "Event complete. N people joined."
         """
-        message = (
-            f"✅ {event.event_type} is complete!\n"
-            f"Thanks to all {participant_count} who joined."
-        )
+        message = f"{event.event_type} complete. {participant_count} people joined."
 
         await self._send_to_group(group_chat_id, message)
         logger.info("Announced event completed", extra={"event_id": event.event_id})
@@ -268,17 +180,10 @@ class EventMaterializationService:
     def _format_event_time(self, event: Event) -> str:
         """Format event scheduled time for display."""
         if not event.scheduled_time:
-            return "soon"
+            return "Time TBD"
 
         time_str = event.scheduled_time.strftime("%a %d %b, %H:%M")
         return time_str
-
-    def _format_deadline(self, deadline: Optional[datetime]) -> str:
-        """Format collapse deadline for display."""
-        if not deadline:
-            return "soon"
-
-        return deadline.strftime("%a %d %b, %H:%M")
 
     async def _send_to_group(self, chat_id: int, message: str) -> None:
         """Send message to group chat."""

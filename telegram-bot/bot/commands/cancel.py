@@ -10,9 +10,14 @@ from db.users import get_or_create_user_id
 from config.settings import settings
 from datetime import datetime
 from bot.services import ParticipantService
-from bot.utils.nudges import generate_nudge_message
+from bot.common.rbac import check_event_visibility_and_get_event
 
 logger = logging.getLogger(__name__)
+
+
+def _nudge_message(event_id: int, event_type: str) -> str:
+    """Inline nudge message — extracted from dead nudges.py module."""
+    return f"Event {event_id} ({event_type}) is upcoming. Your response helps everyone plan."
 
 
 async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -43,14 +48,19 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await message.reply_text("❌ Event ID must be a number.")
         return
 
-    async with get_session(settings.db_url) as session:
-        result = await session.execute(
-            select(Event).where(Event.event_id == event_id)
-        )
-        event = result.scalar_one_or_none()
+    chat_id = update.effective_chat.id if update.effective_chat else None
 
-        if not event:
-            await message.reply_text("❌ Event not found.")
+    async with get_session(settings.db_url) as session:
+        is_visible, event, group, error_msg = (
+            await check_event_visibility_and_get_event(
+                session, event_id, telegram_user_id,
+                telegram_chat_id=chat_id,
+                bot=context.bot,
+            )
+        )
+
+        if not is_visible:
+            await message.reply_text(f"❌ {error_msg or 'Event not found.'}")
             return
 
         if event.state == "locked":
@@ -91,9 +101,7 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
         await session.commit()
 
-        nudge_msg = generate_nudge_message(
-            event_id, telegram_user_id, event.event_type
-        )
+        nudge_msg = _nudge_message(event_id, event.event_type)
 
         await message.reply_text(
             f"❌ *Attendance cancelled for event {event_id}!*\n\n"

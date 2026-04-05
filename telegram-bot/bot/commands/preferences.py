@@ -13,7 +13,6 @@ from bot.common.user_preferences import (
     create_or_update_user_preferences,
     get_privacy_defaults,
 )
-from bot.common.reputation_trends import get_user_reputation_summary
 
 
 TIME_PREFERENCES = ["any", "morning", "afternoon", "evening", "night"]
@@ -231,41 +230,3 @@ async def set_preference(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             f"✅ *Preference updated!*\n\n"
             f"{pref_type.replace('_', ' ').title()}: {pref_value}"
         )
-
-
-async def show_reputation(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Show user's reputation summary."""
-    if not update.message or not update.effective_user:
-        return
-
-    user = update.effective_user
-    telegram_user_id = user.id
-
-    db_url = settings.db_url or ""
-    async with get_session(db_url) as session:
-        summary = await get_user_reputation_summary(session, telegram_user_id)
-
-        if "error" in summary:
-            await update.message.reply_text("❌ User not found.")
-            return
-
-        lines = [
-            f"⭐ *Reputation Summary for {summary.get('display_name', 'User')}*",
-            "",
-            f"Global Reputation: {summary.get('global_reputation', 0):.2f}",
-            "",
-            "Activity-specific scores:",
-        ]
-
-        for activity, score in summary.get('activity_reputations', {}).items():
-            lines.append(f"  - {activity}: {score:.2f}")
-
-        reliability = summary.get('reliability_trend', {})
-        lines.extend([
-            "",
-            f"Current Reliability Score: {reliability.get('current_score', 0):.2f}",
-            f"Events participated: {reliability.get('total_events', 0)}",
-            f"Confirmation rate: {reliability.get('confirmation_rate', 0)*100:.1f}%",
-        ])
-
-        await update.message.reply_text("\n".join(lines))

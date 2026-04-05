@@ -166,30 +166,6 @@ class EventDraftFromContext(BaseModel):
 
 
 # ============================================================================
-# Early Feedback Inference Schema
-# ============================================================================
-
-
-class EarlyFeedbackInference(BaseModel):
-    """Schema for early behavioral feedback inference."""
-
-    signal_type: Literal[
-        "overall", "reliability", "cooperation", "toxicity", "commitment", "trust"
-    ] = "overall"
-    score: float = Field(ge=0.0, le=5.0, default=3.0)
-    weight: float = Field(ge=0.0, le=1.0, default=0.6)
-    confidence: float = Field(ge=0.0, le=1.0, default=0.7)
-    sanitized_comment: str = Field(max_length=500, default="")
-
-    @validator("sanitized_comment")
-    def ensure_comment_not_empty(cls, v: str) -> str:
-        """Ensure comment has content."""
-        if not v or len(v.strip()) == 0:
-            return "Behavioral signal observed"
-        return v.strip()
-
-
-# ============================================================================
 # Group Mention Action Schema
 # ============================================================================
 

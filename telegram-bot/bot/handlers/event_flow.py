@@ -68,7 +68,8 @@ async def handle_join(query, context: ContextTypes.DEFAULT_TYPE, event_id: int) 
         is_visible, event, group, error_msg = (
             await check_event_visibility_and_get_event(
                 session, event_id, telegram_user_id,
-                telegram_chat_id=chat_id
+                telegram_chat_id=chat_id,
+                bot=context.bot,
             )
         )
 
@@ -285,7 +286,8 @@ async def handle_confirm(query, context: ContextTypes.DEFAULT_TYPE, event_id: in
         is_visible, event, group, error_msg = (
             await check_event_visibility_and_get_event(
                 session, event_id, telegram_user_id,
-                telegram_chat_id=chat_id
+                telegram_chat_id=chat_id,
+                bot=context.bot,
             )
         )
 
@@ -451,7 +453,8 @@ async def handle_back(query, context: ContextTypes.DEFAULT_TYPE, event_id: int) 
         is_visible, event, group, error_msg = (
             await check_event_visibility_and_get_event(
                 session, event_id, telegram_user_id,
-                telegram_chat_id=chat_id
+                telegram_chat_id=chat_id,
+                bot=context.bot,
             )
         )
 
@@ -506,7 +509,8 @@ async def handle_cancel(query, context: ContextTypes.DEFAULT_TYPE, event_id: int
         is_visible, event, group, error_msg = (
             await check_event_visibility_and_get_event(
                 session, event_id, telegram_user_id,
-                telegram_chat_id=chat_id
+                telegram_chat_id=chat_id,
+                bot=context.bot,
             )
         )
 
@@ -579,7 +583,8 @@ async def handle_lock(query, context: ContextTypes.DEFAULT_TYPE, event_id: int) 
         is_visible, event, group, error_msg = (
             await check_event_visibility_and_get_event(
                 session, event_id, telegram_user_id,
-                telegram_chat_id=chat_id
+                telegram_chat_id=chat_id,
+                bot=context.bot,
             )
         )
 

@@ -93,7 +93,6 @@ class SchedulerService:
         PRD v2 Section 5.1: Data minimization policy
         - Action-level logs: 90 days retention
         - Event memories: retained long-term
-        - Reputation aggregates: retained long-term
 
         Triggered: Weekly
         """

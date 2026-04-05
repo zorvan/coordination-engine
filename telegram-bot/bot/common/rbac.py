@@ -4,6 +4,7 @@ PRD v2: Organizer control, permission checks, and group membership enforcement.
 """
 from __future__ import annotations
 
+import logging
 from typing import Optional, Tuple, TYPE_CHECKING
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -13,12 +14,31 @@ from db.models import Event, EventParticipant, Group
 if TYPE_CHECKING:
     from db.models import Event as EventType, Group as GroupType
 
+logger = logging.getLogger("coord_bot.rbac")
+
+
+def _sep():
+    return "━" * 52
+
+
+def _pass(step: str, detail: str = ""):
+    logger.info("✅ %s  %s", step, detail)
+
+
+def _fail(step: str, detail: str = ""):
+    logger.info("❌ %s  %s", step, detail)
+
+
+def _info(label: str, value: str):
+    logger.info("   %s: %s", label, value)
+
 
 async def check_group_membership(
     session: AsyncSession,
     group_id: int,
     user_id: int,
     telegram_chat_id: Optional[int] = None,
+    bot: object = None,
 ) -> Tuple[bool, Optional[str]]:
     """
     Check if a user is a member of the given group.
@@ -26,58 +46,101 @@ async def check_group_membership(
     Checks in order:
     1. If telegram_chat_id matches the group's telegram_group_id → implicit member
     2. If user has participated in ANY event in this group → proven member
-    3. Explicit check of Group.member_list (unreliable if not fully populated)
-
-    Args:
-        session: DB session
-        group_id: Internal group ID
-        user_id: Telegram user ID
-        telegram_chat_id: Optional Telegram chat ID for implicit membership
-
-    Returns:
-        (is_member, error_message)
+    3. Explicit check of Group.member_list
+    4. Final fallback: query Telegram API for actual group membership
     """
+    logger.info("")
+    logger.info("%s", _sep())
+    logger.info("🔍 check_group_membership")
+    logger.info("   group_id=%d  user_id=%d  chat_id=%r", group_id, user_id, telegram_chat_id)
+
     result = await session.execute(
         select(Group).where(Group.group_id == group_id)
     )
     group = result.scalar_one_or_none()
 
     if not group:
+        _fail("Group not found", f"group_id={group_id}")
         return False, "Group not found"
 
-    # 1. If the user is interacting from the same group chat, they're implicitly a member
-    if telegram_chat_id is not None and group.telegram_group_id == telegram_chat_id:
-        # Auto-enroll into member_list for future checks
+    _info("Group", f"{group.group_name or 'unnamed'} (tg_id={group.telegram_group_id})")
+    _info("Stored members", str(group.member_list or []))
+
+    uid = int(user_id)
+
+    # ── Step 1: Same group chat ──────────────────────────────
+    _info("Step 1", "Same group chat check")
+    _info("  group.telegram_group_id", str(group.telegram_group_id))
+    _info("  incoming telegram_chat_id", str(telegram_chat_id))
+
+    if telegram_chat_id is not None and int(group.telegram_group_id) == int(telegram_chat_id):
         member_list = group.member_list or []
-        if int(user_id) not in [int(m) for m in member_list]:
-            group.member_list = [*member_list, int(user_id)]
+        if uid not in [int(m) for m in member_list]:
+            group.member_list = [*member_list, uid]
             await session.flush()
+        _pass("Step 1 PASS", "Same group chat → implicit member")
         return True, None
 
-    # 2. If user is a participant in ANY event in this group, they're a proven member
+    _fail("Step 1 FAIL", "Chat IDs do not match")
+
+    # ── Step 2: Prior event participation ────────────────────
+    _info("Step 2", "Prior event participation in group")
     participant_check = await session.execute(
         select(EventParticipant.event_id)
         .join(Event, EventParticipant.event_id == Event.event_id)
         .where(
             Event.group_id == group_id,
-            EventParticipant.telegram_user_id == int(user_id),
+            EventParticipant.telegram_user_id == uid,
         )
         .limit(1)
     )
-    if participant_check.scalar_one_or_none() is not None:
-        # Auto-enroll into member_list
+    prior = participant_check.scalar_one_or_none()
+    if prior is not None:
         member_list = group.member_list or []
-        if int(user_id) not in [int(m) for m in member_list]:
-            group.member_list = [*member_list, int(user_id)]
+        if uid not in [int(m) for m in member_list]:
+            group.member_list = [*member_list, uid]
             await session.flush()
+        _pass("Step 2 PASS", f"Participated in event {prior}")
         return True, None
 
-    # 3. Fallback: check member_list (may not be fully populated)
-    member_list = group.member_list or []
-    if int(user_id) not in [int(m) for m in member_list]:
-        return False, "You are not a member of this group"
+    _fail("Step 2 FAIL", "No prior event participation in this group")
 
-    return True, None
+    # ── Step 3: member_list cache ────────────────────────────
+    _info("Step 3", "member_list cache check")
+    member_list = group.member_list or []
+    _info("  checking user_id", str(uid))
+    _info("  member_list int values", str([int(m) for m in member_list]))
+
+    if uid in [int(m) for m in member_list]:
+        _pass("Step 3 PASS", "User found in cached member_list")
+        return True, None
+
+    _fail("Step 3 FAIL", "User not in member_list")
+
+    # ── Step 4: Telegram API fallback ────────────────────────
+    _info("Step 4", "Telegram API get_chat_member")
+    if bot is not None:
+        try:
+            _info("  calling get_chat_member", f"chat_id={group.telegram_group_id} user_id={uid}")
+            member = await bot.get_chat_member(
+                chat_id=group.telegram_group_id,
+                user_id=uid,
+            )
+            _info("  API returned", f"status={member.status}")
+            if member.status in {"member", "administrator", "creator"}:
+                group.member_list = [*member_list, uid]
+                await session.flush()
+                _pass("Step 4 PASS", f"Telegram API confirms: status={member.status}")
+                return True, None
+            _fail("Step 4 FAIL", f"Telegram API says: status={member.status}")
+        except Exception as e:
+            _fail("Step 4 FAIL", f"API error: {type(e).__name__}: {e}")
+    else:
+        _fail("Step 4 FAIL", "Bot not provided — cannot query Telegram API")
+
+    _info("Result", "DENIED — not a member of this group")
+    logger.info("%s", _sep())
+    return False, "You are not a member of this group"
 
 
 async def check_event_visibility_and_get_event(
@@ -85,27 +148,24 @@ async def check_event_visibility_and_get_event(
     event_id: int,
     user_id: int,
     telegram_chat_id: Optional[int] = None,
+    bot: object = None,
 ) -> Tuple[bool, Optional["EventType"], Optional["GroupType"], Optional[str]]:
     """
     Check if an event is visible to the user based on group membership.
 
-    Rules:
-    - Event organizer can always see the event
-    - Event admin can always see the event
-    - If user is interacting from the same group chat as the event, they're a member
-    - If user has participated in ANY event in this group, they're a member
-    - Otherwise, check Group.member_list for explicit membership
-    - Non-members cannot see events in the group
-
-    Args:
-        session: DB session
-        event_id: Event ID to check
-        user_id: Telegram user ID
-        telegram_chat_id: Optional Telegram chat ID for implicit membership
-
-    Returns:
-        (is_visible, event, group, error_message)
+    Checks in order:
+    1. Organizer/admin → always allowed
+    2. Same group chat → implicit member
+    3. Participant in THIS event → allowed
+    4. Participant in ANY event in group → proven member
+    5. member_list cache
+    6. Telegram API get_chat_member (final fallback)
     """
+    logger.info("")
+    logger.info("%s", _sep())
+    logger.info("🔍 check_event_visibility_and_get_event")
+    logger.info("   event_id=%d  user_id=%d  chat_id=%r", event_id, user_id, telegram_chat_id)
+
     result = await session.execute(
         select(Event, Group)
         .join(Group, Event.group_id == Group.group_id, isouter=True)
@@ -114,53 +174,133 @@ async def check_event_visibility_and_get_event(
     row = result.one_or_none()
 
     if not row:
+        _fail("Event not found", f"event_id={event_id}")
         return False, None, None, "Event not found"
 
     event, group = row
+    uid = int(user_id)
 
-    # Organizer and admin can always see the event
-    if event.organizer_telegram_user_id == user_id:
-        return True, event, group, None
-    if event.admin_telegram_user_id == user_id:
+    _info("Event", f"{event.event_type} (state={event.state}, id={event.event_id})")
+    _info("Organizer", str(event.organizer_telegram_user_id))
+    _info("Admin", str(event.admin_telegram_user_id))
+
+    # ── Check 1: Organizer / Admin ───────────────────────────
+    _info("Check 1", "Organizer / Admin check")
+    _info("  event.organizer_telegram_user_id", str(event.organizer_telegram_user_id))
+    _info("  event.admin_telegram_user_id", str(event.admin_telegram_user_id))
+    _info("  requesting user_id", str(uid))
+
+    if event.organizer_telegram_user_id == uid:
+        _pass("Check 1 PASS", "User is event organizer")
         return True, event, group, None
 
-    # If event has no group, it's orphaned — deny access
+    if event.admin_telegram_user_id == uid:
+        _pass("Check 1 PASS", "User is event admin")
+        return True, event, group, None
+
+    _fail("Check 1 FAIL", "Not organizer or admin")
+
+    # ── Orphaned event ───────────────────────────────────────
     if not group:
+        _fail("Orphaned event", "Event has no group → denied")
         return False, None, None, "Event not found"
 
-    # 1. If user is interacting from the same group chat as the event, they're a member
-    if telegram_chat_id is not None and group.telegram_group_id == telegram_chat_id:
-        # Auto-enroll into member_list for future checks
+    _info("Group", f"{group.group_name or 'unnamed'} (tg_id={group.telegram_group_id})")
+    _info("Stored members", str(group.member_list or []))
+
+    # ── Check 2: Same group chat ─────────────────────────────
+    _info("Check 2", "Same group chat check")
+    _info("  group.telegram_group_id", str(group.telegram_group_id))
+    _info("  incoming telegram_chat_id", str(telegram_chat_id))
+
+    if telegram_chat_id is not None and int(group.telegram_group_id) == int(telegram_chat_id):
         member_list = group.member_list or []
-        if int(user_id) not in [int(m) for m in member_list]:
-            group.member_list = [*member_list, int(user_id)]
+        if uid not in [int(m) for m in member_list]:
+            group.member_list = [*member_list, uid]
             await session.flush()
+        _pass("Check 2 PASS", "Same group chat → implicit member")
         return True, event, group, None
 
-    # 2. If user has participated in ANY event in this group, they're a proven member
+    _fail("Check 2 FAIL", "Chat IDs do not match")
+
+    # ── Check 3: Participant in THIS event ───────────────────
+    _info("Check 3", "Participant in THIS event")
+    _info("  event_id", str(event_id))
+    _info("  user_id", str(uid))
+
     participant_check = await session.execute(
+        select(EventParticipant.event_id)
+        .where(
+            EventParticipant.event_id == event_id,
+            EventParticipant.telegram_user_id == uid,
+        )
+        .limit(1)
+    )
+    this_event = participant_check.scalar_one_or_none()
+    if this_event is not None:
+        _pass("Check 3 PASS", f"Already participant in event {this_event}")
+        return True, event, group, None
+
+    _fail("Check 3 FAIL", "Not a participant in this event")
+
+    # ── Check 4: Participant in ANY event in group ───────────
+    _info("Check 4", "Participant in ANY event in group")
+    group_participant_check = await session.execute(
         select(EventParticipant.event_id)
         .join(Event, EventParticipant.event_id == Event.event_id)
         .where(
             Event.group_id == group.group_id,
-            EventParticipant.telegram_user_id == int(user_id),
+            EventParticipant.telegram_user_id == uid,
         )
         .limit(1)
     )
-    if participant_check.scalar_one_or_none() is not None:
-        # Auto-enroll into member_list
+    prior = group_participant_check.scalar_one_or_none()
+    if prior is not None:
         member_list = group.member_list or []
-        if int(user_id) not in [int(m) for m in member_list]:
-            group.member_list = [*member_list, int(user_id)]
+        if uid not in [int(m) for m in member_list]:
+            group.member_list = [*member_list, uid]
             await session.flush()
+        _pass("Check 4 PASS", f"Participated in prior event {prior}")
         return True, event, group, None
 
-    # 3. Fallback: check member_list (used for DM access or cross-context)
-    member_list = group.member_list or []
-    if int(user_id) not in [int(m) for m in member_list]:
-        return False, None, None, "You do not have access to this event"
+    _fail("Check 4 FAIL", "No prior event participation in group")
 
-    return True, event, group, None
+    # ── Check 5: member_list cache ───────────────────────────
+    _info("Check 5", "member_list cache check")
+    member_list = group.member_list or []
+    _info("  checking user_id", str(uid))
+    _info("  member_list int values", str([int(m) for m in member_list]))
+
+    if uid in [int(m) for m in member_list]:
+        _pass("Check 5 PASS", "User found in cached member_list")
+        return True, event, group, None
+
+    _fail("Check 5 FAIL", "User not in member_list")
+
+    # ── Check 6: Telegram API fallback ───────────────────────
+    _info("Check 6", "Telegram API get_chat_member")
+    if bot is not None:
+        try:
+            _info("  calling get_chat_member", f"chat_id={group.telegram_group_id} user_id={uid}")
+            member = await bot.get_chat_member(
+                chat_id=group.telegram_group_id,
+                user_id=uid,
+            )
+            _info("  API returned", f"status={member.status}")
+            if member.status in {"member", "administrator", "creator"}:
+                group.member_list = [*member_list, uid]
+                await session.flush()
+                _pass("Check 6 PASS", f"Telegram API confirms: status={member.status}")
+                return True, event, group, None
+            _fail("Check 6 FAIL", f"Telegram API says: status={member.status}")
+        except Exception as e:
+            _fail("Check 6 FAIL", f"API error: {type(e).__name__}: {e}")
+    else:
+        _fail("Check 6 FAIL", "Bot not provided — cannot query Telegram API")
+
+    _info("Result", "DENIED — no access to this event")
+    logger.info("%s", _sep())
+    return False, None, None, "You do not have access to this event"
 
 
 async def check_event_organizer(

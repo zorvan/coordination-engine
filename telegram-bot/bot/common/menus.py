@@ -11,15 +11,14 @@ def build_main_menu() -> InlineKeyboardMarkup:
             InlineKeyboardButton("👤 My Profile", callback_data="menu_my_profile"),
         ],
         [
-            InlineKeyboardButton("⭐ My Reputation", callback_data="menu_reputation"),
             InlineKeyboardButton("📜 My History", callback_data="menu_history"),
+            InlineKeyboardButton("✏️ Organize", callback_data="menu_organize"),
         ],
         [
-            InlineKeyboardButton("✏️ Organize Event", callback_data="menu_organize"),
-            InlineKeyboardButton("🔧 Modify Event", callback_data="menu_modify"),
+            InlineKeyboardButton("🔧 Modify", callback_data="menu_modify"),
+            InlineKeyboardButton("👥 Groups", callback_data="menu_groups"),
         ],
         [
-            InlineKeyboardButton("👥 My Groups", callback_data="menu_groups"),
             InlineKeyboardButton("❓ Help", callback_data="menu_help"),
         ],
     ]
@@ -114,9 +113,6 @@ def build_help_keyboard() -> InlineKeyboardMarkup:
         ],
         [
             InlineKeyboardButton("📅 Scheduling", callback_data="help_scheduling"),
-            InlineKeyboardButton("⭐ Reputation", callback_data="help_reputation"),
-        ],
-        [
             InlineKeyboardButton("🔙 Back to Main Menu", callback_data="menu_main"),
         ],
     ]

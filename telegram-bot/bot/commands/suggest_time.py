@@ -130,10 +130,8 @@ async def _send_suggestion(
             f"🤖 *AI Time Suggestion for Event {event_id}*\n\n"
             f"Suggested Time: {normalized_suggested}\n"
             f"Reasoning: {suggestion.get('reasoning', 'N/A')}\n"
-            f"Confidence: {suggestion.get('confidence', 0):.2f}\n\n"
-            f"Availability Score: "
-            f"{suggestion.get('availability_score', 0):.2f}\n"
-            f"Reliability Score: {suggestion.get('reliability_score', 0):.2f}"
+            f"Confidence: {suggestion.get('confidence', 0):.2f}\n"
+            f"Availability Score: {suggestion.get('availability_score', 0):.2f}"
             + (
                 "\n\n✅ Applied this suggested time to the event."
                 if auto_applied else ""

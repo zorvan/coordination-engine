@@ -10,7 +10,6 @@ from db.connection import get_session
 from db.users import get_or_create_user_id, get_user_id_by_username
 from config.settings import settings
 from ai.llm import LLMClient
-from bot.common.early_feedback import add_early_feedback_signal
 from bot.common.event_access import get_event_organizer_telegram_id, is_attendee
 
 ALLOWED_CONSTRAINT_TYPES = {"if_joins", "if_attends", "unless_joins"}
@@ -381,33 +380,6 @@ async def _save_constraint_from_inputs(
             confidence=confidence
         )
         session.add(constraint)
-        # Persist a normalized pre-event trust signal from constraints.
-        score_by_type = {
-            "if_attends": 4.2,
-            "if_joins": 3.8,
-            "unless_joins": 2.8,
-        }
-        signal_score = score_by_type.get(constraint_type, 3.2)
-        try:
-            await add_early_feedback_signal(
-                session,
-                event_id=event_id,
-                source_user_id=source_user_id,
-                target_user_id=target_user_id,
-                source_type="constraint",
-                signal_type="trust",
-                value=signal_score,
-                weight=max(0.2, min(1.0, float(confidence))),
-                confidence=max(0.2, min(1.0, float(confidence))),
-                sanitized_comment=(
-                    summary
-                    or f"Constraint signal: {constraint_type} on {target_label}"
-                ),
-                metadata={"constraint_type": constraint_type},
-            )
-        except Exception:
-            # Constraint persistence is primary; skip signal on failure.
-            pass
         try:
             await session.commit()
         except IntegrityError:

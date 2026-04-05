@@ -227,12 +227,10 @@ class OrganizerRotationService:
                 "telegram_user_id": user.telegram_user_id,
                 "display_name": user.display_name or user.username,
                 "organized_count": organized_count,
-                "reliability": user.reputation or 3.0,
             })
 
         # Sort by organized_count (ascending - prefer those who organized less)
-        # Then by reliability (descending)
-        candidates.sort(key=lambda c: (c["organized_count"], -c["reliability"]))
+        candidates.sort(key=lambda c: c["organized_count"])
 
         # Return top candidate
         return candidates[0] if candidates else None

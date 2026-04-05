@@ -49,8 +49,6 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         await _show_event_detail(query, context, event_id)
     elif data == "menu_my_profile":
         await _redirect_to_profile(query, context)
-    elif data == "menu_reputation":
-        await _redirect_to_reputation(query, context)
     elif data == "menu_history":
         await _redirect_to_history(query, context)
     elif data == "menu_organize":
@@ -77,7 +75,6 @@ async def _show_main_menu(query, context: ContextTypes.DEFAULT_TYPE) -> None:
         "Choose an option below:\n\n"
         "📋 *My Events* - View and manage your events\n"
         "👤 *My Profile* - Check your stats\n"
-        "⭐ *Reputation* - See your reputation\n"
         "📜 *History* - Browse your event history\n"
         "✏️ *Organize* - Create a new event\n"
         "🔧 *Modify* - Modify an existing event\n"
@@ -125,7 +122,8 @@ async def _show_my_events(query, context: ContextTypes.DEFAULT_TYPE, page: int =
             # Check group membership
             is_member, _ = await check_group_membership(
                 session, group.group_id, user_id,
-                telegram_chat_id=chat_id
+                telegram_chat_id=chat_id,
+                bot=context.bot,
             )
             if not is_member:
                 # Non-member: skip this event
@@ -248,7 +246,8 @@ async def _show_event_detail(query, context: ContextTypes.DEFAULT_TYPE, event_id
         is_visible, event, group, error_msg = (
             await check_event_visibility_and_get_event(
                 session, event_id, user_id,
-                telegram_chat_id=chat_id
+                telegram_chat_id=chat_id,
+                bot=context.bot,
             )
         )
 
@@ -348,15 +347,8 @@ async def _show_help_topic(query, context: ContextTypes.DEFAULT_TYPE, topic: str
             "• The bot suggests optimal times\n"
             "• More availability = better scheduling!"
         ),
-        "reputation": (
-            "⭐ *Reputation System*\n\n"
-            "• Shows up when you *attend events* reliably\n"
-            "• Drops when you *cancel last minute*\n"
-            "• Affects how others *trust your commitments*\n\n"
-            "Be reliable to build a strong reputation!"
-        ),
     }
-    
+
     text = topics.get(topic, "❓ Help topic not found.")
     
     await query.edit_message_text(
@@ -370,60 +362,45 @@ async def _show_help_topic(query, context: ContextTypes.DEFAULT_TYPE, topic: str
 async def _redirect_to_profile(query, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Redirect to profile command."""
     await query.edit_message_text(
-        "👤 *Your Profile*\n\n"
+        "Your Profile\n\n"
         "Please use /profile command to view your full profile and stats.",
         reply_markup=build_back_to_menu_keyboard(),
-        parse_mode="Markdown",
-    )
-
-
-async def _redirect_to_reputation(query, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Redirect to reputation command."""
-    await query.edit_message_text(
-        "⭐ *Your Reputation*\n\n"
-        "Please use /reputation command to view your reputation trend.",
-        reply_markup=build_back_to_menu_keyboard(),
-        parse_mode="Markdown",
     )
 
 
 async def _redirect_to_history(query, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Redirect to history command."""
     await query.edit_message_text(
-        "📜 *Your History*\n\n"
+        "Your History\n\n"
         "Please use /my_history command to view your event timeline.",
         reply_markup=build_back_to_menu_keyboard(),
-        parse_mode="Markdown",
     )
 
 
 async def _redirect_to_organize(query, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Redirect to organize command."""
     await query.edit_message_text(
-        "✏️ *Organize Event*\n\n"
+        "Organize Event\n\n"
         "Please use /organize_event command in a group chat to create an event.\n\n"
         "Or use /private_organize_event to create a private locked event.",
         reply_markup=build_back_to_menu_keyboard(),
-        parse_mode="Markdown",
     )
 
 
 async def _redirect_to_modify(query, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Redirect to modify command."""
     await query.edit_message_text(
-        "🔧 *Modify Event*\n\n"
+        "Modify Event\n\n"
         "Please use /modify_event <event_id> command to modify an event.\n\n"
         "Or select an event from My Events and use the Modify button.",
         reply_markup=build_back_to_menu_keyboard(),
-        parse_mode="Markdown",
     )
 
 
 async def _redirect_to_groups(query, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Redirect to groups command."""
     await query.edit_message_text(
-        "👥 *Your Groups*\n\n"
+        "Your Groups\n\n"
         "Please use /my_groups command to view your groups.",
         reply_markup=build_back_to_menu_keyboard(),
-        parse_mode="Markdown",
     )

@@ -1,31 +1,308 @@
 # Coordination Engine Bot
 
-Telegram group coordination bot with hybrid AI + deterministic command flows.
+**Pure Mediation: From Behavioral Inference to Relational Perception**
 
-**Version 3.0** — Clean Architecture with domain-driven design, normalized participant management, automated lifecycle events, and comprehensive service integration.
+A Telegram bot that mediates group coordination through perception, not prediction. It shapes how people relate to what is forming — without modeling users, inferring reliability, or steering outcomes.
 
-> **Phase 6 Complete** ✅ — Clean Architecture refactoring: domain layer with rich aggregates, application layer with CQRS-lite use cases, infrastructure layer with repository implementations, and presentation layer with thin handlers. See [docs/v2/IMPLEMENTATION.md](docs/v2/IMPLEMENTATION.md) for details.
+---
 
-This README reflects the **current v3 implementation** with Clean Architecture, normalized database schema, and service-oriented design.
+## The Problem This Solves
 
-## What This Bot Does
+Traditional coordination systems create hidden asymmetries:
 
-The bot helps groups coordinate events with:
+- They observe and model user behavior over time
+- They infer "reliability" and adjust access/priorities accordingly
+- They engineer social pressure through fragility framing
+- They synthesize memory into unified narratives
+- They create surveillance dynamics, even when well-intentioned
 
-- **Clean Architecture**: Domain → Application → Infrastructure → Presentation, with dependency rule enforced
-- **Three-layer architecture**: Coordination (state management), Materialization (announcements), Memory (post-event narratives)
-- **Normalized participant management**: EventParticipant table replaces JSON attendance_list
-- **Automated lifecycle events**: Materialization announcements and memory collection triggers
-- **Domain-driven design**: Event aggregate root with state machine, invariants, and optimistic concurrency
-- **CQRS-lite**: Separate command handlers (write) and query handlers (read)
-- **Event-driven**: Domain events published via EventBus → notifications
-- **Idempotency framework**: Prevents duplicate command execution (feature-flagged)
-- **Optimistic concurrency control**: Version-based conflict detection for state transitions
-- Structured slash-command workflows for speed and reliability
-- Mention/reply-based AI orchestration for natural language interaction
-- Organizer-controlled event edits with reconfirmation handling
-- Attendee private inputs (availability, notes, early feedback) via DM
-- Persistent PostgreSQL storage for events, constraints, logs, and reputation-related signals
+The result: groups coordinate around system-defined variables, not shared intention. Trust becomes computational, not relational. Meaning gets centralized, not plural.
+
+This system rejects that foundation entirely.
+
+---
+
+## What This System Is
+
+### A Pure Mediation System
+
+The system's only mechanism is **shaping how people perceive what is forming**.
+
+It does not:
+
+- Predict behavior or model users
+- Score participation or infer reliability
+- Steer outcomes or adjust treatment based on history
+- Learn from user behavior over time
+
+It does:
+
+- Show who has joined and confirmed equally
+- Show how close the event is to threshold
+- Show what the group remembered last time
+- Let participants declare constraints privately
+
+That is the complete set of causal mechanisms.
+
+### A Recognition Environment
+
+Recognition means: **I see that you are here. I see what you are bringing.**
+
+It does not mean: *The system has evaluated you and found you reliable.*
+
+The bot announces joins and confirms equally. Every participant is announced the same way. No one is amplified. No one is silently deprioritized.
+
+### An Absent Friend (Not a Pipeline)
+
+An absent friend:
+
+- Has no deadline for hearing your story
+- Does not structure what you say
+- Does not synthesize your words into something else
+- Simply receives and holds what you offer
+
+The memory flow has no collection window. No required categories. No synthesis. Fragments are presented as they arrived — plural, unresolved, co-existing without hierarchy.
+
+### A Memory Driver (Not an Artifact)
+
+Memory is not what happens after an event. Memory is what makes the next event possible.
+
+When a group creates a new event of the same type, the system shows them what they remembered last time — before they configure anything else. The past is present at the moment of formation.
+
+---
+
+## The Six Mediation Levers
+
+These are the only mechanisms the system has. None require behavioral data. All are about perception.
+
+### 1. Timing
+
+When the system speaks matters. A threshold announcement at 48 hours feels different than at 2 hours.
+
+### 2. Framing
+
+"3 people joined" vs. "This is close to happening" — same fact, different relational experience.
+
+### 3. Visibility (Without Analysis)
+
+Who is in. How many are needed. What the group remembered. These facts, made visible at the right moment.
+
+### 4. Language
+
+Every word the bot uses is a design decision. "Confirm participation" and "others are counting on you" are not the same.
+
+### 5. Sequence
+
+What comes first shapes what is possible. Memory surfaces before creation. The bot asks about intent before asking about structure.
+
+### 6. Memory Surfacing
+
+Not memory analysis. Not memory synthesis. Simply: when a group tries to do something again, they first see what they remembered last time.
+
+---
+
+## The Complete List of System Inputs That Affect Outcomes
+
+This is exhaustive. If it's not on this list, the system does not use it to change what happens.
+
+| Input | Used For | Different Outcomes for Different Users? |
+|---|---|---|
+| User joins an event | Adding to participant list; triggering join announcement | No — all joins announced equally |
+| User confirms attendance | Moving to confirmed list; triggering confirmation announcement | No — all confirms announced equally |
+| User cancels | Removing from participant list; DM to organizer only | No — cancellation always private |
+| Event reaches minimum participants | Threshold announcement | No — based on count only |
+| Event passes collapse deadline | Auto-cancellation | No — based on time and count only |
+| User declares availability constraint | Time suggestion calculation | No — availability is merged neutrally |
+| User declares conditional constraint | Eligibility checking | No — condition evaluated deterministically |
+| User contributes memory fragment | Fragment stored; mosaic assembled when ≥2 exist | No — all fragments treated equally |
+| User requests personal attendance mirror | Private display of counts by event type | No — user sees only their own data |
+
+**There is no column for "reliability score," "trust inference," or "behavioral pattern."** Those do not exist in the system.
+
+---
+
+## The Bot's Voice
+
+### Before Structure (Meaning-Formation Mode)
+
+When a user signals they want to organize something, the bot does not immediately ask "What type of event?"
+
+It asks:
+> *"What are you trying to bring together?"*
+
+Or:
+> *"Is this something that needs a fixed time, or just a moment for a certain group?"*
+
+The bot stays with vagueness if the user is vague:
+> *"That sounds like it could be a few things — do you have a sense of who needs to be there for it to feel right?"*
+
+Only when intent is clear does the bot shift to structured flow.
+
+### During Coordination (Quiet Facilitation Mode)
+
+The bot is a background orchestrator. It facilitates without crowding the space. Messages are brief, specific, relational. The bot does not explain itself, offer unsolicited options, or manufacture urgency.
+
+### During Memory Collection (Receiving Mode)
+
+The bot is receiving, not collecting. No deadline. No structure. No categories.
+
+> *"Hey — how was [event]? Anything that stuck with you? A word, a moment, a photo — whatever comes to mind."*
+
+The bot does not ask follow-up questions. It does not prompt for specific categories. It says thank you and holds what was offered.
+
+---
+
+## The One Question That Decides Everything
+
+> If two users behave identically in the system, but you believe one is more reliable… should the system treat them differently?
+
+**Answer:** No.
+
+The system does not hold beliefs about users. It does not infer reliability. It does not compute trust. It does not maintain scores — hidden or visible. It does not adjust timing, priority, access, or any other variable based on what it thinks about a user.
+
+The system knows three things about a user:
+
+1. Their Telegram identity (name, ID)
+2. What events they have joined or confirmed (factual attendance counts)
+3. What constraints they have declared (availability, conditional participation)
+
+That is all. None of these are used as inputs to any algorithm that produces different outcomes for different users.
+
+---
+
+## The Materialization Test
+
+Before any materialization announcement is sent, it must pass this test:
+
+> **Does this show what is forming, or does it engineer a response?**
+
+| Message | Pass/Fail | Why |
+|---|---|---|
+| "[Name] just joined. [N] people are in." | Pass | Shows reality |
+| "We need 2 more for this to happen." | Pass (threshold context) | Shows reality |
+| "If one more person drops, this event collapses." | Fail | Engineers dread |
+| "[Name], who's been to every session, just joined." | Fail | Creates hierarchy |
+| "Heads up — [event] needs [N] more. Deadline: [time]." | Pass | Shows reality without guilt |
+| "X is counting on you." | Fail | Engineers personal responsibility |
+
+The group is informed. The system does not engineer guilt.
+
+---
+
+## The Memory Mosaic Test
+
+Before any Fragment Mosaic is assembled, the LLM prompt must enforce:
+
+> **You may rearrange fragments for readability. You may not add words that were not in the fragments. You may not label, categorize, interpret, or synthesize. The output must contain only the participants' words, in their original form, possibly reordered.**
+
+| Output Type | Pass/Fail | Why |
+|---|---|---|
+| "The rain made it better." / "Best three hours." | Pass | Participant words only |
+| "The group enjoyed a memorable adventure with unexpected weather." | Fail | Synthesis, not fragments |
+| "Fragment 1: The rain made it better. Fragment 2: Best three hours." | Pass (if labels are minimal layout) | No interpretation |
+| "Several people mentioned the weather." | Fail | Interpretation, not fragment |
+
+If the LLM cannot be constrained to this, the mosaic is assembled without LLM — simple chronological list.
+
+---
+
+## The Personal Attendance Mirror
+
+When a user sends `/how_am_i_doing` (private DM only), the bot responds:
+
+Your attendance by event type:
+
+• Hiking: 8 joined, 7 completed
+• Work meetups: 3 joined, 3 completed
+• Social: 5 joined, 4 completed
+
+**Constraints:**
+
+- No score. No formula. No weighting.
+- No comparison to others ("you are in the top 20%" — forbidden)
+- No trend analysis ("your reliability is improving" — forbidden)
+- No influence on system behavior (these counts are never read by any algorithm that affects outcomes)
+- Private to the user — no other user can query this data
+
+**What this is:** A mirror. The user sees their own pattern. The system does nothing with it.
+
+**What this is not:** A reputation system, a scoring system, a behavioral model, or an input to any decision.
+
+---
+
+## What This System Is Not
+
+### Not a Behavioral Modeling System
+
+This system does not:
+
+- Extract signals from participation
+- Infer reliability, trust, civility, cooperation, or commitment
+- Maintain scores — visible or invisible
+- Use attendance history to change outcomes for any user
+- Learn from user behavior over time
+
+The attendance counts a user can see privately are just that — counts. They influence nothing the system does. They are for the user's own reflection, not for the system's decisions.
+
+### Not a Steering System
+
+The system does not steer individuals. It only reveals shared reality
+
+This system does not:
+
+- Adjust confirmation windows based on inferred reliability
+- Prioritize some users over others for event access
+- Send different messages to different users based on their history
+- Engineer social pressure through fragility framing
+- Amplify some participants' arrivals over others
+
+The only thing that determines what a user sees or experiences is:
+
+- Their declared intent (join, confirm, cancel)
+- Their declared constraints (availability, conditions)
+- The state of the event (how many have joined, confirmed)
+
+### Not a Meaning-Centralizing System
+
+This system does not:
+
+- Synthesize memory fragments into a unified narrative
+- Assign tone categories to contributions
+- Decide which fragments matter more
+- Write conclusions or takeaways
+
+The Fragment Mosaic is the fragments themselves — arranged for readability, but with no words added, no interpretation, no synthesis. The LLM is constrained to rearrangement only. If it cannot be constrained, the mosaic is assembled without it.
+
+### Not a Surveillance System
+
+This system does not:
+
+- Store chat history for behavioral inference
+- Track user behavior beyond factual attendance
+- Maintain logs that connect behavior to future treatment
+- Observe what users cannot observe about themselves
+
+Chat history (40 messages) is retained for action context only — "what event are we talking about" — and is pruned after 90 days. It is never used for modeling.
+
+---
+
+## What This System Delivers
+
+Telegram gives communication.
+
+This system adds **relational structure over communication** — through timing, framing, visibility, language, sequence, and memory surfacing.
+
+No behavioral data needed. No inference required. No hidden steering.
+
+The value is not knowing more about people.
+
+The value is shaping how people relate to what they already know is forming.
+
+When people can see who else is in — genuinely, not through engineered perception — they act accordingly. Not because the system pressured them. Because they chose to.
+
+That is the system.
+
+---
 
 ## Quick Start
 
@@ -45,6 +322,8 @@ PGPASSWORD=coord_pass psql -h localhost -U coord_user -d coord_db -f db/schema.s
 # Start the bot
 python main.py
 ```
+
+---
 
 ## Architecture Overview
 
@@ -76,7 +355,7 @@ coordination_engine/
 ├── presentation/              # Input adapters
 │   ├── presenters.py          # format_event_card(), format_event_details()
 │   ├── command_handlers.py    # Telegram handlers using EventApplicationService
-│   ├── event_flow_handler.py  # Callback-based event interaction
+│   ├── event_flow.py          # Callback-based event interaction
 │   └── mention_handler.py     # MentionHandler with LLM inference
 │
 └── shared/
@@ -90,14 +369,14 @@ coordination_engine/
 ```
 ┌─────────────────────────────────────────┐
 │  Layer 3: Memory (Post-Event Narratives)│
-│  - Memory collection via DM             │
-│  - Memory Weave generation              │
+│  - Fragment Mosaic assembly             │
+│  - Memory surfacing at event creation   │
 │  - Event lineage                        │
 └─────────────────────────────────────────┘
               ▲
 ┌─────────────────────────────────────────┐
 │  Layer 2: Materialization (Announcements)│
-│  - Group chat announcements             │
+│  - Group chat announcements at transitions│
 │  - Threshold celebrations               │
 │  - Visible momentum                     │
 └─────────────────────────────────────────┘
@@ -125,8 +404,8 @@ coordination_engine/
    - Private cancellation notices (no public shaming)
 
 3. **Memory Layer** (`EventMemoryService`)
-   - Collects post-event narratives via DM
-   - Generates Memory Weaves (multi-narrative aggregation)
+   - Collects post-event narratives via DM (no deadline)
+   - Generates Fragment Mosaics (rearrangement only, no synthesis)
    - Maintains event lineage and hashtags
    - Preserves plurality of voices (not a summary)
 
@@ -152,55 +431,18 @@ coordination_engine/
 | `EventStateTransitionService` | State machine with validation + concurrency |
 | `EventLifecycleService` | Orchestrates transitions across all three layers |
 | `EventMaterializationService` | Group announcements and DM notifications |
-| `EventMemoryService` | Memory collection and weave generation |
+| `EventMemoryService` | Fragment collection and mosaic generation |
 | `IdempotencyService` | Prevents duplicate command execution |
 
 All services use async SQLAlchemy with proper transaction management.
 
-## Documentation
-
-| Document | Description |
-|----------|-------------|
-| [QUICKSTART.md](docs/v2/QUICKSTART.md) | Get running in 15 minutes |
-| [USER_FLOWS.md](docs/v2/USER_FLOWS.md) | Complete user flow specifications |
-| [PRD v2](docs/v2/coordination-engine-PRD-v2.md) | Product requirements document |
-| [IMPLEMENTATION.md](docs/v2/IMPLEMENTATION.md) | Architecture decisions and TODOs (includes Phase 6 Clean Architecture) |
-| [REFACTORING_SUMMARY.md](docs/v2/REFACTORING_SUMMARY.md) | Refactoring summaries (Phase 1–6) |
-
-## Using the Clean Architecture
-
-The new `coordination_engine/` package provides a clean API for bot operations:
-
-```python
-from coordination_engine.bootstrap import build_container
-from coordination_engine.application.dto import CreateEventCommand, JoinEventCommand
-
-# Build the application (composition root)
-container = build_container(database_url, telegram_context, llm_client, notification_service)
-app = container.resolve("app_service")
-
-# Create an event
-result = await app.create_event(CreateEventCommand(
-    group_telegram_id=chat_id,
-    organizer_telegram_id=user_id,
-    description="Board game night",
-    threshold_attendance=5,
-))
-
-# Join an event
-result = await app.join_event(JoinEventCommand(
-    event_id=event_id,
-    telegram_user_id=user_id,
-    source="callback",
-))
-```
+---
 
 ## Core Interaction Modes
 
 ### 1) Classic slash commands (deterministic)
 
-When a message starts with `/`, command handlers are used directly.  
-This is the fast and predictable mode.
+When a message starts with `/`, command handlers are used directly. This is the fast and predictable mode.
 
 ### 2) Mention/reply AI mode (group chat)
 
@@ -220,7 +462,9 @@ The bot sends deep links for private interactions:
 
 - private availability input
 - private feedback submission
-- private attendee notes to organizer context
+- private attendee notes to organizer
+
+---
 
 ## Event Model and Lifecycle
 
@@ -241,6 +485,7 @@ proposed → interested → confirmed → locked → completed
 | `cancelled` | Event cancelled (terminal state) |
 
 **Automatic State Transitions:**
+
 - `proposed` → `interested`: When first participant joins
 - `interested` → `confirmed`: When first participant confirms
 - `confirmed` → `locked`: Manual organizer action (with threshold validation)
@@ -268,6 +513,8 @@ The bot automatically posts to group chat at key state transitions:
 
 *Note: Cancellations are sent privately to organizer only (no public shaming).*
 
+---
+
 ## Key Capabilities
 
 ### Event Creation
@@ -292,22 +539,15 @@ The bot automatically posts to group chat at key state transitions:
 
 ### Event Coordination
 
-- `/lock <event_id>`: Finalize event (requires organizer, validates thresholds)
+- `/lock <id>`: Finalize event (requires organizer, validates thresholds)
   - Automatically finalizes all joined participants to confirmed status
   - Triggers materialization announcement
-- `/request_confirmations <event_id>`: Send DM prompts to pending participants
-- `/suggest_time <event_id>`: AI-assisted optimal time selection based on constraints
-
-### Event Modification
-
-- `/modify_event <event_id> <changes>`: Organizer-only modifications
-- LLM infers patch (time, duration, threshold, description, type, etc.)
-- Invalidates confirmations if time/location changes
-- Triggers reconfirmation DMs to affected participants
+- `/request_confirmations <id>`: Send DM prompts to pending participants
+- `/suggest_time <id>`: AI-assisted optimal time selection based on constraints
 
 ### Constraints and Availability
 
-- `/constraints <event_id> view|add|remove|availability`
+- `/constraints <id> view|add|remove|availability`
 - Supports structured and natural language formats
 - Private constraints in DM (attendee-only)
 - Availability supports multiple time slots
@@ -315,18 +555,12 @@ The bot automatically posts to group chat at key state transitions:
 
 ### Feedback and Memory
 
-- `/feedback <event_id>`: Post-event feedback collection
-- `/early_feedback <event_id>`: Pre-event feedback and notes
-- `/event_note <event_id>`: Private attendee notes to organizer
-- Automatic memory collection triggers on event completion
+- `/feedback <id>`: Post-event feedback collection
+- `/early_feedback <id>`: Pre-event feedback and notes
+- `/event_note <id>`: Private attendee notes to organizer
+- Automatic memory collection triggers on event completion (no deadline)
 
-### Monitoring and Status
-
-- `/status`: Current events overview
-- `/event_details <event_id>`: Detailed event view with participant status
-- `/events`: List all events
-- `/profile`: User reputation and activity stats
-- `/reputation`: Group reputation rankings
+---
 
 ## Data Model (PostgreSQL v2)
 
@@ -339,14 +573,14 @@ The bot automatically posts to group chat at key state transitions:
 | `events` | Event details with normalized schema |
 | `event_participants` | **NEW** - Normalized participant records |
 | `constraints` | Availability and constraint rules |
-| `reputation` | User reputation scores |
+| `reputation` | User reputation scores (deprecated in v3) |
 | `logs` | Audit trail for all actions |
 | `feedback` | Post-event feedback |
 | `early_feedback` | Pre-event signals |
 | `ailog` | AI interaction history |
 | `event_state_transitions` | **NEW** - Audit trail for state changes |
 | `idempotency_keys` | **NEW** - Prevents duplicate command execution |
-| `event_memories` | **NEW** - Memory Weave storage |
+| `event_memories` | **NEW** - Fragment Mosaic storage |
 
 ### Event Fields (v2)
 
@@ -372,9 +606,12 @@ The bot automatically posts to group chat at key state transitions:
 | `source` | `slash`, `callback`, `mention`, `dm` |
 | `joined_at`, `confirmed_at`, `cancelled_at` | Timestamps |
 
+---
+
 ## Commands
 
 ### Core Commands
+
 | Command | Description |
 |---------|-------------|
 | `/start`, `/help` | Bot introduction |
@@ -383,6 +620,7 @@ The bot automatically posts to group chat at key state transitions:
 | `/reputation` | Group reputation rankings |
 
 ### Event Management
+
 | Command | Description |
 |---------|-------------|
 | `/organize_event` | Create structured event |
@@ -394,6 +632,7 @@ The bot automatically posts to group chat at key state transitions:
 | `/event_details <id>` | Detailed event view |
 
 ### Participation
+
 | Command | Description |
 |---------|-------------|
 | `/join <id>` | Join event |
@@ -402,6 +641,7 @@ The bot automatically posts to group chat at key state transitions:
 | `/back <id>` | Unconfirm attendance |
 
 ### Coordination
+
 | Command | Description |
 |---------|-------------|
 | `/constraints <id> <action>` | Manage constraints |
@@ -409,34 +649,39 @@ The bot automatically posts to group chat at key state transitions:
 | `/request_confirmations <id>` | Send confirmation requests |
 
 ### Feedback & Memory
+
 | Command | Description |
 |---------|-------------|
-| `/feedback <id> [text]` | Post-event feedback |
+| `/feedback <id>` [text] | Post-event feedback |
 | `/early_feedback <id> <@user> <text>` | Pre-event feedback |
 | `/event_note <id> <note>` | Private attendee notes |
-| `/memory <id>` | View event memory weave |
+| `/memory <id>` | View event memory mosaic |
 | `/recall` | List recent group memories |
 | `/remember <id> <text>` | Add memory fragment |
 
-## Migration from v1
+---
 
-### Key Changes
+## Migration from v1/v2
+
+### Key Changes in v3
 
 | Change | Impact |
 |--------|--------|
-| `attendance_list` JSON → `event_participants` table | Normalized participation tracking |
-| Service-oriented architecture | Single write paths for all operations |
-| Automated lifecycle events | Materialization announcements, memory collection |
-| Optimistic concurrency control | Version-based conflict detection |
-| Idempotency framework | Duplicate command prevention |
-| Comprehensive audit logging | State transition tracking |
+| Complete removal of behavioral inference | System never acts on inferred user qualities |
+| Memory Weave → Fragment Mosaic | LLM rearranges only; no synthesis, no interpretation |
+| Materialization messages rewritten | Tested against "show reality, not engineer response" |
+| Personal Attendance Mirror | Causally inert counts for self-reflection only |
+| No reliability-based adjustments | All users treated identically regardless of history |
+| Memory surfacing at event creation | Past memory becomes input to future coordination |
 
 ### Backward Compatibility
 
 - ✅ Legacy `attendance_list` parsing maintained for read operations
 - ✅ Gradual migration of display logic to new schema
-- ✅ All v1 commands supported with improved internals
+- ✅ All v1/v2 commands supported with improved internals
 - ✅ Migration helper: `ParticipantService.migrate_from_legacy()`
+
+---
 
 ## Development
 
@@ -472,49 +717,7 @@ pytest --cov=bot --cov-report=html
 - ✅ Service layer testing with mocks
 - ✅ Integration tests for end-to-end flows
 
-### Project Structure
-
-```text
-.
-├── ai/                          # AI coordination engine
-│   ├── core.py                  # Hybrid decision logic
-│   ├── llm.py                   # LLM client
-│   └── rules.py                 # Rule-based engine
-├── bot/
-│   ├── commands/                # Slash command handlers
-│   │   ├── join.py             # ✅ Refactored (v2 pattern)
-│   │   ├── lock.py             # ✅ RBAC + threshold enforcement
-│   │   ├── confirm.py          # ✅ Uncommit flow
-│   │   ├── event_details.py    # ✅ State-aware menus + mutual dependence
-│   │   └── ...
-│   ├── handlers/                # Update/message/callback handlers
-│   │   └── event_flow.py       # ✅ State-aware navigation
-│   ├── services/                # Service layer (single write paths)
-│   │   ├── participant_service.py
-│   │   ├── event_state_transition_service.py
-│   │   ├── event_lifecycle_service.py
-│   │   ├── event_materialization_service.py
-│   │   ├── event_memory_service.py
-│   │   └── idempotency_service.py
-│   ├── common/                  # Shared helpers
-│   │   ├── rbac.py             # ✅ NEW: Role-based access control
-│   │   ├── materialization.py  # Materialization orchestrator
-│   │   ├── event_presenters.py # ✅ Mutual dependence visibility
-│   │   └── ...
-│   └── utils/
-├── config/                      # Settings + logging
-├── db/                          # Models, connection, schema
-├── docs/
-│   └── v2/                      # v2 documentation
-│       ├── QUICKSTART.md
-│       ├── USER_FLOWS.md
-│       ├── coordination-engine-PRD-v2.md
-│       ├── IMPLEMENTATION.md   # Architecture decisions
-│       └── REFACTORING_SUMMARY.md
-├── tests/
-├── main.py                      # App bootstrap
-└── IMPLEMENTATION.md            # Legacy (moved to docs/v2)
-```
+---
 
 ## Setup
 
@@ -564,6 +767,7 @@ JSON_LOGS=false
 ### 3) Initialize database
 
 **Option A: Using Docker (Recommended)**
+
 ```bash
 docker-compose up -d postgres
 sleep 5
@@ -571,6 +775,7 @@ docker-compose exec postgres psql -U coord_user -d coord_db -f /app/db/schema.sq
 ```
 
 **Option B: Manual PostgreSQL**
+
 ```bash
 # Create database and user
 sudo -u postgres psql -c "CREATE USER coord_user WITH PASSWORD 'coord_pass';"
@@ -587,12 +792,15 @@ python main.py
 ```
 
 Expected output:
+
 ```
 INFO: Startup LLM check: LLM available at http://127.0.0.1:8080/v1
 INFO: Startup DB check: Database accessible
 INFO: Database initialization complete
 INFO: Bot started. Press Ctrl+C to stop.
 ```
+
+---
 
 ## AI and LLM Configuration
 
@@ -602,103 +810,27 @@ LLM client is OpenAI-compatible and expects:
 - `POST /chat/completions` for inference calls
 
 **Used for:**
+
 - Mention intent inference
 - Event draft inference and modification patching
 - Natural-language constraint parsing
-- Early-feedback and post-event feedback structuring
-- Conflict-resolution fallback when rules confidence is low
+- Fragment Mosaic rearrangement (readability only, no synthesis)
+
+---
 
 ## Current Limitations
 
 | Limitation | Status | Workaround |
 |------------|--------|------------|
 | `/feedback` requires `completed` state | ⚠️ Known | Manual state completion via admin |
-| Test suite outdated | ⚠️ In Progress | Being updated for v2 architecture |
+| Test suite outdated | ⚠️ In Progress | Being updated for v3 architecture |
 | `reputation` command basic | ⚠️ Known | Use `/profile` for detailed stats |
 | Webhook support | ❌ TODO | Use polling (default) |
 | RBAC coverage | ⚠️ Partial | Lock command done, more coming |
 | Rate limiting | ❌ TODO | Manual monitoring |
 | Callback replay protection | ❌ TODO | Short session timeouts |
 
-## New Features (Phase 2)
-
-### RBAC (Role-Based Access Control)
-
-**Permission Checks:**
-- `check_event_organizer()` — Organizer-only actions
-- `check_event_admin()` — Organizer or admin actions
-- `check_can_lock_event()` — Lock event (organizer/admin only)
-- `check_can_modify_event()` — Modify event (organizer/admin/confirmed)
-- `check_can_submit_private_note()` — Submit notes (NOT organizer)
-
-**Usage:**
-```python
-from bot.common.rbac import check_can_lock_event
-
-is_authorized, error = await check_can_lock_event(session, event_id, user_id)
-if not is_authorized:
-    await message.reply_text(f"❌ {error}")
-    return
-```
-
-### Threshold Enforcement
-
-**Lock Requirements:**
-1. User must be organizer or admin
-2. Event must be in `confirmed` state
-3. `confirmed_count >= min_participants`
-
-**Error Message:**
-```
-❌ Cannot lock event - below minimum participants.
-
-Required: 3 confirmed
-Current: 2 confirmed
-
-Wait for more participants to confirm, or reduce min_participants.
-```
-
-### Mutual Dependence Visibility
-
-**PRD v2 Section 2.2.3:** Shows who else is attending and threshold fragility.
-
-**Status Message Features:**
-- ✅ Confirmed participant names
-- 👀 Interested participant names
-- ⚠️ Threshold progress ("We need N more")
-- ❗ Fragility warning ("If one more drops, collapses")
-- 🤝 User acknowledgment ("You are one of N people others are counting on")
-
-**Example:**
-```
-📊 Event 123 Status
-
-⚠️ We need 2 more to reach threshold (2/4)
-❗ If one more person drops, this event collapses.
-
-🤝 You are one of 5 people others are counting on.
-   4 participants depending on you.
-
-Participants:
-✅ Confirmed (2): Alice(@alice), Bob(@bob)
-👀 Interested (3): Charlie, Diana, You
-```
-
-### State-Aware Navigation
-
-**Problem Solved:** "Back" button was confused between navigation and uncommit action.
-
-**Solution:** Separate callbacks:
-- `event_unconfirm_` — Revert confirmation
-- `event_details_` — Navigate to details (state-aware)
-- `event_close_` — Close menu
-
-**Menu Structure:**
-| User State | First Row |
-|------------|-----------|
-| Not joined | ✅ Join |
-| Joined | ✅ Confirm + ❌ Cancel |
-| Confirmed | ✓ Confirmed + ↩️ Uncommit |
+---
 
 ## Production Deployment
 
@@ -714,7 +846,7 @@ docker-compose logs -f bot
 ```env
 ENVIRONMENT=production
 ENABLE_IDEMPOTENCY=true
-ENABLE_REPUTATION_EFFECTS=true
+ENABLE_REPUTATION_EFFECTS=false
 LOG_LEVEL=WARNING
 JSON_LOGS=true
 ```
@@ -723,38 +855,50 @@ JSON_LOGS=true
 
 For production, use webhooks instead of polling. See [QUICKSTART.md](docs/v2/QUICKSTART.md) for details.
 
+---
+
 ## Troubleshooting
 
 **Database connection errors:**
+
 ```
 Error: could not connect to server
 ```
+
 → Check PostgreSQL is running: `docker-compose ps` or `systemctl status postgresql`  
 → Verify credentials in `.env`  
 → Ensure `DB_URL` uses `postgresql+asyncpg://` prefix
 
 **LLM unavailable:**
+
 ```
 Warning: Startup LLM check: LLM unavailable
 ```
+
 → Check AI endpoint is accessible  
 → Verify `AI_ENDPOINT` and `AI_API_KEY` in `.env`  
 → AI features gracefully degrade if unavailable
 
 See [QUICKSTART.md](docs/v2/QUICKSTART.md) for more troubleshooting tips.
 
+---
+
 ## License
 
 Apache-2.0
 
+---
+
 ## Contributing
 
-1. Read [PRD v2](docs/v2/coordination-engine-PRD-v2.md) for product philosophy
-2. Review [USER_FLOWS.md](docs/v2/USER_FLOWS.md) for interaction patterns
+1. Read [PRD v3.1](docs/v3/PRD_v3.1.md) for product philosophy
+2. Review [USER_FLOWS_v3.1.md](docs/v3/USER_FLOWS_v3.1.md) for interaction patterns
 3. Check [IMPLEMENTATION.md](docs/v2/IMPLEMENTATION.md) for architecture decisions
 4. Review [REFACTORING_SUMMARY.md](docs/v2/REFACTORING_SUMMARY.md) for implementation status
 5. Run tests: `pytest`
 6. Submit PR with description of changes
+
+---
 
 ## Implementation Status
 

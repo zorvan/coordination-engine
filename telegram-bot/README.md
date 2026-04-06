@@ -2,6 +2,9 @@
 
 **Pure Mediation: From Behavioral Inference to Relational Perception**
 
+Current release: `v3.2.0`
+Supported Python: `3.13` to `3.14`
+
 A Telegram bot that mediates group coordination through perception, not prediction. It shapes how people relate to what is forming — without modeling users, inferring reliability, or steering outcomes.
 
 ---
@@ -723,7 +726,7 @@ pytest --cov=bot --cov-report=html
 
 ### Requirements
 
-- Python 3.11+
+- Python 3.13-3.14
 - PostgreSQL 15+
 - Telegram Bot Token (from [@BotFather](https://t.me/BotFather))
 
@@ -762,7 +765,8 @@ LOG_LEVEL_HTTPX=WARNING
 JSON_LOGS=false
 ```
 
-**Note:** The `DB_URL` must use an async driver (`postgresql+asyncpg://`).
+**Note:** The `DB_URL` must use an async driver.
+Use `postgresql+asyncpg://` on Python `<3.14` or `postgresql+psycopg://` on Python `>=3.14`.
 
 ### 3) Initialize database
 
@@ -867,7 +871,7 @@ Error: could not connect to server
 
 → Check PostgreSQL is running: `docker-compose ps` or `systemctl status postgresql`  
 → Verify credentials in `.env`  
-→ Ensure `DB_URL` uses `postgresql+asyncpg://` prefix
+→ Ensure `DB_URL` uses an async driver prefix: `postgresql+asyncpg://` on Python `<3.14` or `postgresql+psycopg://` on Python `>=3.14`
 
 **LLM unavailable:**
 

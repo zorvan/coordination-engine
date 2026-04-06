@@ -192,58 +192,57 @@ class LLMClient:
         """Infer a structured patch for event draft revisions."""
         prompt = f"""
         You update an event draft using user requested modifications.
-        Return JSON patch fields only when explicit in user request.
-        Keep deterministic and conservative.
-
-        CRITICAL: If the user mentions a location (e.g., "at Amin's house", "move to the park"),
-        update the description to reflect it. Do NOT default to generic locations.
+        Analyze the user's message and extract any changes they want to make.
+        Be flexible but conservative - only change what's explicitly mentioned.
 
         Current draft:
         {current_draft}
 
-        User modification:
+        User modification request:
         {message_text}
 
-        Output JSON only:
+        IMPORTANT: Look for specific changes like:
+        - Time changes: "change to 7pm", "move to tomorrow 3pm", "set time to 2024-01-15 19:00"
+        - Participant changes: "minimum 5 people", "capacity 10", "at least 3"
+        - Duration changes: "2 hours long", "90 minutes", "extend by 30 min"
+        - Location changes: "at the park", "change location to cafe", "move to Amin's house"
+        - Type changes: "make it sports", "change to work event", "social gathering"
+        - Budget/transport: "free event", "drive there", "public transit"
+
+        EXAMPLES:
+        - "change time to 8pm" → {{"scheduled_time_iso": "2024-01-15T20:00"}}
+        - "minimum 4 people" → {{"min_participants": 4}}
+        - "at the cafe" → {{"location_type": "cafe"}}
+        - "sports event" → {{"event_type": "sports"}}
+
+        Output JSON with changes only for fields that are explicitly modified:
         {{
-          "description": "string or null — include location if user mentions one",
+          "description": "updated description or null",
           "event_type": "social|sports|work|null",
           "scheduled_time_iso": "YYYY-MM-DDTHH:MM or null",
           "clear_time": true/false,
-          "duration_minutes": 90 or null,
-          "threshold_attendance": 5 or null,
-          "invitees_add": ["alice", "@bob"] or [],
-          "invitees_remove": ["charlie"] or [],
-          "invite_all_members": true/false/null,
-          "scheduling_mode": "fixed|flexible|null",
+          "duration_minutes": number or null,
+          "min_participants": number or null,
+          "target_participants": number or null,
           "location_type": "home|outdoor|cafe|office|gym or null",
           "budget_level": "free|low|medium|high or null",
-          "transport_mode": "walk|public_transit|drive|any or null",
-          "note": "constraint/suggestion note or null"
+          "transport_mode": "walk|public_transit|drive|any or null"
         }}
         """
         try:
             response = await self._call_llm(prompt)
             parsed = json.loads(response)
-            invitees_add = parsed.get("invitees_add")
-            invitees_remove = parsed.get("invitees_remove")
             return {
                 "description": parsed.get("description"),
                 "event_type": parsed.get("event_type"),
                 "scheduled_time_iso": parsed.get("scheduled_time_iso"),
                 "clear_time": bool(parsed.get("clear_time", False)),
                 "duration_minutes": parsed.get("duration_minutes"),
-                "threshold_attendance": parsed.get("threshold_attendance"),
-                "invitees_add": invitees_add if isinstance(invitees_add, list) else [],
-                "invitees_remove": (
-                    invitees_remove if isinstance(invitees_remove, list) else []
-                ),
-                "invite_all_members": parsed.get("invite_all_members"),
-                "scheduling_mode": parsed.get("scheduling_mode"),
+                "min_participants": parsed.get("min_participants"),
+                "target_participants": parsed.get("target_participants"),
                 "location_type": parsed.get("location_type"),
                 "budget_level": parsed.get("budget_level"),
                 "transport_mode": parsed.get("transport_mode"),
-                "note": parsed.get("note"),
             }
         except Exception:
             lowered = message_text.lower()
@@ -253,7 +252,8 @@ class LLMClient:
                 "scheduled_time_iso": None,
                 "clear_time": False,
                 "duration_minutes": None,
-                "threshold_attendance": None,
+                "min_participants": None,
+                "target_participants": None,
                 "invitees_add": [],
                 "invitees_remove": [],
                 "invite_all_members": None,
@@ -272,9 +272,13 @@ class LLMClient:
             if "invite all" in lowered or "@all" in lowered:
                 patch["invite_all_members"] = True
 
-            threshold_match = re.search(r"\bthreshold(?:\s+to)?\s+(\d{1,3})\b", lowered)
-            if threshold_match:
-                patch["threshold_attendance"] = int(threshold_match.group(1))
+            min_match = re.search(r"\b(?:minimum|min|threshold|at least)(?:\s+(?:to|of))?\s+(\d{1,3})\b", lowered)
+            if min_match:
+                patch["min_participants"] = int(min_match.group(1))
+
+            target_match = re.search(r"\b(?:capacity|target|up to|fit)\s+(\d{1,3})\b", lowered)
+            if target_match:
+                patch["target_participants"] = int(target_match.group(1))
 
             duration_match = re.search(
                 r"\b(\d{1,3})\s*(minutes|minute|mins|min|hours|hour|hrs|hr)\b",
@@ -296,8 +300,29 @@ class LLMClient:
                 time_part = datetime_match.group(2)
                 hour, minute = time_part.split(":")
                 patch["scheduled_time_iso"] = f"{date_part}T{int(hour):02d}:{minute}"
+            else:
+                # Try more flexible time parsing
+                time_match = re.search(r"\b(\d{1,2}):(\d{2})\b", message_text)
+                if time_match:
+                    hour = int(time_match.group(1))
+                    minute = int(time_match.group(2))
+                    # Assume today if no date specified
+                    today = datetime.now().date()
+                    patch["scheduled_time_iso"] = f"{today}T{hour:02d}:{minute:02d}"
+                else:
+                    # Try 12-hour format with am/pm
+                    ampm_match = re.search(r"\b(\d{1,2})\s*(am|pm)\b", lowered)
+                    if ampm_match:
+                        hour = int(ampm_match.group(1))
+                        ampm = ampm_match.group(2)
+                        if ampm == "pm" and hour != 12:
+                            hour += 12
+                        elif ampm == "am" and hour == 12:
+                            hour = 0
+                        today = datetime.now().date()
+                        patch["scheduled_time_iso"] = f"{today}T{hour:02d}:00"
 
-            if "clear time" in lowered or "no time" in lowered or "time tbd" in lowered:
+            if "clear time" in lowered or "no time" in lowered or "time tbd" in lowered or "flexible" in lowered:
                 patch["clear_time"] = True
 
             handles = re.findall(r"@([A-Za-z][A-Za-z0-9_]{4,31})", message_text)
@@ -320,7 +345,19 @@ class LLMClient:
                     patch["event_type"] = "social"
 
             # Location type detection
-            if any(token in lowered for token in ["my house", "your house", "their house", "someone's house", "amir's house", "john's house"]):
+            if any(
+                token in lowered
+                for token in [
+                    "home",
+                    "at home",
+                    "my house",
+                    "your house",
+                    "their house",
+                    "someone's house",
+                    "amir's house",
+                    "john's house",
+                ]
+            ):
                 patch["location_type"] = "home"
             elif any(token in lowered for token in ["park", "outdoor", "outside", "garden", "field"]):
                 patch["location_type"] = "outdoor"
@@ -369,7 +406,8 @@ class LLMClient:
 
         CRITICAL: Extract ALL parameters from the conversation. Do NOT use defaults unless the conversation is completely silent on that topic.
         - event_type: "social" for hangouts/games/meetups, "sports" for athletic activities, "work" for professional/coding sessions
-        - threshold_attendance: If a minimum is discussed (e.g., "need at least 4"), use that. Otherwise infer from context (small gathering → 3, big party → 6+).
+        - min_participants: If a minimum is discussed (e.g., "need at least 4"), use that. Otherwise infer from context (small gathering → 3, big party → 6+).
+        - target_participants: If ideal capacity is discussed, use it. Otherwise set a comfortable target at or above the minimum.
         - duration_minutes: If duration is discussed (e.g., "for a couple hours" → 120, "quick meetup" → 60). Otherwise infer from context.
         
         CRITICAL RULES FOR invite_all_members:
@@ -418,7 +456,8 @@ class LLMClient:
           "scheduled_time_iso": "YYYY-MM-DDTHH:MM or null",
           "collapse_at_iso": "YYYY-MM-DDTHH:MM or null",
           "duration_minutes": 120,
-          "threshold_attendance": 3,
+          "min_participants": 3,
+          "target_participants": 5,
           "invite_all_members": true,
           "invitees": ["@alice", "@bob"],
           "key_attendees": ["@alice"],
@@ -450,7 +489,8 @@ class LLMClient:
             if event_type not in {"social", "sports", "work"}:
                 event_type = "social"
             duration = int(parsed.get("duration_minutes", 120))
-            threshold = int(parsed.get("threshold_attendance", 3))
+            min_participants = int(parsed.get("min_participants", 3))
+            target_participants = int(parsed.get("target_participants", max(min_participants, 5)))
             invitees = parsed.get("invitees", [])
             if not isinstance(invitees, list):
                 invitees = []
@@ -567,7 +607,11 @@ class LLMClient:
                 "scheduled_time": parsed.get("scheduled_time_iso"),
                 "collapse_at": collapse_at.isoformat() if collapse_at else None,
                 "duration_minutes": max(30, min(720, duration)),
-                "threshold_attendance": max(1, min(200, threshold)),
+                "min_participants": max(1, min(200, min_participants)),
+                "target_participants": max(
+                    max(1, min(200, min_participants)),
+                    min(200, target_participants),
+                ),
                 "invite_all_members": bool(parsed.get("invite_all_members", True)),
                 "invitees": normalized_invitees,
                 "key_attendees": normalized_key_attendees,
@@ -588,7 +632,8 @@ class LLMClient:
                 "scheduled_time": None,
                 "collapse_at": None,
                 "duration_minutes": 120,
-                "threshold_attendance": 3,
+                "min_participants": 3,
+                "target_participants": 5,
                 "invite_all_members": True,
                 "invitees": ["@all"],
                 "key_attendees": [],
@@ -840,8 +885,8 @@ class LLMClient:
         only declared availability. No user history or behavioral inference.
 
         Event: {event.event_type}
-        Participants: {len(event.attendance_list)}
-        Threshold: {event.threshold_attendance}
+        Participants: {len(getattr(event, "participants", []) or [])}
+        Minimum needed: {event.min_participants}
 
         Availability slots (users per slot): {availability}
 

@@ -185,7 +185,8 @@ async def send_event_invitation_dm(
                 f"Location Type: {location_escaped}\n"
                 f"Budget: {budget_escaped}\n"
                 f"Transport: {transport_escaped}\n"
-                f"Threshold: {event_data.get('threshold_attendance', 'Not set')}\n"
+                f"Minimum: {event_data.get('min_participants', 'Not set')}\n"
+                f"Capacity: {event_data.get('target_participants', 'Not set')}\n"
                 f"Invitees: {invitees_summary}"
             ),
             reply_markup=build_event_invitation_keyboard(bot_username, event_id),

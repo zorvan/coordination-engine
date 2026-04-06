@@ -11,11 +11,10 @@ import logging
 from datetime import datetime
 from typing import Optional, Tuple, Dict, Any
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, func
 
-from db.models import Event, EventStateTransition, ParticipantStatus
+from db.models import Event, EventParticipant, EventStateTransition, ParticipantStatus
 from bot.common.event_states import can_transition
-from bot.common.attendance import parse_attendance
 
 logger = logging.getLogger("coord_bot.services.event_state")
 
@@ -169,25 +168,18 @@ class EventStateTransitionService:
                     error_code="THRESHOLD_NOT_MET"
                 )
 
-            # Check threshold_attendance (legacy field support)
-            if event.threshold_attendance and confirmed_count < event.threshold_attendance:
-                raise ThresholdNotMetError(
-                    f"Cannot lock: {confirmed_count} confirmed, threshold is {event.threshold_attendance}",
-                    error_code="THRESHOLD_NOT_MET"
-                )
-
     async def _get_confirmed_count(self, event: Event) -> int:
         """Get count of confirmed participants."""
-        # Try normalized table first
-        if event.participants:
-            return sum(
-                1 for p in event.participants
-                if p.status in {ParticipantStatus.confirmed, ParticipantStatus.joined}
+        result = await self.session.execute(
+            select(func.count()).select_from(EventParticipant).where(
+                EventParticipant.event_id == event.event_id,
+                EventParticipant.status.in_([
+                    ParticipantStatus.confirmed,
+                    ParticipantStatus.joined,
+                ]),
             )
-
-        # Fallback to legacy attendance_list
-        _, confirmed = parse_attendance(event.attendance_list)
-        return len(confirmed)
+        )
+        return int(result.scalar_one() or 0)
 
     async def get_transition_history(self, event_id: int) -> list[EventStateTransition]:
         """Get full transition history for an event."""

@@ -1,6 +1,7 @@
 """
 EventLifecycleService - Orchestrates event state transitions with materialization and memory.
 PRD v2: Integrates all three layers (Coordination, Materialization, Memory).
+PRD v3.2: Adds event-level resilience (failure tracking, waitlist auto-fill hooks).
 """
 from __future__ import annotations
 
@@ -11,6 +12,7 @@ from telegram import Bot
 
 from db.models import Event, EventParticipant, ParticipantStatus
 from bot.services import EventStateTransitionService, EventMaterializationService, EventMemoryService
+from bot.services.group_event_type_stats_service import GroupEventTypeStatsService
 from config.settings import settings
 
 logger = logging.getLogger("coord_bot.services.lifecycle")
@@ -32,6 +34,7 @@ class EventLifecycleService:
         self.transition_service = EventStateTransitionService(session)
         self.materialization_service = EventMaterializationService(bot, session) if settings.enable_materialization else None
         self.memory_service = EventMemoryService(bot, session) if settings.enable_memory_layer else None
+        self.stats_service = GroupEventTypeStatsService(session)
 
     async def transition_with_lifecycle(
         self,
@@ -75,23 +78,34 @@ class EventLifecycleService:
 
         # Get group chat ID for announcements
         group_chat_id = await self._get_group_chat_id(event)
-        if not group_chat_id:
-            return
 
         if target_state == "locked" and self.materialization_service:
             # Announce event locked
-            participants = await self._get_confirmed_participants(event.event_id)
-            await self.materialization_service.announce_event_locked(event, participants, group_chat_id)
+            if group_chat_id:
+                participants = await self._get_confirmed_participants(event.event_id)
+                await self.materialization_service.announce_event_locked(event, participants, group_chat_id)
 
         elif target_state == "completed":
+            # Track completion in stats
+            if event.group_id and event.event_type:
+                await self.stats_service.record_completion(event.group_id, event.event_type)
+
             # Announce event completed
-            if self.materialization_service:
+            if self.materialization_service and group_chat_id:
                 participant_count = await self._get_participant_count(event.event_id)
                 await self.materialization_service.announce_event_completed(event, participant_count, group_chat_id)
 
             # Trigger memory collection
             if self.memory_service:
                 await self.memory_service.start_memory_collection(event)
+
+        elif target_state == "cancelled":
+            # Track failed attempt in stats
+            if event.group_id and event.event_type:
+                confirmed = await self._get_participant_count(event.event_id)
+                await self.stats_service.record_attempt(
+                    event.group_id, event.event_type, dropout_point=confirmed
+                )
 
     async def _get_group_chat_id(self, event: Event) -> Optional[int]:
         """Get the Telegram group chat ID for the event."""

@@ -1,14 +1,11 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-from typing import Any
-
 """Event details command handler."""
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from sqlalchemy import select
 from db.models import Event, User, ParticipantStatus
-from bot.common.attendance import has_attendee
 from bot.common.rbac import check_event_visibility_and_get_event
 from db.connection import get_session
 from config.settings import settings
@@ -49,6 +46,7 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     async with get_session(settings.db_url) as session:
         user_id = user.id if user else None
         chat_id = update.effective_chat.id if update.effective_chat else None
+        chat_type = update.effective_chat.type if update.effective_chat else None
         is_visible, event, group, error_msg = (
             await check_event_visibility_and_get_event(
                 session, event_id, user_id,
@@ -66,7 +64,10 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
         bot_username = context.bot.username if context.bot else None
         user_id = user.id if user else None
-        reply_markup = await build_event_details_action_markup(event, user_id, bot_username, session)
+        # Don't show interactive keyboard in group chats - only in private chats
+        reply_markup = None
+        if chat_type == "private":
+            reply_markup = await build_event_details_action_markup(event, user_id, bot_username, session)
 
         await update.message.reply_text(
             await format_event_details_message(event_id, event, logs, constraints, context.bot),
@@ -106,6 +107,9 @@ async def show_details(query, context: ContextTypes.DEFAULT_TYPE, event_id: int)
     """Show full event details for callback-based navigation."""
     user_id = query.from_user.id if query.from_user else None
     chat_id = getattr(getattr(query, "message", None), "chat_id", None)
+    chat_type = getattr(getattr(query, "message", None), "chat", None)
+    if chat_type:
+        chat_type = getattr(chat_type, "type", None)
     async with get_session(settings.db_url) as session:
         is_visible, event, group, error_msg = (
             await check_event_visibility_and_get_event(
@@ -124,7 +128,10 @@ async def show_details(query, context: ContextTypes.DEFAULT_TYPE, event_id: int)
 
         bot_username = context.bot.username if context.bot else None
         user_id = query.from_user.id if query.from_user else None
-        reply_markup = await build_event_details_action_markup(event, user_id, bot_username, session)
+        # Don't show interactive keyboard in group chats - only in private chats
+        reply_markup = None
+        if chat_type == "private":
+            reply_markup = await build_event_details_action_markup(event, user_id, bot_username, session)
 
         try:
             await query.edit_message_text(
@@ -403,9 +410,7 @@ async def build_event_details_action_markup(
                 user_joined = participant.status in [ParticipantStatus.joined, ParticipantStatus.confirmed]
                 user_confirmed = participant.status == ParticipantStatus.confirmed
         except Exception:
-            # Fallback to old logic if service fails
-            attendance_list: list[Any] | None = event.attendance_list or []
-            user_joined = has_attendee(attendance_list, user_id)
+            user_joined = False
 
     # Build first row based on user status (mutually exclusive actions)
     first_row = []
@@ -451,14 +456,9 @@ async def build_event_details_action_markup(
 
     # Add DM links
     avail_link = build_start_link(bot_username, f"avail_{event.event_id}")
-    feedback_link = build_start_link(bot_username, f"feedback_{event.event_id}")
     if avail_link:
         keyboard.append(
             [InlineKeyboardButton("📥 Set Availability in DM", url=avail_link)]
-        )
-    if feedback_link:
-        keyboard.append(
-            [InlineKeyboardButton("⭐ Give Feedback in DM", url=feedback_link)]
         )
 
     return InlineKeyboardMarkup(keyboard)

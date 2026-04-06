@@ -184,7 +184,7 @@ async def setup_webhook(
     await application.run_webhook(
         listen=webhook_host,
         port=webhook_port,
-        url_path=application.bot.token,  # Use token as URL path
+        url_path="telegram-webhook",
         webhook_url=webhook_url,
         allowed_updates=allowed_updates,
         secret_token=webhook_secret,

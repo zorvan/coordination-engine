@@ -4,6 +4,9 @@
 When a user signals intent to organize, prior event memories surface
 in the group chat BEFORE any creation questions. Then the bot asks
 clarifying questions until intent is clear. No timeout forces structure.
+
+v3.2: Repeated failure pattern surface — checks for ≥3 failed attempts
+before showing memories.
 """
 from __future__ import annotations
 
@@ -17,6 +20,7 @@ from config.settings import settings
 from db.connection import get_session
 from db.models import Group
 from bot.services.event_memory_service import EventMemoryService
+from bot.services.group_event_type_stats_service import GroupEventTypeStatsService
 
 logger = logging.getLogger("coord_bot.commands.meaning_formation")
 
@@ -75,6 +79,15 @@ async def start_meaning_formation(
 
             group_id = group.group_id
 
+            # v3.2: Check for repeated failure pattern BEFORE showing memories
+            stats_service = GroupEventTypeStatsService(session)
+            failure_pattern = None
+            if event_type_hint:
+                failure_pattern = await stats_service.get_failure_pattern(
+                    group_id=group.group_id,
+                    event_type=event_type_hint,
+                )
+
             # v3: Surface prior memories BEFORE any creation prompt
             memory_service = EventMemoryService(update.get_bot(), session)
             prior_memories = await memory_service.get_prior_event_memories(
@@ -98,6 +111,17 @@ async def start_meaning_formation(
 
     if group_id:
         context.user_data[flow_key]["group_title"] = chat_title
+
+    # v3.2: Surface failure pattern FIRST (before memories)
+    if failure_pattern:
+        pattern_msg = (
+            f"📊 Your group has tried something like this {failure_pattern['attempt_count']} times. "
+            f"Each time it reached around {failure_pattern.get('last_dropout_point', '?')} people "
+            f"and didn't happen.\n\n"
+            f"Want to approach it differently this time — change the minimum, "
+            f"the timing, or who you invite?"
+        )
+        await message.reply_text(pattern_msg)
 
     # Surface memories in group chat (if any)
     if prior_memories:

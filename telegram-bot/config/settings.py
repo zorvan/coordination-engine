@@ -40,6 +40,10 @@ class Settings:
         # PRD v2: Production settings
         self.environment: str = os.environ.get("ENVIRONMENT", "development")  # development, staging, production
         self.enable_idempotency: bool = os.environ.get("ENABLE_IDEMPOTENCY", "false").lower() == "true"
+        self.webhook_url: str | None = os.environ.get("WEBHOOK_URL")
+        self.webhook_port: int = int(os.environ.get("WEBHOOK_PORT", "8443"))
+        self.webhook_secret: str | None = os.environ.get("WEBHOOK_SECRET")
+        self.webhook_host: str = os.environ.get("WEBHOOK_HOST", "0.0.0.0")
 
 
 settings = Settings()

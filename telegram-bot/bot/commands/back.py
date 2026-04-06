@@ -9,6 +9,7 @@ from config.settings import settings
 from db.connection import get_session
 from db.models import Event, Log
 from db.users import get_or_create_user_id
+from bot.common.participant_state_reconcile import reconcile_event_state_after_participant_change
 from bot.services import ParticipantService
 from bot.common.rbac import check_event_visibility_and_get_event
 from datetime import datetime
@@ -78,6 +79,14 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                     "sub_action": "back_unconfirm",
                 },
             )
+        )
+        event = await reconcile_event_state_after_participant_change(
+            session=session,
+            bot=context.bot,
+            event_id=event_id,
+            actor_telegram_user_id=telegram_user_id,
+            source="slash",
+            reason="Participant unconfirmed attendance",
         )
         await session.commit()
 

@@ -732,7 +732,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                 "✏️ *Please type your modification request below:*\n\n"
                 "Describe the changes you want to make. Examples:\n"
                 "- Change time to March 8, 2026 at 18:00\n"
-                "- Increase threshold to 10\n"
+                "- Increase minimum to 4 and capacity to 10\n"
                 "- Move location to gym\n\n"
                 "Type 'cancel' to abort.",
                 parse_mode="Markdown",
@@ -768,13 +768,14 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                             else None
                         ),
                         "duration_minutes": int(event.duration_minutes or 120),
-                        "threshold_attendance": int(event.threshold_attendance or 0),
+                        "min_participants": int(event.min_participants or 2),
+                        "target_participants": int(event.target_participants or event.min_participants or 2),
                     }
                     ai_prompt = (
                         "Please suggest improvements to this event. "
                         "Return a JSON patch with any of these fields you think should change: "
                         "description, event_type, scheduled_time_iso, duration_minutes, "
-                        "threshold_attendance, clear_time. Be specific about what should change."
+                        "min_participants, target_participants, clear_time. Be specific about what should change."
                     )
                     patch = await llm.infer_event_draft_patch(draft, ai_prompt)
                 finally:
@@ -792,8 +793,10 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                     change_parts.append("Clear scheduled time (set to TBD)")
                 if patch.get("duration_minutes"):
                     change_parts.append(f"Duration: {patch['duration_minutes']} minutes")
-                if patch.get("threshold_attendance"):
-                    change_parts.append(f"Threshold: {patch['threshold_attendance']}")
+                if patch.get("min_participants"):
+                    change_parts.append(f"Minimum: {patch['min_participants']}")
+                if patch.get("target_participants"):
+                    change_parts.append(f"Capacity: {patch['target_participants']}")
                 if patch.get("scheduling_mode"):
                     change_parts.append(f"Mode: {patch['scheduling_mode']}")
 
@@ -880,24 +883,11 @@ async def _submit_modify_request_via_message(
         "created_at": datetime.utcnow().isoformat(),
     }
 
-    keyboard = [
-        [
-            InlineKeyboardButton(
-                "✅ Approve", callback_data=f"modreq_{request_id}_approve"
-            ),
-            InlineKeyboardButton(
-                "❌ Reject", callback_data=f"modreq_{request_id}_reject"
-            ),
-        ]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-
     await update.message.reply_text(
         f"📩 *Modify request submitted for admin approval*\n\n"
         f"Event ID: {event_id}\n"
         f"Changes: {change_text}\n\n"
         f"Waiting for admin approval...",
-        reply_markup=reply_markup,
         parse_mode="Markdown",
     )
 
@@ -933,24 +923,11 @@ async def _submit_modify_request_via_callback(
     requester_username: str | None,
 ) -> None:
     """Helper to submit modification request via callback."""
-    keyboard = [
-        [
-            InlineKeyboardButton(
-                "✅ Approve", callback_data=f"modreq_{request_id}_approve"
-            ),
-            InlineKeyboardButton(
-                "❌ Reject", callback_data=f"modreq_{request_id}_reject"
-            ),
-        ]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-
     await update.callback_query.edit_message_text(
         f"📩 *Modify request submitted for admin approval*\n\n"
         f"Event ID: {event_id}\n"
         f"Changes: {change_text}\n\n"
         f"Waiting for admin approval...",
-        reply_markup=reply_markup,
         parse_mode="Markdown",
     )
 
@@ -1550,10 +1527,18 @@ async def _start_interactive_event_flow(
         event_type = str(draft.get("event_type")).strip().lower()
         if event_type in event_creation.ALLOWED_EVENT_TYPES:
             flow_data["event_type"] = event_type
-    if draft.get("threshold_attendance"):
+    if draft.get("min_participants"):
         try:
-            flow_data["threshold_attendance"] = max(
-                1, int(draft.get("threshold_attendance", 3))
+            flow_data["min_participants"] = max(
+                1, int(draft.get("min_participants", 3))
+            )
+        except (TypeError, ValueError):
+            pass
+    if draft.get("target_participants"):
+        try:
+            flow_data["target_participants"] = max(
+                int(flow_data.get("min_participants", 1)),
+                int(draft.get("target_participants", 5)),
             )
         except (TypeError, ValueError):
             pass
@@ -1669,9 +1654,16 @@ async def _handle_organize_event_direct(
         event_type = "social"
 
     try:
-        threshold = max(1, int(draft.get("threshold_attendance", 3)))
+        min_participants = max(1, int(draft.get("min_participants", 3)))
     except (TypeError, ValueError):
-        threshold = 3
+        min_participants = 3
+    try:
+        target_participants = max(
+            min_participants,
+            int(draft.get("target_participants", max(min_participants, 5))),
+        )
+    except (TypeError, ValueError):
+        target_participants = max(min_participants, 5)
 
     try:
         duration = max(30, int(draft.get("duration_minutes", 120)))
@@ -1808,7 +1800,8 @@ async def _handle_organize_event_direct(
             commit_by=commit_by,
             collapse_at=collapse_at_dt,
             duration_minutes=duration,
-            threshold_attendance=threshold,
+            min_participants=min_participants,
+            target_participants=target_participants,
             planning_prefs={
                 "date_preset": date_preset,
                 "time_window": time_window,
@@ -1915,7 +1908,8 @@ async def _handle_organize_event_direct(
                 "event_type": event_type,
                 "scheduled_time": scheduled_time_raw,
                 "duration_minutes": duration,
-                "threshold_attendance": threshold,
+                "min_participants": min_participants,
+                "target_participants": target_participants,
                 "invitees": invitees if not invite_all else [],
                 "key_attendees": draft.get("key_attendees", []),
                 "invite_all_members": invite_all,
@@ -2052,7 +2046,8 @@ async def _handle_organize_event_direct(
                     f"Location Type: {location_text_escaped}\n"
                     f"Budget: {budget_text_escaped}\n"
                     f"Transport: {transport_text_escaped}\n"
-                    f"Threshold: {threshold}\n"
+                    f"Minimum: {min_participants}\n"
+                    f"Capacity: {target_participants}\n"
                     f"Invitees: {invitees_summary}\n\n"
                     f"✅ Event ready for confirmation. Run /confirm {event.event_id} to lock it."
                     + (
@@ -2090,49 +2085,19 @@ async def _handle_organize_event_direct(
                     f"Full event details sent to admin {creator_id} via DM for event {event.event_id}"
                 )
 
+        # Minimal announcement for the group - NO interactive menu
+        # All interactions (join, details, etc.) happen via DM only
         proposer = f"@{user.username}" if user and user.username else "the group"
-        scheduled_time_group = (
-            str(scheduled_time_raw).replace("T", " ")
-            if scheduled_time_raw
-            else "⏳ Time TBD — flexible scheduling"
-        )
-        location_group = location_type.replace("_", " ").title() if location_type else "See description"
-        threshold_call = f"We need {threshold} people on board to make this happen."
-
         escaped_desc_group = _escape_for_markdown(description)
 
-        group_message = (
+        group_announcement = (
             f"🌱 *New event proposed by {proposer}*\n\n"
-            f"*{escaped_desc_group}*\n\n"
-            f"📅 {scheduled_time_group}\n"
-            f"⏱ {duration} min · 📍 {location_group}\n"
-            f"👥 {threshold_call}\n\n"
-            f"🎉 _Event #{event.event_id} · Tap below to respond_"
-        )
-
-        group_keyboard = InlineKeyboardMarkup(
-            [
-                [
-                    InlineKeyboardButton(
-                        "✅ I'm in",
-                        callback_data=f"event_join_{event.event_id}",
-                    ),
-                    InlineKeyboardButton(
-                        "📋 Details",
-                        callback_data=f"event_details_{event.event_id}",
-                    ),
-                ],
-                [
-                    InlineKeyboardButton(
-                        "📣 Share",
-                        switch_inline_query=f"event {event.event_id}",
-                    ),
-                ],
-            ]
+            f"Event #{event.event_id}: *{escaped_desc_group}*\n\n"
+            f"Check your DM with the bot for full details and to join."
         )
 
         await update.message.reply_text(
-            group_message,
-            reply_markup=group_keyboard,
+            group_announcement,
             parse_mode="Markdown",
         )
+

@@ -9,6 +9,7 @@ from db.connection import get_session
 from db.users import get_or_create_user_id
 from config.settings import settings
 from datetime import datetime
+from bot.common.participant_state_reconcile import reconcile_event_state_after_participant_change
 from bot.services import ParticipantService
 from bot.common.rbac import check_event_visibility_and_get_event
 
@@ -98,6 +99,19 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             metadata_dict={"timestamp": datetime.utcnow().isoformat()}
         )
         session.add(log)
+
+        from bot.services import WaitlistService
+        waitlist_service = WaitlistService(session, context.bot)
+        await waitlist_service.trigger_auto_fill(event_id)
+
+        event = await reconcile_event_state_after_participant_change(
+            session=session,
+            bot=context.bot,
+            event_id=event_id,
+            actor_telegram_user_id=telegram_user_id,
+            source="slash",
+            reason="Participant cancelled attendance",
+        )
 
         await session.commit()
 

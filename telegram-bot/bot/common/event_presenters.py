@@ -4,7 +4,6 @@ from typing import Any
 from sqlalchemy import select
 
 from bot.common.event_states import STATE_EXPLANATIONS
-from bot.common.attendance import parse_attendance_with_status
 from bot.common.event_formatters import (
     format_date_preset,
     format_time_window,
@@ -134,7 +133,7 @@ def summarize_description(description: str | None, max_len: int = 400) -> str:
 
 
 async def attendance_stats_with_usernames(
-    attendance: list[Any] | None, session, event_id: int = None
+    session, event_id: int
 ) -> tuple[int, int, str]:
     """
     Return interested count, confirmed count, and formatted attendee text with usernames.
@@ -144,18 +143,13 @@ async def attendance_stats_with_usernames(
     """
     from db.models import EventParticipant
 
-    if not event_id:
-        # Fallback to old method (legacy attendance_list)
-        status_by_user = parse_attendance_with_status(attendance)
-    else:
-        # Read from participant table (current system)
-        result = await session.execute(
-            select(EventParticipant).where(EventParticipant.event_id == event_id)
-        )
-        participants = result.scalars().all()
-        status_by_user = {
-            p.telegram_user_id: p.status.value for p in participants
-        }
+    result = await session.execute(
+        select(EventParticipant).where(EventParticipant.event_id == event_id)
+    )
+    participants = result.scalars().all()
+    status_by_user = {
+        p.telegram_user_id: p.status.value for p in participants
+    }
 
     # Count statuses (new system uses 'joined' and 'confirmed')
     interested_count = sum(
@@ -208,67 +202,26 @@ async def attendance_stats_with_usernames(
     return interested_count, confirmed_count, "\n".join(lines)
 
 
-def attendance_stats(attendance: list[Any] | None) -> tuple[int, int, str]:
-    """Return interested count, confirmed count, and formatted attendee text (legacy function)."""
-    status_by_user = parse_attendance_with_status(attendance)
-    # Legacy system: 'interested' = joined, 'confirmed' = confirmed (committed is mapped to confirmed)
-    interested_count = sum(
-        1 for status in status_by_user.values() if status == "interested"
-    )
-    confirmed_count = sum(
-        1 for status in status_by_user.values() if status == "confirmed"
-    )
+def participant_stats(event: Any) -> tuple[int, int, str]:
+    """Return joined/confirmed counts and attendee text from normalized participants."""
+    participants = list(getattr(event, "participants", None) or [])
+    interested_count = sum(1 for p in participants if getattr(p.status, "value", p.status) == "joined")
+    confirmed_count = sum(1 for p in participants if getattr(p.status, "value", p.status) == "confirmed")
 
-    if not status_by_user:
+    if not participants:
         return interested_count, confirmed_count, "No attendees yet."
 
     lines = []
-    user_ids = list(status_by_user.keys())
-
-    # Fetch user data for formatting
-    from db.models import User
-    from db.connection import get_session
-    from config.settings import settings
-
-    users = {}
-    if user_ids and settings.db_url:
-        import asyncio
-        async def fetch_users():
-            async with get_session(settings.db_url) as session:
-                result = await session.execute(
-                    select(User).where(User.telegram_user_id.in_(user_ids))
-                )
-                for user in result.scalars().all():
-                    users[user.telegram_user_id] = user
-        try:
-            asyncio.get_event_loop().run_until_complete(fetch_users())
-        except Exception:
-            pass
-
-    for telegram_user_id in sorted(status_by_user.keys()):
-        status = status_by_user[telegram_user_id]
-        user = users.get(telegram_user_id)
-        username = getattr(user, "username", None) if user else None
-        display_name = getattr(user, "display_name", None) if user else None
-
-        # Format: "Name(@username) has confirmed"
-        if display_name and username:
-            user_display = f"{display_name}(@{username})"
-        elif username:
-            user_display = f"@{username}"
-        elif display_name:
-            user_display = display_name
-        else:
-            user_display = f"User{telegram_user_id}"
-
+    for participant in sorted(participants, key=lambda p: int(p.telegram_user_id)):
+        status = getattr(participant.status, "value", participant.status)
         status_text = {
-            "invited": "has been invited",
-            "interested": "has joined",
+            "joined": "has joined",
             "confirmed": "has confirmed",
-            "committed": "has confirmed",  # Legacy mapping
-        }.get(status, status)
+            "cancelled": "has cancelled",
+            "no_show": "was absent",
+        }.get(status, str(status))
+        lines.append(f"User{participant.telegram_user_id} {status_text}")
 
-        lines.append(f"{user_display} {status_text}")
     return interested_count, confirmed_count, "\n".join(lines)
 
 
@@ -276,14 +229,13 @@ async def format_event_details_message(
     event_id: int, event: Any, logs: list[Any], constraints: list[Any], bot=None
 ) -> str:
     """Build consistent detailed event info with early-stage progress."""
-    attendance = event.attendance_list or []
-
     if settings.db_url:
         async with get_session(settings.db_url) as session:
-            interested_count, confirmed_count, attendees_text = await attendance_stats_with_usernames(attendance, session, event_id)
+            interested_count, confirmed_count, attendees_text = await attendance_stats_with_usernames(session, event_id)
     else:
-        interested_count, confirmed_count, attendees_text = attendance_stats(attendance)
-    threshold = event.threshold_attendance or 0
+        interested_count, confirmed_count, attendees_text = participant_stats(event)
+    attendee_count = interested_count + confirmed_count
+    threshold = event.min_participants or 0
     needed = max(threshold - confirmed_count, 0)
     availability_count = sum(
         1 for c in constraints if str(getattr(c, "type", "")).startswith("available:")
@@ -334,10 +286,9 @@ async def format_event_details_message(
         f"Budget: {budget_level}\n"
         f"Transport: {transport_mode}\n"
         f"Duration: {format_duration(event.duration_minutes)}\n"
-        f"Threshold: {threshold}\n"
+        f"Minimum Needed: {threshold}\n"
         f"State: {event.state}\n"
         f"State Meaning: {STATE_EXPLANATIONS.get(event.state, 'Unknown state')}\n"
-        f"AI Score: {event.ai_score:.2f}\n"
         f"Created: {event.created_at}\n"
         f"Locked: {event.locked_at or 'Not locked'}\n"
         f"Completed: {event.completed_at or 'Not completed'}\n\n"
@@ -345,9 +296,9 @@ async def format_event_details_message(
         f"Progress:\n"
         f"- Interested: {interested_count}\n"
         f"- Confirmed: {confirmed_count}\n"
-        f"- Needed to reach threshold: {needed}\n"
+        f"- Needed to reach minimum: {needed}\n"
         f"- Availability slots: {availability_count}\n\n"
-        f"Attendees ({len(attendance)}):\n{attendees_text}\n\n"
+        f"Attendees ({attendee_count}):\n{attendees_text}\n\n"
         f"Logs: {len(logs)}\n"
         f"Constraints: {len(constraints)}\n\n"
         f"Next step: {next_step}"
@@ -364,18 +315,18 @@ async def format_status_message(
     session=None,
 ) -> str:
     """
-    Build consistent event status message with mutual dependence visibility.
+    Build consistent event status message with participant visibility.
 
-    PRD v2 Section 2.2.3: Visibility of Mutual Dependence
+    PRD v3.2:
     - Shows who else is in (confirmed names, interested names)
-    - Shows threshold progress and fragility
-    - User-specific acknowledgment: "You are one of [N] people [Name] is counting on"
+    - Shows progress toward the minimum without guilt framing
+    - Keeps user-specific copy informational, not pressuring
     """
     description = summarize_description(event.description, max_len=400)
 
-    # Get participant counts with names (PRD v2: Visibility of Mutual Dependence)
+    # Get participant counts with names
     min_participants = event.min_participants or 2
-    threshold = event.threshold_attendance or min_participants
+    threshold = min_participants
     confirmed_count = 0
     interested_count = 0
     confirmed_names = []
@@ -405,32 +356,29 @@ async def format_status_message(
                 interested_count += 1
                 interested_names.append(user_display)
 
-    # Threshold fragility display (PRD v2 Section 2.2.1)
+    # Progress display without fragility or guilt framing
     needed = max(threshold - confirmed_count, 0)
-    fragility_text = ""
+    progress_text = ""
     if needed > 0:
-        fragility_text = f"\n⚠️ We need {needed} more to reach threshold ({confirmed_count}/{threshold})"
-        if needed == 1:
-            fragility_text += "\n❗ If one more person drops, this event collapses."
+        progress_text = f"\n⚠️ Still needs {needed} more to reach the minimum ({confirmed_count}/{threshold})."
     elif confirmed_count >= threshold:
-        fragility_text = f"\n✅ Threshold reached! ({confirmed_count}/{threshold})"
+        progress_text = f"\n✅ Minimum reached ({confirmed_count}/{threshold})."
 
-    # User-specific mutual dependence acknowledgment (PRD v2 Section 2.2.3)
+    # User-specific informational acknowledgment
     mutual_dependence_text = ""
     if user_participant and session:
         total_count = confirmed_count + interested_count
         if total_count > 1:
-            # Find who the user might be counting on (other participants)
             others_count = total_count - 1
             if user_participant.status == ParticipantStatus.confirmed:
                 mutual_dependence_text = (
-                    f"\n\n🤝 You are one of {total_count} people others are counting on.\n"
-                    f"   {others_count} participant{'s' if others_count > 1 else ''} depending on you."
+                    f"\n\n🤝 You are one of {total_count} active participants.\n"
+                    f"   {others_count} other participant{'s' if others_count > 1 else ''} currently in."
                 )
             elif user_participant.status == ParticipantStatus.joined:
                 mutual_dependence_text = (
                     f"\n\n🤝 You are one of {total_count} interested participants.\n"
-                    f"   Confirm to let others know you're committed."
+                    f"   Confirm when you're ready to move from interested to committed."
                 )
 
     # Get admin mention
@@ -454,9 +402,9 @@ async def format_status_message(
         f"Type: {event.event_type}\n"
         f"Description: {description}\n"
         f"Time: {format_scheduled_time(event.scheduled_time, include_flexible_note=False)}\n"
-        f"Threshold: {threshold}\n"
+        f"Minimum Needed: {threshold}\n"
         f"State: {event.state}\n"
-        f"{fragility_text}"
+        f"{progress_text}"
         f"{mutual_dependence_text}\n\n"
         f"Participants:{participant_text}\n\n"
         f"Admin: {admin_text}\n"

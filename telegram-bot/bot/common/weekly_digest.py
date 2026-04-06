@@ -128,7 +128,7 @@ class WeeklyDigestService:
                 "scheduled_time": event.scheduled_time,
                 "state": event.state,
                 "confirmed_count": await self._get_confirmed_count(event.event_id),
-                "threshold": event.threshold_attendance,
+                "minimum": event.min_participants,
             })
 
         return events
@@ -249,7 +249,7 @@ class WeeklyDigestService:
                 time_str = evt["scheduled_time"].strftime("%a %b %d, %H:%M")
                 lines.append(
                     f"• {evt['event_type']}: {evt['description']}\n"
-                    f"  _{time_str}_ • {evt['confirmed_count']}/{evt['threshold']} confirmed"
+                    f"  _{time_str}_ • {evt['confirmed_count']}/{evt['minimum']} confirmed"
                 )
             lines.append("")
 

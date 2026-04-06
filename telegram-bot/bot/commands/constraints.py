@@ -10,7 +10,7 @@ from db.connection import get_session
 from db.users import get_or_create_user_id, get_user_id_by_username
 from config.settings import settings
 from ai.llm import LLMClient
-from bot.common.event_access import get_event_organizer_telegram_id, is_attendee
+from bot.common.event_access import is_attendee
 
 ALLOWED_CONSTRAINT_TYPES = {"if_joins", "if_attends", "unless_joins"}
 CONSTRAINT_TYPE_ALIASES = {
@@ -284,8 +284,12 @@ async def _save_constraint_from_inputs(
         return
 
     async with get_session(settings.db_url) as session:
+        from sqlalchemy.orm import selectinload
+
         result = await session.execute(
-            select(Event).where(Event.event_id == event_id)
+            select(Event)
+            .options(selectinload(Event.participants))
+            .where(Event.event_id == event_id)
         )
         event = result.scalar_one_or_none()
 
@@ -300,17 +304,6 @@ async def _save_constraint_from_inputs(
         is_private_chat = bool(chat and chat.type == "private")
         requester_tg_id = int(update.effective_user.id)
         if is_private_chat:
-            organizer_id = get_event_organizer_telegram_id(event)
-            if organizer_id is not None and requester_tg_id == organizer_id:
-                error_msg = (
-                    "❌ Organizer cannot add private constraints. "
-                    "Private constraints are for interested attendees."
-                )
-                if edit_via_query and query:
-                    await query.edit_message_text(error_msg)
-                elif message:
-                    await message.reply_text(error_msg)
-                return
             if not is_attendee(event, requester_tg_id):
                 error_msg = (
                     "❌ Only interested attendees can add private constraints."
@@ -497,8 +490,12 @@ async def add_availability_slots(
         return
 
     async with get_session(settings.db_url) as session:
+        from sqlalchemy.orm import selectinload
+
         event_result = await session.execute(
-            select(Event).where(Event.event_id == event_id)
+            select(Event)
+            .options(selectinload(Event.participants))
+            .where(Event.event_id == event_id)
         )
         event = event_result.scalar_one_or_none()
         if not event:
@@ -508,12 +505,6 @@ async def add_availability_slots(
         is_private_chat = bool(chat and chat.type == "private")
         requester_tg_id = int(update.effective_user.id)
         if is_private_chat:
-            organizer_id = get_event_organizer_telegram_id(event)
-            if organizer_id is not None and requester_tg_id == organizer_id:
-                await update.message.reply_text(
-                    "❌ Organizer cannot add private availability notes here."
-                )
-                return
             if not is_attendee(event, requester_tg_id):
                 await update.message.reply_text(
                     "❌ Only interested attendees can add private availability."

@@ -1,20 +1,17 @@
-# Core dependencies
-python-telegram-bot[job-queue]==22.6
-SQLAlchemy==2.0.25
-asyncpg==0.29.0
-pydantic==2.6.1
-python-dotenv==1.0.1
-psycopg2==2.9.11
+# Coordination Engine Bot v3.2.0
+# Runtime dependencies only.
 
-# LLM integration
-openai==1.12.0
-httpx==0.28.0
+# Core bot/runtime
+python-telegram-bot[job-queue]>=22.6,<23
+SQLAlchemy>=2.0.40,<2.1
+python-dotenv>=1.0.1,<2
+pydantic>=2.11,<3
 
-# Utilities
-pytz==2024.1
-aiosignal==1.3.1
+# Async PostgreSQL drivers
+# Use asyncpg on Python < 3.14 and psycopg's async driver on Python >= 3.14.
+asyncpg>=0.30,<0.31 ; python_version < "3.14"
+psycopg[binary]>=3.2,<3.3 ; python_version >= "3.14"
 
-# Development dependencies (in requirements-dev.txt)
-# pytest
-# pytest-asyncio
-# httpx
+# LLM / HTTP
+openai>=1.12,<2
+httpx>=0.28,<0.29

@@ -1,6 +1,5 @@
 """
 ParticipantService - Manages normalized participant records.
-PRD v2 Section 2.1: Replaces attendance_list JSON operations.
 
 This service provides the single write path for participant management.
 All join/confirm/cancel operations must route through this service.
@@ -36,7 +35,6 @@ class ParticipantService:
     - Join/leave operations
     - Confirm/cancel operations
     - Status queries and counts
-    - Migration from legacy attendance_list
     """
 
     def __init__(self, session: AsyncSession):
@@ -388,48 +386,3 @@ class ParticipantService:
             )
         )
         return result.rowcount > 0
-
-    async def migrate_from_legacy(
-        self,
-        event: Event,
-    ) -> int:
-        """
-        Migrate event from legacy attendance_list to normalized table.
-
-        Returns count of migrated participants.
-        """
-        from bot.common.attendance import parse_attendance_with_status
-
-        if not event.attendance_list:
-            return 0
-
-        attendance_map = parse_attendance_with_status(event.attendance_list)
-        migrated_count = 0
-
-        for telegram_user_id, status_str in attendance_map.items():
-            # Map legacy status to new enum
-            # Legacy 'committed' and 'confirmed' → ParticipantStatus.confirmed
-            # Legacy 'interested' → ParticipantStatus.joined
-            if status_str == "confirmed":
-                status = ParticipantStatus.confirmed
-            elif status_str == "interested":
-                status = ParticipantStatus.joined
-            else:
-                status = ParticipantStatus.joined  # Default for unknown/legacy statuses
-
-            participant = EventParticipant(
-                event_id=event.event_id,
-                telegram_user_id=telegram_user_id,
-                status=status,
-                source="migration",
-            )
-            self.session.add(participant)
-            migrated_count += 1
-
-        logger.info(
-            "Migrated %d participants from legacy attendance_list",
-            migrated_count,
-            extra={"event_id": event.event_id}
-        )
-
-        return migrated_count

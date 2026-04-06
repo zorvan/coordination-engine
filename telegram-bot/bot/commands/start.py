@@ -4,7 +4,6 @@ from telegram import Update
 from telegram.ext import ContextTypes
 
 from bot.common.menus import build_main_menu
-from bot.handlers import feedback
 
 
 async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -34,16 +33,6 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             )
             return
 
-    if payload.startswith("feedback_"):
-        try:
-            event_id = int(payload.replace("feedback_", ""))
-        except ValueError:
-            event_id = None
-        if event_id is not None:
-            context.args = [str(event_id)]
-            await feedback.collect_feedback(update, context)
-            return
-
     # Show main menu with buttons
     display_name = (
         update.effective_user.full_name
@@ -62,7 +51,7 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "/events - List recent events\n"
         "/my_groups - List your groups\n"
         "/profile - View your profile\n"
-        "/how_am_i_doing - See your participation",
+        "/how_am_i_doing - See your participation mirror",
         reply_markup=build_main_menu(),
         parse_mode="Markdown",
     )

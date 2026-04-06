@@ -32,7 +32,7 @@ from bot.common.event_formatters import (
     format_commit_by,
     format_duration,
 )
-from bot.common.keyboards import build_threshold_markup
+from bot.common.keyboards import build_threshold_markup, build_min_participants_markup, build_target_participants_markup
 from bot.common.scheduling import find_user_event_conflict
 from db.connection import get_session
 from db.models import Event, Group, User
@@ -422,7 +422,8 @@ def build_event_summary_text(data: dict[str, Any], is_private: bool = False) -> 
             f"Location Type: {location_type_label}\n"
             f"Budget: {budget_level_label}\n"
             f"Transport: {transport_mode_label}\n"
-            f"Threshold: {data.get('threshold_attendance', 'Not set')}\n"
+            f"Minimum: {data.get('min_participants', 'Not set')}\n"
+            f"Capacity: {data.get('target_participants', 'Not set')}\n"
             f"Invitees: {invitees_summary}\n\n"
             "Press *Confirm & Lock* to finalize and lock this event."
         )
@@ -440,7 +441,8 @@ def build_event_summary_text(data: dict[str, Any], is_private: bool = False) -> 
         f"Location Type: {location_type_label}\n"
         f"Budget: {budget_level_label}\n"
         f"Transport: {transport_mode_label}\n"
-        f"Threshold: {data.get('threshold_attendance', 'Not set')}\n"
+        f"Minimum: {data.get('min_participants', 'Not set')}\n"
+        f"Capacity: {data.get('target_participants', 'Not set')}\n"
         f"Invitees: {invitees_summary}"
         f"{notes_text}\n\n"
         "Create this event?\n"
@@ -513,18 +515,35 @@ async def _apply_final_stage_patch(
                 "Unsupported event type in modification; kept current value."
             )
 
-    threshold_raw = patch.get("threshold_attendance")
-    if threshold_raw is not None:
+    min_raw = patch.get("min_participants")
+    if min_raw is not None:
         try:
-            threshold = int(threshold_raw)
-            if threshold < 1:
-                warnings.append("Threshold must be at least 1.")
+            min_participants = int(min_raw)
+            if min_participants < 1:
+                warnings.append("Minimum participants must be at least 1.")
             else:
-                flow_data["threshold_attendance"] = threshold
-                changes.append(f"threshold set to {threshold}")
+                flow_data["min_participants"] = min_participants
+                existing_target = int(flow_data.get("target_participants", min_participants))
+                if existing_target < min_participants:
+                    flow_data["target_participants"] = min_participants
+                changes.append(f"minimum set to {min_participants}")
                 changed = True
         except (TypeError, ValueError):
-            warnings.append("Invalid threshold format; ignored.")
+            warnings.append("Invalid minimum participant format; ignored.")
+
+    target_raw = patch.get("target_participants")
+    if target_raw is not None:
+        try:
+            target_participants = int(target_raw)
+            min_participants = int(flow_data.get("min_participants", 2))
+            if target_participants < min_participants:
+                warnings.append("Capacity cannot be below the minimum participants.")
+            else:
+                flow_data["target_participants"] = target_participants
+                changes.append(f"capacity set to {target_participants}")
+                changed = True
+        except (TypeError, ValueError):
+            warnings.append("Invalid capacity format; ignored.")
 
     duration_raw = patch.get("duration_minutes")
     if duration_raw is not None:
@@ -819,11 +838,18 @@ async def start_event_flow_from_prefill(
         event_type if event_type in ALLOWED_EVENT_TYPES else "social"
     )
     try:
-        flow_data["threshold_attendance"] = max(
-            1, int(pre.get("threshold_attendance", 3))
+        flow_data["min_participants"] = max(
+            1, int(pre.get("min_participants", 3))
         )
     except (TypeError, ValueError):
-        flow_data["threshold_attendance"] = 3
+        flow_data["min_participants"] = 3
+    try:
+        flow_data["target_participants"] = max(
+            flow_data["min_participants"],
+            int(pre.get("target_participants", max(flow_data["min_participants"], 5))),
+        )
+    except (TypeError, ValueError):
+        flow_data["target_participants"] = max(flow_data["min_participants"], 5)
     try:
         flow_data["duration_minutes"] = max(30, int(pre.get("duration_minutes", 120)))
     except (TypeError, ValueError):
@@ -991,7 +1017,7 @@ async def _handle_callback_common(
                     context.user_data[flow_key] = event_flow
                     await query.edit_message_text(
                         "Flexible mode skips fixed date selection.\n"
-                        "Set minimum attendance threshold:",
+                        "Set the minimum people needed:",
                         reply_markup=build_threshold_markup(f"{prefix}_edit_type"),
                     )
                 else:
@@ -1025,7 +1051,7 @@ async def _handle_callback_common(
                 else f"{prefix}_edit_type"
             )
             await query.edit_message_text(
-                "👥 *Attendance Threshold*\n\nSet minimum attendance:",
+                "👥 *Participation Minimum*\n\nSet the minimum people needed:",
                 reply_markup=build_threshold_markup(back_target),
             )
         elif target == "duration":
@@ -1084,7 +1110,7 @@ async def _handle_callback_common(
                 "Flexible mode selected.\n"
                 "No fixed date/time now. Attendees can add availability slots later with:\n"
                 "/constraints <event_id> availability <YYYY-MM-DD HH:MM, ...>\n\n"
-                "Set minimum attendance threshold:",
+                "Set the minimum people needed:",
                 reply_markup=build_threshold_markup(f"{prefix}_edit_type"),
             )
         else:
@@ -1202,21 +1228,50 @@ async def _handle_callback_common(
             await query.edit_message_text("❌ Failed to parse selected time.")
             return
         flow_data["scheduled_time"] = scheduled_time.isoformat(timespec="minutes")
-        event_flow["stage"] = "threshold"
+        event_flow["stage"] = "min_participants"
         context.user_data[flow_key] = event_flow
         await query.edit_message_text(
             f"⏱️ *Time: {scheduled_time.strftime('%Y-%m-%d %H:%M')}*\n\n"
-            "What is the minimum attendance threshold?",
-            reply_markup=build_threshold_markup(f"{prefix}_edit_time_window"),
+            "What's the minimum number of people this needs to happen?",
+            reply_markup=build_min_participants_markup(f"{prefix}_edit_time_window"),
+        )
+
+    # v3.2: Handle min_participants selection
+    elif data and data.startswith(f"{prefix}_min_"):
+        min_val = int(data.replace(f"{prefix}_min_", ""))
+        event_flow["stage"] = "target_participants"
+        flow_data["min_participants"] = min_val
+        # Default target = ceil(min * 1.5)
+        import math
+        flow_data["target_participants"] = math.ceil(min_val * 1.5)
+        context.user_data[flow_key] = event_flow
+        await query.edit_message_text(
+            f"✅ *Minimum: {min_val}*\n\n"
+            f"How many people can this comfortably fit? (Default: {flow_data['target_participants']})",
+            reply_markup=build_target_participants_markup(min_val, f"{prefix}_min_{min_val}"),
+        )
+
+    # v3.2: Handle target_participants selection
+    elif data and data.startswith(f"{prefix}_target_"):
+        target_val = int(data.replace(f"{prefix}_target_", ""))
+        event_flow["stage"] = "duration"
+        flow_data["target_participants"] = target_val
+        context.user_data[flow_key] = event_flow
+        await query.edit_message_text(
+            f"✅ *Capacity: {target_val}* (min: {flow_data.get('min_participants', '?')})\n\n"
+            f"Select event duration:",
+            reply_markup=build_duration_markup(prefix=prefix),
         )
 
     elif data and data.startswith(f"{prefix}_threshold_"):
+        # Legacy fallback: if old threshold_ callback is clicked
         threshold = int(data.replace(f"{prefix}_threshold_", ""))
         event_flow["stage"] = "duration"
-        flow_data["threshold_attendance"] = threshold
+        flow_data["min_participants"] = threshold
+        flow_data["target_participants"] = threshold
         context.user_data[flow_key] = event_flow
         await query.edit_message_text(
-            f"✅ *Threshold: {threshold}*\n\nSelect event duration:",
+            f"✅ *Minimum/Capacity: {threshold}*\n\nSelect event duration:",
             reply_markup=build_duration_markup(prefix=prefix),
         )
 
@@ -1296,7 +1351,7 @@ async def _handle_callback_common(
             "Examples:\n"
             "- Change time to 2026-03-10 19:30\n"
             "- Make duration 90 minutes\n"
-            "- Increase threshold to 5\n"
+            "- Increase the minimum to 5\n"
             "- Set location to outdoor and budget to low\n"
             "- Add @alice and remove @bob"
         )
@@ -1621,7 +1676,8 @@ async def finalize_event(
             scheduled_time=candidate_time,
             commit_by=commit_by,
             duration_minutes=duration_minutes,
-            threshold_attendance=data.get("threshold_attendance", 5),
+            min_participants=data.get("min_participants", 2),
+            target_participants=data.get("target_participants", max(data.get("min_participants", 2), 5)),
             planning_prefs={
                 "date_preset": data.get("date_preset"),
                 "time_window": data.get("time_window"),
@@ -1682,14 +1738,12 @@ async def finalize_event(
 
     context.user_data.pop("event_flow", None)
 
-    # Default to True for public events
-    send_to_all_members = bool(data.get("invite_all_members", True))
     invitees = list(data.get("invitees", []))
 
     logger.info(
-        "Event %s: send_to_all_members=%s, invitees=%s",
+        "Event %s created in group %s: invitees=%s",
         event.event_id,
-        send_to_all_members,
+        group_id,
         invitees,
     )
 
@@ -1714,103 +1768,44 @@ async def finalize_event(
 
         group_members = group.member_list or []
 
-        # Send DMs - different logic for public vs private events
+        # Send DMs - group-organized events notify members privately
         dm_count = 0
         dm_failed = 0
 
-        if send_to_all_members:
-            # Public event: DM all group members (excluding creator who gets admin DM)
-            logger.info(
-                "Public event %s: Sending DMs to all %s group members",
-                event.event_id,
-                len(group_members),
-            )
-            for telegram_user_id in group_members:
-                if telegram_user_id and telegram_user_id != creator_id:
-                    try:
-                        sent = await send_event_invitation_dm(
-                            context,
-                            int(telegram_user_id),
-                            data,
-                            int(event.event_id),
-                        )
-                        if sent:
-                            logger.info(
-                                "DM sent to user %s for event %s (public event, all members)",
-                                telegram_user_id,
-                                event.event_id,
-                            )
-                            dm_count += 1
-                        else:
-                            dm_failed += 1
-                    except Exception as e:
-                        logger.error(
-                            "Error sending DM to user %s: %s",
-                            telegram_user_id,
-                            e,
-                            exc_info=True,
-                        )
-                        dm_failed += 1
-        else:
-            # Private event: DM ONLY invitees + admin
-            logger.info(
-                "Private event %s: Sending DMs to invitees only",
-                event.event_id,
-            )
-
-            # First, send to all listed invitees
-            for handle in invitees:
-                if not handle.startswith("@"):
-                    continue
-                username = handle[1:]
+        logger.info(
+            "Group event %s: Sending DMs to all %s group members",
+            event.event_id,
+            len(group_members),
+        )
+        for telegram_user_id in group_members:
+            if telegram_user_id:
                 try:
-                    user_id = await get_user_id_by_username(session, username)
-                    if user_id:
-                        result = await session.execute(
-                            select(User).where(User.user_id == int(user_id))
-                        )
-                        invitee_user = result.scalar_one_or_none()
-                        if invitee_user and invitee_user.telegram_user_id:
-                            sent = await send_event_invitation_dm(
-                                context,
-                                int(invitee_user.telegram_user_id),
-                                data,
-                                int(event.event_id),
-                            )
-                            if sent:
-                                logger.info(
-                                    "DM sent to user %s (@%s) for event %s (private invitee)",
-                                    invitee_user.telegram_user_id,
-                                    username,
-                                    event.event_id,
-                                )
-                                dm_count += 1
-                            else:
-                                dm_failed += 1
-                        else:
-                            logger.warning(
-                                "User @%s not found or no telegram_user_id for private event %s",
-                                username,
-                                event.event_id,
-                            )
-                            dm_failed += 1
-                    else:
-                        logger.warning(
-                            "No user_id found for handle @%s in private event %s",
-                            username,
+                    sent = await send_event_invitation_dm(
+                        context,
+                        int(telegram_user_id),
+                        data,
+                        int(event.event_id),
+                    )
+                    if sent:
+                        logger.info(
+                            "DM sent to user %s for event %s (group event, all members)",
+                            telegram_user_id,
                             event.event_id,
                         )
+                        dm_count += 1
+                    else:
                         dm_failed += 1
                 except Exception as e:
                     logger.error(
-                        "Error sending DM to @%s: %s",
-                        username,
+                        "Error sending DM to user %s: %s",
+                        telegram_user_id,
                         e,
                         exc_info=True,
                     )
                     dm_failed += 1
 
-            # Also send to admin/creator
+        # If no group members were found, still notify the creator in DM
+        if dm_count == 0:
             try:
                 sent = await send_event_invitation_dm(
                     context,
@@ -1820,7 +1815,7 @@ async def finalize_event(
                 )
                 if sent:
                     logger.info(
-                        "DM sent to admin %s for event %s (private event admin)",
+                        "DM sent to admin %s for event %s (fallback, no group members)",
                         creator_id,
                         event.event_id,
                     )
@@ -1856,13 +1851,12 @@ async def finalize_event(
     date_preset_text = format_date_preset(data.get("date_preset"))
     time_window_text = format_time_window(data.get("time_window"))
 
-    # Minimal summary for group - just event ID and key info
+    # Minimal summary for group - only the announcement + event ID
     group_summary = (
         f"✅ *Event Created!*\n\n"
         f"Event ID: `{event.event_id}`\n"
-        f"Type: {data.get('event_type', 'Not specified')}\n"
-        f"Invitees: {invitees_summary}\n"
-        f"Admin: {organizer_username if organizer_username else creator_id}"
+        f"Description: {_escape_md(data.get('description', 'Not provided'))}\n\n"
+        "A private DM has been sent to group members with full event details and next steps."
     )
 
     await query.edit_message_text(group_summary)
@@ -1883,7 +1877,8 @@ async def finalize_event(
         f"Location Type: {_escape_md(location_text)}\n"
         f"Budget: {_escape_md(budget_text)}\n"
         f"Transport: {_escape_md(transport_text)}\n"
-        f"Threshold: {_escape_md(data.get('threshold_attendance', 'Not set'))}\n"
+        f"Minimum: {_escape_md(data.get('min_participants', 'Not set'))}\n"
+        f"Capacity: {_escape_md(data.get('target_participants', 'Not set'))}\n"
         f"Invitees: {_escape_md(invitees_summary)}\n\n"
         f"✅ Event ready for confirmation. Run /confirm {event.event_id} to lock it."
         + (
@@ -1986,7 +1981,8 @@ async def finalize_private_event(
             scheduled_time=candidate_time,
             commit_by=commit_by,
             duration_minutes=duration_minutes,
-            threshold_attendance=data.get("threshold_attendance", 5),
+            min_participants=data.get("min_participants", 2),
+            target_participants=data.get("target_participants", max(data.get("min_participants", 2), 5)),
             planning_prefs={
                 "date_preset": data.get("date_preset"),
                 "time_window": data.get("time_window"),
@@ -2167,7 +2163,8 @@ async def finalize_private_event(
         f"Location Type: {_escape_md(location_text)}\n"
         f"Budget: {_escape_md(budget_text)}\n"
         f"Transport: {_escape_md(transport_text)}\n"
-        f"Threshold: {_escape_md(data.get('threshold_attendance', 'Not set'))}\n"
+        f"Minimum: {_escape_md(data.get('min_participants', 'Not set'))}\n"
+        f"Capacity: {_escape_md(data.get('target_participants', 'Not set'))}\n"
         f"Invitees: {_escape_md(invitees_summary)}\n\n"
         f"✅ Event has been automatically locked.\n"
         f"Status: Locked - No further changes allowed.\n\n"

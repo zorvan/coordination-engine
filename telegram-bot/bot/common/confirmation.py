@@ -1,24 +1,15 @@
 """Confirmation invalidation helpers."""
 from __future__ import annotations
 
-from typing import Any
-
-from bot.common.attendance import parse_attendance_with_status
-
-def _extract_confirmed_telegram_ids(attendance_list: list[Any] | None) -> list[int]:
-    """Extract confirmed telegram user ids from attendance entries."""
-    confirmed: list[int] = []
-    for telegram_user_id, status in parse_attendance_with_status(attendance_list).items():
-        if status in {"confirmed"}:
-            confirmed.append(telegram_user_id)
-    return confirmed
+from db.models import ParticipantStatus
 
 
-def _to_interested_attendance(attendance_list: list[Any] | None) -> list[str]:
-    """Convert all attendance markers into interested stage."""
+def _active_participants(event) -> list:
+    """Return participants still considered active for event coordination."""
     return [
-        f"{telegram_user_id}:interested"
-        for telegram_user_id in sorted(parse_attendance_with_status(attendance_list).keys())
+        participant
+        for participant in (getattr(event, "participants", None) or [])
+        if participant.status in {ParticipantStatus.joined, ParticipantStatus.confirmed}
     ]
 
 
@@ -29,12 +20,20 @@ async def invalidate_confirmations_and_notify(
     reason: str,
 ) -> int:
     """Reset confirmations to interested state and notify previously confirmed users."""
-    confirmed_ids = _extract_confirmed_telegram_ids(event.attendance_list)
+    confirmed_participants = [
+        participant
+        for participant in _active_participants(event)
+        if participant.status == ParticipantStatus.confirmed
+    ]
+    confirmed_ids = [int(participant.telegram_user_id) for participant in confirmed_participants]
     if not confirmed_ids:
         return 0
 
-    event.attendance_list = _to_interested_attendance(event.attendance_list)
-    event.state = "interested" if event.attendance_list else "proposed"
+    for participant in confirmed_participants:
+        participant.status = ParticipantStatus.joined
+        participant.confirmed_at = None
+
+    event.state = "interested" if _active_participants(event) else "proposed"
 
     message = (
         f"🔁 Event {event.event_id} modified.\n"
@@ -51,15 +50,6 @@ async def invalidate_confirmations_and_notify(
     return len(confirmed_ids)
 
 
-def _extract_all_active_telegram_ids(attendance_list: list[Any] | None) -> list[int]:
-    """Extract all active telegram user ids (interested, confirmed) from attendance entries."""
-    active: list[int] = []
-    for telegram_user_id, status in parse_attendance_with_status(attendance_list).items():
-        if status in {"interested", "confirmed"}:
-            active.append(telegram_user_id)
-    return active
-
-
 async def notify_attendees_of_modification(
     *,
     context,
@@ -67,7 +57,7 @@ async def notify_attendees_of_modification(
     reason: str,
 ) -> int:
     """Notify all active attendees of event modification."""
-    active_ids = _extract_all_active_telegram_ids(event.attendance_list)
+    active_ids = [int(p.telegram_user_id) for p in _active_participants(event)]
     if not active_ids:
         return 0
 

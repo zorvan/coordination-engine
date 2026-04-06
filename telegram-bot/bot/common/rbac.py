@@ -8,6 +8,7 @@ import logging
 from typing import Optional, Tuple, TYPE_CHECKING
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 
 from db.models import Event, EventParticipant, Group
 
@@ -168,6 +169,7 @@ async def check_event_visibility_and_get_event(
 
     result = await session.execute(
         select(Event, Group)
+        .options(selectinload(Event.participants))
         .join(Group, Event.group_id == Group.group_id, isouter=True)
         .where(Event.event_id == event_id)
     )
@@ -437,14 +439,13 @@ async def check_can_submit_private_note(
     """
     Check if user can submit private attendee notes.
 
-    Rules (PRD v2):
-    - Only interested attendees (joined or confirmed) can submit
-    - Organizer CANNOT submit attendee notes (they're private feedback)
+    Rules:
+    - Only active participants (joined or confirmed) can submit
+    - Organizer is allowed if they are also an active participant
 
     Returns:
         (is_authorized, error_message)
     """
-    # Check if user is organizer (organizers cannot submit private notes)
     event_result = await session.execute(
         select(Event).where(Event.event_id == event_id)
     )
@@ -452,9 +453,6 @@ async def check_can_submit_private_note(
 
     if not event:
         return False, "Event not found"
-
-    if event.organizer_telegram_user_id == telegram_user_id:
-        return False, "Organizers cannot submit private attendee notes"
 
     # Check if user is a participant
     participant_result = await session.execute(

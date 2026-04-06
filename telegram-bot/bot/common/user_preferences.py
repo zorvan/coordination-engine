@@ -284,15 +284,10 @@ async def get_group_aggregate_preferences(
 
     from db.users import get_user_ids_for_telegram_ids
 
-    def get_telegram_id(attendee):
-        if isinstance(attendee, dict):
-            return attendee.get("user_id")
-        elif isinstance(attendee, (int, float)):
-            return int(attendee)
-        return None
-
-    telegram_ids = [get_telegram_id(a) for a in (event.attendance_list or [])]
-    telegram_ids = [t for t in telegram_ids if t]
+    telegram_ids = [
+        int(participant.telegram_user_id)
+        for participant in (event.participants or [])
+    ]
 
     if not telegram_ids:
         return {}

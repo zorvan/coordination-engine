@@ -19,6 +19,7 @@ from bot.common.event_formatters import (
 from bot.common.scheduling import find_user_event_conflict
 from bot.common.event_access import get_event_admin_telegram_id, get_event_organizer_telegram_id
 from bot.common.rbac import check_event_visibility_and_get_event
+from bot.common.participant_state_reconcile import reconcile_event_state_after_participant_change
 from bot.services import ParticipantService, EventLifecycleService
 
 logger = logging.getLogger(__name__)
@@ -60,6 +61,14 @@ async def handle_join(query, context: ContextTypes.DEFAULT_TYPE, event_id: int) 
     display_name = query.from_user.full_name
     username = query.from_user.username
     bot = context.bot
+
+    # Prevent interactions from group chats - all event interactions should be in DMs
+    chat_type = getattr(getattr(query, "message", None), "chat", None)
+    if chat_type:
+        chat_type = getattr(chat_type, "type", None)
+    if chat_type and chat_type != "private":
+        await query.answer("Please interact with events in private DM with the bot.", show_alert=True)
+        return
 
     db_url = settings.db_url or ""
     async with get_session(db_url) as session:
@@ -116,6 +125,49 @@ async def handle_join(query, context: ContextTypes.DEFAULT_TYPE, event_id: int) 
                 f"Conflicting Event ID: {conflict.event_id}\n"
                 f"Time: {conflict.scheduled_time}\n"
                 f"Duration: {conflict.duration_minutes or 120} minutes"
+            )
+            return
+
+        # v3.2: Check if event is at target capacity → offer waitlist
+        from sqlalchemy import func as sql_func
+        from db.models import EventParticipant
+        participant_result = await session.execute(
+            select(sql_func.count(EventParticipant.telegram_user_id))
+            .where(
+                EventParticipant.event_id == event_id,
+                EventParticipant.status.in_([
+                    ParticipantStatus.confirmed,
+                    ParticipantStatus.joined,
+                ])
+            )
+        )
+        current_count = participant_result.scalar() or 0
+        target = event.target_participants or event.min_participants or 6
+
+        if current_count >= target and not (participant and participant.status in [ParticipantStatus.joined, ParticipantStatus.confirmed, ParticipantStatus.cancelled]):
+            # Event at capacity — offer waitlist
+            from bot.services import WaitlistService
+            waitlist_service = WaitlistService(session, bot)
+
+            # Check if already on waitlist
+            existing_position = await waitlist_service.get_waitlist_position(event_id, telegram_user_id)
+            if existing_position:
+                await query.edit_message_text(
+                    f"📋 The {event.event_type} is full at the moment. "
+                    f"You're #{existing_position} on the list. "
+                    f"You'll be notified if a spot opens."
+                )
+                return
+
+            await query.edit_message_text(
+                f"📋 The {event.event_type} is full at the moment. "
+                f"Want me to add you to the waitlist? You'll be notified if a spot opens.",
+                reply_markup=InlineKeyboardMarkup([
+                    [
+                        InlineKeyboardButton("✅ Join Waitlist", callback_data=f"waitlist_join_{event_id}"),
+                        InlineKeyboardButton("❌ No Thanks", callback_data=f"event_close_{event_id}"),
+                    ]
+                ])
             )
             return
 
@@ -234,12 +286,8 @@ async def handle_join(query, context: ContextTypes.DEFAULT_TYPE, event_id: int) 
         # Add DM links
         if bot.username:
             avail_link = f"https://t.me/{bot.username}?start=avail_{event_id}"
-            feedback_link = f"https://t.me/{bot.username}?start=feedback_{event_id}"
             keyboard.append(
                 [InlineKeyboardButton("📥 Set Availability in DM", url=avail_link)]
-            )
-            keyboard.append(
-                [InlineKeyboardButton("⭐ Give Feedback in DM", url=feedback_link)]
             )
 
         reply_markup = InlineKeyboardMarkup(keyboard)
@@ -263,7 +311,8 @@ async def handle_join(query, context: ContextTypes.DEFAULT_TYPE, event_id: int) 
             f"👥 *Participants:*\n"
             f"Interested: {interested_count}\n"
             f"Confirmed: {confirmed_count}\n"
-            f"Threshold: {event.threshold_attendance}\n\n"
+            f"Minimum: {event.min_participants}\n"
+            f"Capacity: {event.target_participants}\n\n"
             f"_The event is now gathering momentum!_\n"
             f"_Set your availability, add constraints, and engage with the group._",
             reply_markup=reply_markup,
@@ -278,6 +327,14 @@ async def handle_confirm(query, context: ContextTypes.DEFAULT_TYPE, event_id: in
     display_name = query.from_user.full_name
     username = query.from_user.username
     bot = context.bot
+
+    # Prevent interactions from group chats - all event interactions should be in DMs
+    chat_type = getattr(getattr(query, "message", None), "chat", None)
+    if chat_type:
+        chat_type = getattr(chat_type, "type", None)
+    if chat_type and chat_type != "private":
+        await query.answer("Please interact with events in private DM with the bot.", show_alert=True)
+        return
 
     db_url = settings.db_url or ""
     async with get_session(db_url) as session:
@@ -395,13 +452,9 @@ async def handle_confirm(query, context: ContextTypes.DEFAULT_TYPE, event_id: in
                 InlineKeyboardButton("📅 Set Availability", url=f"https://t.me/{bot.username}?start=avail_{event_id}"),
                 InlineKeyboardButton("🔒 Constraints", callback_data=f"event_constraints_{event_id}"),
             ],
-            # Feedback & logs
+            # Logs
             [
                 InlineKeyboardButton("📝 Logs", callback_data=f"event_logs_{event_id}"),
-                InlineKeyboardButton("💬 Feedback", callback_data=f"event_feedback_{event_id}"),
-            ],
-            # Update button
-            [
                 InlineKeyboardButton("🔄 Update", callback_data=f"event_details_{event_id}"),
             ],
         ]
@@ -435,7 +488,8 @@ async def handle_confirm(query, context: ContextTypes.DEFAULT_TYPE, event_id: in
             f"👥 *Participants:*\n"
             f"Interested: {interested_count}\n"
             f"Confirmed: {confirmed_count}\n"
-            f"Threshold: {event.threshold_attendance}\n\n"
+            f"Minimum: {event.min_participants}\n"
+            f"Capacity: {event.target_participants}\n\n"
             f"_Your confirmation helps the event reach critical mass!_\n"
             f"_You can go back before the event is locked._",
             reply_markup=reply_markup,
@@ -446,6 +500,15 @@ async def handle_confirm(query, context: ContextTypes.DEFAULT_TYPE, event_id: in
 async def handle_back(query, context: ContextTypes.DEFAULT_TYPE, event_id: int) -> None:
     """Revert personal confirmation to interested before lock (uncommit)."""
     telegram_user_id = query.from_user.id
+
+    # Prevent interactions from group chats - all event interactions should be in DMs
+    chat_type = getattr(getattr(query, "message", None), "chat", None)
+    if chat_type:
+        chat_type = getattr(chat_type, "type", None)
+    if chat_type and chat_type != "private":
+        await query.answer("Please interact with events in private DM with the bot.", show_alert=True)
+        return
+
     db_url = settings.db_url or ""
     async with get_session(db_url) as session:
         # Check event visibility based on group membership
@@ -476,16 +539,20 @@ async def handle_back(query, context: ContextTypes.DEFAULT_TYPE, event_id: int) 
             )
             return
 
-        # Revert to joined (interested)
-        participant.status = ParticipantStatus.joined
-        participant.confirmed_at = None
+        await participant_service.unconfirm(
+            event_id=event_id,
+            telegram_user_id=telegram_user_id,
+            source="callback",
+        )
+        event = await reconcile_event_state_after_participant_change(
+            session=session,
+            bot=context.bot,
+            event_id=event_id,
+            actor_telegram_user_id=telegram_user_id,
+            source="callback",
+            reason="Participant unconfirmed attendance",
+        )
         await session.commit()
-
-        # Update event state if needed
-        confirmed_count = await participant_service.get_confirmed_count(event_id)
-        if confirmed_count == 0 and event.state == "confirmed":
-            event.state = "interested"
-            await session.commit()
 
     await query.edit_message_text(
         f"↩️ Confirmation reverted for event {event_id}.\n"
@@ -496,11 +563,21 @@ async def handle_back(query, context: ContextTypes.DEFAULT_TYPE, event_id: int) 
 
 
 async def handle_cancel(query, context: ContextTypes.DEFAULT_TYPE, event_id: int) -> None:
-    """Handle cancelling attendance for the clicking user."""
+    """Handle cancelling attendance for the clicking user.
+    v3.2: Triggers waitlist auto-fill if someone is waiting.
+    """
     telegram_user_id = query.from_user.id
     display_name = query.from_user.full_name
     username = query.from_user.username
     bot = context.bot
+
+    # Prevent interactions from group chats - all event interactions should be in DMs
+    chat_type = getattr(getattr(query, "message", None), "chat", None)
+    if chat_type:
+        chat_type = getattr(chat_type, "type", None)
+    if chat_type and chat_type != "private":
+        await query.answer("Please interact with events in private DM with the bot.", show_alert=True)
+        return
 
     db_url = settings.db_url or ""
     async with get_session(db_url) as session:
@@ -530,22 +607,19 @@ async def handle_cancel(query, context: ContextTypes.DEFAULT_TYPE, event_id: int
             await query.edit_message_text(f"❌ Failed to cancel attendance: {str(e)}")
             return
 
-        # Update event state if needed
-        confirmed_count = await participant_service.get_confirmed_count(event_id)
-        if event.state not in {"locked", "completed", "cancelled"} and confirmed_count == 0:
-            # If no one is confirmed anymore, go back to interested or proposed
-            new_state = "interested" if confirmed_count > 0 else "proposed"
-            lifecycle_service = EventLifecycleService(bot, session)
-            try:
-                event, _ = await lifecycle_service.transition_with_lifecycle(
-                    event_id=event_id,
-                    target_state=new_state,
-                    actor_telegram_user_id=telegram_user_id,
-                    source="callback",
-                    reason="Last participant cancelled",
-                )
-            except Exception as e:
-                logger.error(f"Failed to transition event {event_id} to {new_state}: {e}")
+        # v3.2: Trigger waitlist auto-fill
+        from bot.services import WaitlistService
+        waitlist_service = WaitlistService(session, bot)
+        await waitlist_service.trigger_auto_fill(event_id)
+
+        event = await reconcile_event_state_after_participant_change(
+            session=session,
+            bot=bot,
+            event_id=event_id,
+            actor_telegram_user_id=telegram_user_id,
+            source="callback",
+            reason="Participant cancelled attendance",
+        )
 
         user_id = await get_or_create_user_id(
             session,
@@ -575,6 +649,14 @@ async def handle_lock(query, context: ContextTypes.DEFAULT_TYPE, event_id: int) 
     """Handle locking an event - transition from confirmed to locked."""
     telegram_user_id = query.from_user.id
     bot = context.bot
+
+    # Prevent interactions from group chats - all event interactions should be in DMs
+    chat_type = getattr(getattr(query, "message", None), "chat", None)
+    if chat_type:
+        chat_type = getattr(chat_type, "type", None)
+    if chat_type and chat_type != "private":
+        await query.answer("Please interact with events in private DM with the bot.", show_alert=True)
+        return
 
     db_url = settings.db_url or ""
     async with get_session(db_url) as session:
@@ -653,7 +735,7 @@ async def show_event_details(query, context: ContextTypes.DEFAULT_TYPE, event_id
             f"Type: {event.event_type}\n"
             f"Time: {event.scheduled_time}\n"
             f"State: {event.state}\n"
-            f"Threshold: {event.threshold_attendance}\n"
+            f"Minimum: {event.min_participants}\n"
+            f"Capacity: {event.target_participants}\n"
             f"Attendees: {total_attendees}"
         )
-

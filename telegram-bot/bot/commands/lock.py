@@ -135,11 +135,6 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         # Finalize commitments - mark all joined participants as confirmed
         finalized_count = await participant_service.finalize_commitments(event_id)
 
-        # Legacy cleanup - remove old attendance_list if it exists
-        if event.attendance_list:
-            event.attendance_list = None
-            await session.commit()
-
     await update.message.reply_text(
         f"🔒 Event {event_id} locked successfully.\n\n"
         f"State: locked\n"

@@ -1,12 +1,14 @@
 """
 Materialization helpers - Layer 2: Makes events feel real.
 PRD v2 Section 2.2: Event Materialization Layer.
+PRD v3.2: Temporal gradient, memory hooks, cancellation-with-action DM.
 
 This module provides the integration between service layer and group announcements.
 """
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 from typing import Optional, TYPE_CHECKING
 from telegram import Bot
 
@@ -16,6 +18,40 @@ if TYPE_CHECKING:
     from bot.services import EventMaterializationService
 
 logger = logging.getLogger("coord_bot.materialization")
+
+
+def get_time_framing_tier(event: 'Event') -> str:
+    """
+    v3.2: Returns tier based on time to event.
+    Operates on event state only — no user data.
+
+    Tiers:
+    - light: >72h before event
+    - warm: 24–72h before event
+    - urgent: 2–24h before event
+    - immediate: <2h before event
+    """
+    if not event.scheduled_time:
+        return "light"
+    now = datetime.utcnow()
+    scheduled = event.scheduled_time
+    if isinstance(scheduled, str):
+        # Handle case where scheduled_time might be a string
+        try:
+            scheduled = datetime.fromisoformat(scheduled)
+        except (ValueError, TypeError):
+            return "light"
+    if not isinstance(scheduled, datetime):
+        return "light"
+    hours = (scheduled - now).total_seconds() / 3600
+    if hours > 72:
+        return "light"
+    elif hours > 24:
+        return "warm"
+    elif hours > 2:
+        return "urgent"
+    else:
+        return "immediate"
 
 
 class MaterializationOrchestrator:

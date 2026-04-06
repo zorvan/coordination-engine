@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """Profile command handler."""
-from sqlalchemy import select, func
+from sqlalchemy import select
 from telegram import Update
 from telegram.ext import ContextTypes
 
 from config.settings import settings
 from db.connection import get_session
-from db.models import User, Feedback
+from db.models import User
 
 
 async def handle(
@@ -36,21 +36,15 @@ async def handle(
             )
             return
 
-        feedback_stats = await session.execute(
-            select(
-                func.count(Feedback.feedback_id),
-                func.avg(Feedback.value),
-            ).where(Feedback.user_id == user.user_id)
-        )
-        feedback_count, avg_feedback = feedback_stats.one()
-
     lines = [
         "👤 *Your Profile*",
         "",
         f"Username: @{user.username}" if user.username else "Username: N/A",
         f"Display Name: {user.display_name or 'N/A'}",
-        f"Feedback Entries: {int(feedback_count or 0)}",
-        f"Avg Feedback Score: {float(avg_feedback or 0.0):.2f}",
+        "",
+        "This profile is identity-only.",
+        "The bot does not compute reliability, reputation, or scores about you.",
+        "Use /how_am_i_doing for your private attendance mirror.",
     ]
 
     await update.message.reply_text("\n".join(lines))

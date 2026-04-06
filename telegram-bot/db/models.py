@@ -37,7 +37,6 @@ class User(Base):
         foreign_keys="[Constraint.target_user_id]"
     )
     logs = relationship("Log", back_populates="user")
-    feedback = relationship("Feedback", back_populates="user")
     preferences = relationship("UserPreference", back_populates="user", uselist=False)
 
 
@@ -72,17 +71,13 @@ class Event(Base):
     scheduled_time = Column(DateTime)
     commit_by = Column(DateTime)
     duration_minutes = Column(Integer, default=120)
-    threshold_attendance = Column(Integer, default=0)
-
     # PRD v2: Explicit threshold fields (Section 2.1)
     min_participants = Column(Integer, default=2)  # Absolute floor for viability
     target_participants = Column(Integer, default=6)  # Desired count for optimal experience
     collapse_at = Column(DateTime)  # Auto-cancel deadline for underthreshold events
     lock_deadline = Column(DateTime)  # Cutoff for attendance changes
 
-    attendance_list = Column(JSON, default=list)  # DEPRECATED: kept for migration
     planning_prefs = Column(JSON, default=dict)
-    ai_score = Column(Float, default=0.0)
     state = Column(String(20), default="proposed")
     created_at = Column(DateTime, default=datetime.utcnow)
     locked_at = Column(DateTime)
@@ -98,12 +93,6 @@ class Event(Base):
         cascade="all, delete-orphan"
     )
     logs = relationship("Log", back_populates="event")
-    feedback = relationship(
-        "Feedback",
-        back_populates="event",
-        cascade="all, delete-orphan"
-    )
-    ailog = relationship("AILog", back_populates="event")
     # PRD v2: Normalized participants table (Priority 1)
     participants = relationship(
         "EventParticipant",
@@ -197,61 +186,6 @@ class Log(Base):
 
     event = relationship("Event", back_populates="logs")
     user = relationship("User", back_populates="logs")
-
-
-class Feedback(Base):
-    """Feedback table - post-event ratings."""
-    __tablename__ = "feedback"
-
-    feedback_id = Column(Integer, primary_key=True)
-    event_id = Column(
-        Integer,
-        ForeignKey("events.event_id", ondelete="CASCADE"),
-        nullable=False
-    )
-    user_id = Column(
-        Integer,
-        ForeignKey("users.user_id", ondelete="CASCADE"),
-        nullable=False
-    )
-    score_type = Column(String(50), nullable=False)
-    value = Column(Float, nullable=False)
-    comment = Column(Text)
-    timestamp = Column(DateTime, default=datetime.utcnow)
-
-    __table_args__ = (
-        CheckConstraint(
-            "value >= 0 AND value <= 5",
-            name="feedback_value_range"
-        ),
-        UniqueConstraint(
-            "event_id",
-            "user_id",
-            "score_type",
-            name="uq_feedback_user_event"
-        ),
-    )
-
-    event = relationship("Event", back_populates="feedback")
-    user = relationship("User", back_populates="feedback")
-
-
-class AILog(Base):
-    """AILog table - AI decision tracking."""
-    __tablename__ = "ailog"
-
-    ailog_id = Column(Integer, primary_key=True)
-    event_id = Column(
-        Integer,
-        ForeignKey("events.event_id", ondelete="SET NULL")
-    )
-    recommendation_type = Column(String(100), nullable=False)
-    recommendation_value = Column(Text, nullable=False)
-    confidence = Column(Float)
-    is_fallback = Column(Integer, default=0)
-    timestamp = Column(DateTime, default=datetime.utcnow)
-
-    event = relationship("Event", back_populates="ailog")
 
 
 # ============================================================================
@@ -353,6 +287,33 @@ class EventStateTransition(Base):
     event = relationship("Event")
 
 
+class GroupEventTypeStats(Base):
+    """
+    GroupEventTypeStats table - Group-level coordination pattern tracking.
+    PRD v3.2: Used only for the repeated failure pattern surface in meaning-formation.
+    No individual user data. No attribution.
+    """
+    __tablename__ = "group_event_type_stats"
+
+    stat_id = Column(Integer, primary_key=True)
+    group_id = Column(
+        Integer,
+        ForeignKey("groups.group_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    event_type = Column(String(100), nullable=False)
+    attempt_count = Column(Integer, default=0, nullable=False)
+    completed_count = Column(Integer, default=0, nullable=False)
+    last_dropout_point = Column(Integer)  # participant count at last cancellation
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("group_id", "event_type", name="uq_group_event_type_stats"),
+    )
+
+    group = relationship("Group")
+
+
 # ============================================================================
 # PRD v2: New Tables for Priority 3 - Layer 3 Memory
 # ============================================================================
@@ -372,12 +333,11 @@ class EventMemory(Base):
         unique=True
     )
     fragments = Column(JSON, default=list)
-    # Each fragment: {text, contributor_hash, tone_tag, submitted_at}
+    # Each fragment: {text, contributor_hash, submitted_at, word_count}
     hashtags = Column(JSON, default=list)  # 1-3 natural language tags
     outcome_markers = Column(JSON, default=list)  # follow-on events, collaborations
     weave_text = Column(Text)  # Bot-generated weave posted to group
     lineage_event_ids = Column(JSON, default=list)  # References to prior similar events
-    tone_palette = Column(JSON, default=list)  # Coexisting tones identified
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
     event = relationship("Event", back_populates="memories")
@@ -404,7 +364,8 @@ class EventWaitlist(Base):
         nullable=False
     )
     telegram_user_id = Column(BigInteger, nullable=False)
-    position = Column(Integer, nullable=False)  # Waitlist position (1-based)
+    # Legacy compatibility field. Active v3.2 ordering is by added_at only.
+    position = Column(Integer, nullable=True)
     added_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     expires_at = Column(DateTime)  # When waitlist offer expires
     status = Column(
@@ -426,5 +387,5 @@ Event.waitlist = relationship(
     "EventWaitlist",
     back_populates="event",
     cascade="all, delete-orphan",
-    order_by="EventWaitlist.position"
+    order_by="EventWaitlist.added_at"
 )

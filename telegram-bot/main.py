@@ -22,7 +22,7 @@ from bot.commands import (
     event_details, events, check_deadlines, memory, my_history,
     personal_attendance_mirror, meaning_formation,
 )
-from bot.handlers import event_flow, feedback, membership, mentions, menus
+from bot.handlers import event_flow, membership, mentions, menus, waitlist as waitlist_handlers
 from ai.llm import LLMClient
 from db.connection import check_db_connection, create_engine, init_db
 
@@ -81,6 +81,18 @@ def main():
 
     if not settings.telegram_token:
         raise ValueError("TELEGRAM_TOKEN is not set. Define it in environment or .env.")
+    if settings.telegram_token in {"test-token", "dummy-token", "changeme", "your-token-here", "<set-me>"}:
+        raise ValueError(
+            "TELEGRAM_TOKEN is still a placeholder value. "
+            "Set a real BotFather token in .env before starting the bot."
+        )
+    if ":" not in settings.telegram_token:
+        raise ValueError(
+            "TELEGRAM_TOKEN does not look like a valid Telegram bot token. "
+            "Expected '<bot_id>:<secret>'."
+        )
+    if settings.environment == "production" and not settings.webhook_url:
+        raise ValueError("WEBHOOK_URL must be set when ENVIRONMENT=production.")
 
     try:
         loop = asyncio.get_event_loop()
@@ -163,7 +175,6 @@ def main():
         "event_details": event_details.handle,
         "private_organize_event": private_organize_event.handle,
         "check_deadlines": check_deadlines.handle,
-        "feedback": feedback.collect_feedback,
         # PRD v2: Memory layer commands
         "memory": memory.memory,
         "recall": memory.recall,
@@ -182,7 +193,12 @@ def main():
     callback_handlers = [
         # Menu handlers (must come before general patterns)
         (r"^menu_", menus.handle_menu_callback),
-        
+
+        # Waitlist handlers (must come before general event_ patterns)
+        (r"^waitlist_(join|accept|decline)_", waitlist_handlers.handle_menu_callback),
+        (r"^extend_deadline_", waitlist_handlers.handle_menu_callback),
+        (r"^view_waitlist_", waitlist_handlers.handle_menu_callback),
+
         # Event flow handlers (more specific, must come before general event_)
         (r"^event_(join|confirm|back|cancel|lock)_", event_flow.handle_event_flow),
         (r"^event_unconfirm_", event_flow.handle_event_flow),  # Uncommit (separate from back)
@@ -200,7 +216,6 @@ def main():
         (r"^constraint_nl_", constraints.handle_callback),
         (r"^mentionact_", mentions.handle_mention_callback),
         (r"^suggest_time_retry_", suggest_time.handle_callback),
-        (r"^feedback_", feedback.handle_feedback_callback),
         (r"^modreq_", modify_event.handle_modify_request_callback),
         # Weekly digest callbacks
         (r"^digest_", memory.handle_digest_callback),
@@ -253,8 +268,9 @@ def main():
             await setup_webhook(
                 application,
                 webhook_url=settings.webhook_url,
-                webhook_port=int(getattr(settings, 'webhook_port', 8443)),
-                webhook_secret=getattr(settings, 'webhook_secret', None),
+                webhook_port=settings.webhook_port,
+                webhook_host=settings.webhook_host,
+                webhook_secret=settings.webhook_secret,
             )
 
         try:

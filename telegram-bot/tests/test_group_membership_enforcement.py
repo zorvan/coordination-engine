@@ -2,15 +2,17 @@
 """
 Integration tests for group membership-based event access control.
 
-Tests verify that:
-- Non-members cannot list events from other groups
-- Non-members cannot view details from other groups
-- Non-members cannot join other groups' events
-- Members can list, view, and join events
-- Organizers/admins can always access their events regardless of member_list
+NOTE: These tests use simplified mocks that don't fully match the real rbac.py
+call patterns (multiple sequential execute calls, Telegram API fallbacks, etc.).
+They verify the test structure and imports work. For real integration testing,
+use tests/integration/ and tests/scenarios/ which use proper DB sessions.
+
+TODO: Rewrite these tests to properly mock sequential session.execute calls
+or migrate to the scenario simulator approach.
 """
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.common.rbac import (
     check_group_membership,
@@ -26,6 +28,7 @@ class MockEvent:
         self.organizer_telegram_user_id = organizer_id
         self.admin_telegram_user_id = admin_id
         self.state = state
+        self.event_type = "social"
 
 
 class MockGroup:
@@ -59,9 +62,13 @@ class TestCheckGroupMembership:
         """User NOT in member_list should be denied (no chat context)."""
         session = AsyncMock(spec=AsyncSession)
         group = MockGroup(group_id=1, member_list=[100, 200, 300])
-        mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = group
-        session.execute = AsyncMock(return_value=mock_result)
+
+        # Multiple execute calls: 1) group lookup, 2) participant check
+        group_result = MagicMock()
+        group_result.scalar_one_or_none.return_value = group
+        participant_result = MagicMock()
+        participant_result.scalar_one_or_none.return_value = None  # No prior participation
+        session.execute = AsyncMock(side_effect=[group_result, participant_result])
 
         is_member, error_msg = await check_group_membership(session, 1, 999)
 
@@ -184,17 +191,26 @@ class TestCheckGroupMembership:
 
 
 class TestCheckEventVisibilityAndGetEvent:
-    """Tests for check_event_visibility_and_get_event helper."""
+    """Tests for check_event_visibility_and_get_event helper.
+
+    NOTE: These tests mock session.execute with side_effect for multiple calls:
+    1) event+group JOIN query, 2) optional membership checks
+    """
+
+    def _mock_event_group_session(self, event, group):
+        """Helper to create session mock for event+group lookup queries."""
+        session = AsyncMock(spec=AsyncSession)
+        event_group_result = MagicMock()
+        event_group_result.one_or_none.return_value = (event, group)
+        session.execute = AsyncMock(return_value=event_group_result)
+        return session
 
     @pytest.mark.asyncio
     async def test_organizer_can_see_event(self):
         """Organizer should always see the event regardless of member_list."""
-        session = AsyncMock(spec=AsyncSession)
         event = MockEvent(event_id=1, group_id=1, organizer_id=100)
-        group = MockGroup(group_id=1, member_list=[])  # Organizer NOT in member_list
-        mock_result = MagicMock()
-        mock_result.one_or_none.return_value = (event, group)
-        session.execute = AsyncMock(return_value=mock_result)
+        group = MockGroup(group_id=1, member_list=[])
+        session = self._mock_event_group_session(event, group)
 
         is_visible, vis_event, vis_group, error_msg = (
             await check_event_visibility_and_get_event(session, 1, 100)
@@ -207,12 +223,9 @@ class TestCheckEventVisibilityAndGetEvent:
     @pytest.mark.asyncio
     async def test_admin_can_see_event(self):
         """Admin should always see the event regardless of member_list."""
-        session = AsyncMock(spec=AsyncSession)
         event = MockEvent(event_id=1, group_id=1, organizer_id=100, admin_id=200)
-        group = MockGroup(group_id=1, member_list=[100])  # Admin NOT in member_list
-        mock_result = MagicMock()
-        mock_result.one_or_none.return_value = (event, group)
-        session.execute = AsyncMock(return_value=mock_result)
+        group = MockGroup(group_id=1, member_list=[100])
+        session = self._mock_event_group_session(event, group)
 
         is_visible, vis_event, vis_group, error_msg = (
             await check_event_visibility_and_get_event(session, 1, 200)
@@ -225,12 +238,9 @@ class TestCheckEventVisibilityAndGetEvent:
     @pytest.mark.asyncio
     async def test_group_member_can_see_event(self):
         """Group member should see the event."""
-        session = AsyncMock(spec=AsyncSession)
         event = MockEvent(event_id=1, group_id=1, organizer_id=100)
         group = MockGroup(group_id=1, member_list=[100, 300, 400])
-        mock_result = MagicMock()
-        mock_result.one_or_none.return_value = (event, group)
-        session.execute = AsyncMock(return_value=mock_result)
+        session = self._mock_event_group_session(event, group)
 
         is_visible, vis_event, vis_group, error_msg = (
             await check_event_visibility_and_get_event(session, 1, 300)
@@ -243,12 +253,22 @@ class TestCheckEventVisibilityAndGetEvent:
     @pytest.mark.asyncio
     async def test_non_member_cannot_see_event(self):
         """Non-member should NOT see the event (no chat context)."""
-        session = AsyncMock(spec=AsyncSession)
         event = MockEvent(event_id=1, group_id=1, organizer_id=100)
         group = MockGroup(group_id=1, member_list=[100, 200, 300])
-        mock_result = MagicMock()
-        mock_result.one_or_none.return_value = (event, group)
-        session.execute = AsyncMock(return_value=mock_result)
+
+        session = AsyncMock(spec=AsyncSession)
+        event_group_result = MagicMock()
+        event_group_result.one_or_none.return_value = (event, group)
+        participant_result = MagicMock()
+        participant_result.scalar_one_or_none.return_value = None
+        telegram_membership_result = MagicMock()
+        telegram_membership_result.scalar_one_or_none.return_value = None
+
+        session.execute = AsyncMock(side_effect=[
+            event_group_result,             # event+group lookup
+            participant_result,             # prior participation check
+            telegram_membership_result,     # Telegram API fallback
+        ])
 
         is_visible, vis_event, vis_group, error_msg = (
             await check_event_visibility_and_get_event(session, 1, 999)
@@ -262,14 +282,9 @@ class TestCheckEventVisibilityAndGetEvent:
     @pytest.mark.asyncio
     async def test_implicit_membership_via_group_chat(self):
         """User in the same group chat should see the event and be auto-enrolled."""
-        session = AsyncMock(spec=AsyncSession)
         event = MockEvent(event_id=1, group_id=1, organizer_id=100)
-        group = MockGroup(
-            group_id=1, telegram_group_id=5001, member_list=[100]
-        )
-        mock_result = MagicMock()
-        mock_result.one_or_none.return_value = (event, group)
-        session.execute = AsyncMock(return_value=mock_result)
+        group = MockGroup(group_id=1, telegram_group_id=5001, member_list=[100])
+        session = self._mock_event_group_session(event, group)
         session.flush = AsyncMock()
 
         is_visible, vis_event, vis_group, error_msg = (
@@ -303,10 +318,10 @@ class TestCheckEventVisibilityAndGetEvent:
     @pytest.mark.asyncio
     async def test_orphaned_event_denied(self):
         """Event with no group should be denied for non-organizer."""
-        session = AsyncMock(spec=AsyncSession)
         event = MockEvent(event_id=1, group_id=1, organizer_id=100)
         mock_result = MagicMock()
         mock_result.one_or_none.return_value = (event, None)  # No group
+        session = AsyncMock(spec=AsyncSession)
         session.execute = AsyncMock(return_value=mock_result)
 
         is_visible, vis_event, vis_group, error_msg = (
@@ -320,18 +335,33 @@ class TestCheckEventVisibilityAndGetEvent:
 class TestCrossGroupIsolation:
     """Integration-style tests for cross-group isolation scenarios."""
 
+    def _mock_event_group_session(self, event, group):
+        """Helper to create session mock for event+group lookup queries."""
+        session = AsyncMock(spec=AsyncSession)
+        event_group_result = MagicMock()
+        event_group_result.one_or_none.return_value = (event, group)
+        session.execute = AsyncMock(return_value=event_group_result)
+        return session
+
     @pytest.mark.asyncio
     async def test_user_cannot_see_events_from_other_group(self):
         """User in Group A should not see events from Group B (no chat context)."""
-        session = AsyncMock(spec=AsyncSession)
-
-        # Group B with member_list NOT containing user 999
         group_b = MockGroup(group_id=2, telegram_group_id=2002, member_list=[100, 200])
         event_b = MockEvent(event_id=2, group_id=2, organizer_id=100)
 
-        mock_result = MagicMock()
-        mock_result.one_or_none.return_value = (event_b, group_b)
-        session.execute = AsyncMock(return_value=mock_result)
+        session = AsyncMock(spec=AsyncSession)
+        event_group_result = MagicMock()
+        event_group_result.one_or_none.return_value = (event_b, group_b)
+        participant_result = MagicMock()
+        participant_result.scalar_one_or_none.return_value = None
+        telegram_membership_result = MagicMock()
+        telegram_membership_result.scalar_one_or_none.return_value = None
+
+        session.execute = AsyncMock(side_effect=[
+            event_group_result,             # event+group lookup
+            participant_result,             # prior participation check
+            telegram_membership_result,     # Telegram API fallback
+        ])
 
         is_visible, _, _, error_msg = (
             await check_event_visibility_and_get_event(session, 2, 999)
@@ -343,15 +373,9 @@ class TestCrossGroupIsolation:
     @pytest.mark.asyncio
     async def test_user_in_both_groups(self):
         """User member of both groups should see events from either."""
-        session = AsyncMock(spec=AsyncSession)
-
-        # Group with user 100 as member
         group = MockGroup(group_id=1, member_list=[100, 200, 300])
         event = MockEvent(event_id=1, group_id=1, organizer_id=200)
-
-        mock_result = MagicMock()
-        mock_result.one_or_none.return_value = (event, group)
-        session.execute = AsyncMock(return_value=mock_result)
+        session = self._mock_event_group_session(event, group)
 
         is_visible, vis_event, _, error_msg = (
             await check_event_visibility_and_get_event(session, 1, 100)
@@ -363,14 +387,9 @@ class TestCrossGroupIsolation:
     @pytest.mark.asyncio
     async def test_organizer_from_other_group_can_see_own_event(self):
         """Organizer of event in Group B can see it even if not in Group B's member_list."""
-        session = AsyncMock(spec=AsyncSession)
-
         group_b = MockGroup(group_id=2, member_list=[200, 300])  # 100 NOT in list
         event_b = MockEvent(event_id=2, group_id=2, organizer_id=100)  # 100 is organizer
-
-        mock_result = MagicMock()
-        mock_result.one_or_none.return_value = (event_b, group_b)
-        session.execute = AsyncMock(return_value=mock_result)
+        session = self._mock_event_group_session(event_b, group_b)
 
         is_visible, vis_event, _, error_msg = (
             await check_event_visibility_and_get_event(session, 2, 100)
@@ -382,16 +401,23 @@ class TestCrossGroupIsolation:
     @pytest.mark.asyncio
     async def test_cross_group_chat_denied(self):
         """User in Group A chat cannot see events from Group B."""
-        session = AsyncMock(spec=AsyncSession)
-
         group_b = MockGroup(group_id=2, telegram_group_id=2002, member_list=[100, 200])
         event_b = MockEvent(event_id=2, group_id=2, organizer_id=100)
 
-        mock_result = MagicMock()
-        mock_result.one_or_none.return_value = (event_b, group_b)
-        session.execute = AsyncMock(return_value=mock_result)
+        session = AsyncMock(spec=AsyncSession)
+        event_group_result = MagicMock()
+        event_group_result.one_or_none.return_value = (event_b, group_b)
+        participant_result = MagicMock()
+        participant_result.scalar_one_or_none.return_value = None
+        telegram_membership_result = MagicMock()
+        telegram_membership_result.scalar_one_or_none.return_value = None
 
-        # User 999 is in Group A chat (3001) trying to access Group B event (2002)
+        session.execute = AsyncMock(side_effect=[
+            event_group_result,             # event+group lookup
+            participant_result,             # prior participation check
+            telegram_membership_result,     # Telegram API fallback
+        ])
+
         is_visible, _, _, error_msg = (
             await check_event_visibility_and_get_event(
                 session, 2, 999, telegram_chat_id=3001
@@ -404,14 +430,9 @@ class TestCrossGroupIsolation:
     @pytest.mark.asyncio
     async def test_same_group_chat_allowed(self):
         """User in the same group chat as the event can access it."""
-        session = AsyncMock(spec=AsyncSession)
-
         group = MockGroup(group_id=1, telegram_group_id=1001, member_list=[100])
         event = MockEvent(event_id=1, group_id=1, organizer_id=100)
-
-        mock_result = MagicMock()
-        mock_result.one_or_none.return_value = (event, group)
-        session.execute = AsyncMock(return_value=mock_result)
+        session = self._mock_event_group_session(event, group)
         session.flush = AsyncMock()
 
         is_visible, vis_event, _, error_msg = (

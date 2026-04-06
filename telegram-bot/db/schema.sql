@@ -24,7 +24,6 @@ CREATE TABLE IF NOT EXISTS users (
     telegram_user_id BIGINT UNIQUE NOT NULL,
     username VARCHAR(255) UNIQUE,
     display_name VARCHAR(255),
-    reputation FLOAT DEFAULT 1.0 CHECK (reputation >= 0 AND reputation <= 5),
     expertise_per_activity JSONB DEFAULT '{}',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -50,10 +49,7 @@ CREATE TABLE IF NOT EXISTS events (
     scheduled_time TIMESTAMP,
     commit_by TIMESTAMP,
     duration_minutes INTEGER DEFAULT 120,
-    threshold_attendance INTEGER DEFAULT 0,
-    attendance_list JSONB DEFAULT '[]',
     planning_prefs JSONB DEFAULT '{}',
-    ai_score FLOAT DEFAULT 0.0,
     state VARCHAR(20) DEFAULT 'proposed' CHECK (state IN ('proposed', 'interested', 'confirmed', 'locked', 'completed', 'cancelled')),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     locked_at TIMESTAMP,
@@ -81,18 +77,7 @@ CREATE TABLE IF NOT EXISTS constraints (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- 5. Reputation: Activity-specific credibility
-CREATE TABLE IF NOT EXISTS reputation (
-    reputation_id SERIAL PRIMARY KEY,
-    user_id INTEGER REFERENCES users(user_id) ON DELETE CASCADE,
-    activity_type VARCHAR(100) NOT NULL,
-    score FLOAT DEFAULT 1.0 CHECK (score >= 0 AND score <= 5),
-    decay_rate FLOAT DEFAULT 0.05,
-    last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(user_id, activity_type)
-);
-
--- 6. Logs: Audit trail
+-- 5. Logs: Audit trail
 CREATE TABLE IF NOT EXISTS logs (
     log_id SERIAL PRIMARY KEY,
     event_id INTEGER REFERENCES events(event_id) ON DELETE SET NULL,
@@ -102,51 +87,7 @@ CREATE TABLE IF NOT EXISTS logs (
     metadata JSONB DEFAULT '{}'
 );
 
--- 7. Feedback: Post-event ratings
-CREATE TABLE IF NOT EXISTS feedback (
-    feedback_id SERIAL PRIMARY KEY,
-    event_id INTEGER REFERENCES events(event_id) ON DELETE CASCADE,
-    user_id INTEGER REFERENCES users(user_id) ON DELETE CASCADE,
-    score_type VARCHAR(50) NOT NULL CHECK (score_type IN ('event_quality', 'member_reliability', 'ai_suggestion')),
-    value FLOAT NOT NULL CHECK (value >= 0 AND value <= 5),
-    comment TEXT,
-    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(event_id, user_id, score_type)
-);
-
--- 8. EarlyFeedback: Pre-event behavioral signals (normalized)
-CREATE TABLE IF NOT EXISTS early_feedback (
-    early_feedback_id SERIAL PRIMARY KEY,
-    event_id INTEGER REFERENCES events(event_id) ON DELETE CASCADE,
-    source_user_id INTEGER REFERENCES users(user_id) ON DELETE SET NULL,
-    target_user_id INTEGER REFERENCES users(user_id) ON DELETE CASCADE,
-    source_type VARCHAR(50) NOT NULL CHECK (
-        source_type IN ('constraint', 'discussion', 'private_peer', 'system')
-    ),
-    signal_type VARCHAR(50) NOT NULL DEFAULT 'overall' CHECK (
-        signal_type IN ('overall', 'reliability', 'cooperation', 'toxicity', 'commitment', 'trust')
-    ),
-    value FLOAT NOT NULL CHECK (value >= 0 AND value <= 5),
-    weight FLOAT DEFAULT 0.5 CHECK (weight >= 0 AND weight <= 1),
-    confidence FLOAT DEFAULT 0.6 CHECK (confidence >= 0 AND confidence <= 1),
-    sanitized_comment TEXT,
-    is_private BOOLEAN DEFAULT FALSE,
-    metadata JSONB DEFAULT '{}',
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
--- 9. AILog: AI decision tracking
-CREATE TABLE IF NOT EXISTS ailog (
-    ailog_id SERIAL PRIMARY KEY,
-    event_id INTEGER REFERENCES events(event_id) ON DELETE SET NULL,
-    recommendation_type VARCHAR(100) NOT NULL CHECK (recommendation_type IN ('suggest_time', 'threshold_prediction', 'conflict_warning', 'nudge_trigger')),
-    recommendation_value TEXT NOT NULL,
-    confidence FLOAT,
-    is_fallback BOOLEAN DEFAULT FALSE,
-    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
--- 10. UserPreference: Private user preference profiles
+-- 6. UserPreference: Private user preference profiles
 CREATE TABLE IF NOT EXISTS user_preferences (
     preference_id SERIAL PRIMARY KEY,
     user_id INTEGER NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
@@ -183,7 +124,7 @@ END $$;
 -- PRD v2: New Tables for Priority 1 - Structural Foundations
 -- ============================================================================
 
--- 11. EventParticipant: Normalized participation tracking (replaces attendance_list JSON)
+-- 7. EventParticipant: Normalized participation tracking
 CREATE TABLE IF NOT EXISTS event_participants (
     event_id INTEGER NOT NULL REFERENCES events(event_id) ON DELETE CASCADE,
     telegram_user_id BIGINT NOT NULL,
@@ -196,7 +137,7 @@ CREATE TABLE IF NOT EXISTS event_participants (
     PRIMARY KEY (event_id, telegram_user_id)
 );
 
--- 12. IdempotencyKey: Prevents duplicate command execution
+-- 8. IdempotencyKey: Prevents duplicate command execution
 CREATE TABLE IF NOT EXISTS idempotency_keys (
     idempotency_key VARCHAR(255) PRIMARY KEY,
     command_type VARCHAR(100) NOT NULL,
@@ -209,7 +150,7 @@ CREATE TABLE IF NOT EXISTS idempotency_keys (
     expires_at TIMESTAMP NOT NULL
 );
 
--- 13. EventStateTransition: Audit trail for state changes
+-- 9. EventStateTransition: Audit trail for state changes
 CREATE TABLE IF NOT EXISTS event_state_transitions (
     transition_id SERIAL PRIMARY KEY,
     event_id INTEGER NOT NULL REFERENCES events(event_id) ON DELETE CASCADE,
@@ -225,7 +166,7 @@ CREATE TABLE IF NOT EXISTS event_state_transitions (
 -- PRD v2: New Tables for Priority 3 - Layer 3 Memory
 -- ============================================================================
 
--- 14. EventMemory: Memory Weave storage
+-- 10. EventMemory: Memory Weave storage
 CREATE TABLE IF NOT EXISTS event_memories (
     memory_id SERIAL PRIMARY KEY,
     event_id INTEGER NOT NULL REFERENCES events(event_id) ON DELETE CASCADE UNIQUE,
@@ -234,16 +175,15 @@ CREATE TABLE IF NOT EXISTS event_memories (
     outcome_markers JSONB DEFAULT '[]',
     weave_text TEXT,
     lineage_event_ids JSONB DEFAULT '[]',
-    tone_palette JSONB DEFAULT '[]',
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
--- 15. EventWaitlist: Waitlist for oversubscribed events (TODO-023)
+-- 11. EventWaitlist: Waitlist for oversubscribed events
 CREATE TABLE IF NOT EXISTS event_waitlist (
     waitlist_id SERIAL PRIMARY KEY,
     event_id INTEGER NOT NULL REFERENCES events(event_id) ON DELETE CASCADE,
     telegram_user_id BIGINT NOT NULL,
-    position INTEGER NOT NULL,
+    position INTEGER,
     added_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     expires_at TIMESTAMP,
     status VARCHAR(20) NOT NULL DEFAULT 'waiting' CHECK (
@@ -259,13 +199,6 @@ CREATE INDEX IF NOT EXISTS idx_events_organizer_tg ON events(organizer_telegram_
 CREATE INDEX IF NOT EXISTS idx_events_admin_tg ON events(admin_telegram_user_id);
 CREATE INDEX IF NOT EXISTS idx_constraints_event ON constraints(event_id);
 CREATE INDEX IF NOT EXISTS idx_logs_event ON logs(event_id);
-CREATE INDEX IF NOT EXISTS idx_feedback_event ON feedback(event_id);
-CREATE INDEX IF NOT EXISTS idx_early_feedback_event ON early_feedback(event_id);
-CREATE INDEX IF NOT EXISTS idx_early_feedback_target ON early_feedback(target_user_id);
-CREATE INDEX IF NOT EXISTS idx_early_feedback_source ON early_feedback(source_user_id);
-CREATE INDEX IF NOT EXISTS idx_early_feedback_source_type ON early_feedback(source_type);
-CREATE INDEX IF NOT EXISTS idx_ailog_event ON ailog(event_id);
-CREATE INDEX IF NOT EXISTS idx_reputation_user ON reputation(user_id);
 CREATE INDEX IF NOT EXISTS idx_user_preferences_user ON user_preferences(user_id);
 CREATE INDEX IF NOT EXISTS idx_user_preferences_time ON user_preferences(time_preference);
 CREATE INDEX IF NOT EXISTS idx_user_preferences_activity ON user_preferences(activity_preference);

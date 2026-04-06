@@ -26,7 +26,10 @@ class RuleBasedEngine:
                     slot: float(len(users))
                     for slot, users in slot_users.items()
                 }
-        return {user_id: 1.0 for user_id in (event.attendance_list or [])}
+        return {
+            int(participant.telegram_user_id): 1.0
+            for participant in (getattr(event, "participants", None) or [])
+        }
 
     def resolve_conflicts(
         self,

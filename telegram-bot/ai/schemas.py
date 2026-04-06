@@ -86,7 +86,8 @@ class EventDraftPatch(BaseModel):
     scheduled_time_iso: Optional[str] = Field(max_length=25, default=None)
     clear_time: bool = False
     duration_minutes: Optional[int] = Field(ge=30, le=720, default=None)
-    threshold_attendance: Optional[int] = Field(ge=1, le=200, default=None)
+    min_participants: Optional[int] = Field(ge=1, le=200, default=None)
+    target_participants: Optional[int] = Field(ge=1, le=200, default=None)
     invitees_add: List[str] = Field(default_factory=list)
     invitees_remove: List[str] = Field(default_factory=list)
     invite_all_members: Optional[bool] = None
@@ -130,7 +131,8 @@ class EventDraftFromContext(BaseModel):
     event_type: Literal["social", "sports", "work"] = "social"
     scheduled_time: Optional[str] = Field(max_length=25, default=None)
     duration_minutes: int = Field(ge=30, le=720, default=120)
-    threshold_attendance: int = Field(ge=1, le=200, default=3)
+    min_participants: int = Field(ge=1, le=200, default=3)
+    target_participants: int = Field(ge=1, le=200, default=5)
     invite_all_members: bool = True
     invitees: List[str] = Field(default_factory=list)
     planning_notes: List[str] = Field(default_factory=list)
@@ -267,18 +269,7 @@ class MemoryWeaveOutput(BaseModel):
     """Schema for LLM-generated memory weave."""
 
     weave_text: str = Field(max_length=2000)
-    tone_palette: List[str] = Field(default_factory=list)
     fragments_used: int = Field(ge=0, default=0)
-
-    @validator("tone_palette")
-    def validate_tone_palette(cls, v: List[str]) -> List[str]:
-        """Validate tone palette."""
-        validated = []
-        for tone in v:
-            t = str(tone).strip()[:30]
-            if t and t not in validated:
-                validated.append(t)
-        return validated[:5]  # Max 5 tones
 
 
 # ============================================================================

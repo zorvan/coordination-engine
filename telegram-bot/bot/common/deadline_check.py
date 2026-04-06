@@ -60,7 +60,7 @@ async def _try_auto_lock_event(session, event, now: datetime, bot=None) -> dict:
         # Use ParticipantService to get confirmed count
         participant_service = ParticipantService(session)
         current_confirmed = await participant_service.get_confirmed_count(event.event_id)
-        threshold = int(event.threshold_attendance or 0)
+        threshold = int(event.min_participants or 2)
 
         if current_confirmed >= threshold:
             from bot.services import EventLifecycleService
@@ -95,12 +95,6 @@ async def _try_auto_lock_event(session, event, now: datetime, bot=None) -> dict:
                     reason="Auto-locked after deadline",
                     expected_version=event.version,
                 )
-
-            # Finalize commitments - TODO: Move to ParticipantService
-            if event.attendance_list:
-                from bot.common.attendance import finalize_commitments
-                event.attendance_list, _ = finalize_commitments(event.attendance_list)
-                await session.commit()
 
             return {
                 "event_id": int(event.event_id) if event.event_id else 0,

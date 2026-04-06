@@ -5,7 +5,7 @@ from typing import Dict, List
 EVENT_STATE_TRANSITIONS: Dict[str, List[str]] = {
     "proposed": ["interested", "cancelled"],
     "interested": ["confirmed", "cancelled"],
-    "confirmed": ["locked", "cancelled"],
+    "confirmed": ["interested", "proposed", "locked", "cancelled"],
     "locked": ["completed", "cancelled"],
     "cancelled": [],
     "completed": [],

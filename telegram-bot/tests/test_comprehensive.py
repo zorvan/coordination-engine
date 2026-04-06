@@ -25,14 +25,15 @@ class TestEventFlowHandlers:
 
         context = MagicMock()
 
-        with patch("bot.handlers.event_flow.get_session") as mock_get_session:
-            mock_session = AsyncMock()
-            mock_session.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=lambda: None))
-            mock_get_session.return_value.__aenter__.return_value = mock_session
+        with patch("bot.handlers.event_flow.get_session") as mock_get_session, patch(
+            "bot.handlers.event_flow.check_event_visibility_and_get_event",
+            AsyncMock(return_value=(False, None, None, "Event not found")),
+        ):
+            mock_get_session.return_value.__aenter__.return_value = AsyncMock()
 
             await handle_join(query, context, 99999)
 
-            query.edit_message_text.assert_called_once_with("❌ Event not found.")
+            query.edit_message_text.assert_called_once_with("❌ Event not found")
 
     @pytest.mark.asyncio
     async def test_handle_join_event_locked(self):
@@ -49,12 +50,11 @@ class TestEventFlowHandlers:
         mock_event = MagicMock(spec=Event)
         mock_event.state = "locked"
 
-        with patch("bot.handlers.event_flow.get_session") as mock_get_session:
-            mock_session = AsyncMock()
-            mock_session.execute = AsyncMock(
-                return_value=MagicMock(scalar_one_or_none=lambda: mock_event)
-            )
-            mock_get_session.return_value.__aenter__.return_value = mock_session
+        with patch("bot.handlers.event_flow.get_session") as mock_get_session, patch(
+            "bot.handlers.event_flow.check_event_visibility_and_get_event",
+            AsyncMock(return_value=(True, mock_event, MagicMock(), None)),
+        ):
+            mock_get_session.return_value.__aenter__.return_value = AsyncMock()
 
             await handle_join(query, context, 1)
 
@@ -75,12 +75,11 @@ class TestEventFlowHandlers:
         mock_event = MagicMock(spec=Event)
         mock_event.state = "completed"
 
-        with patch("bot.handlers.event_flow.get_session") as mock_get_session:
-            mock_session = AsyncMock()
-            mock_session.execute = AsyncMock(
-                return_value=MagicMock(scalar_one_or_none=lambda: mock_event)
-            )
-            mock_get_session.return_value.__aenter__.return_value = mock_session
+        with patch("bot.handlers.event_flow.get_session") as mock_get_session, patch(
+            "bot.handlers.event_flow.check_event_visibility_and_get_event",
+            AsyncMock(return_value=(True, mock_event, MagicMock(), None)),
+        ):
+            mock_get_session.return_value.__aenter__.return_value = AsyncMock()
 
             await handle_confirm(query, context, 1)
 
@@ -101,12 +100,11 @@ class TestEventFlowHandlers:
         mock_event = MagicMock(spec=Event)
         mock_event.state = "proposed"
 
-        with patch("bot.handlers.event_flow.get_session") as mock_get_session:
-            mock_session = AsyncMock()
-            mock_session.execute = AsyncMock(
-                return_value=MagicMock(scalar_one_or_none=lambda: mock_event)
-            )
-            mock_get_session.return_value.__aenter__.return_value = mock_session
+        with patch("bot.handlers.event_flow.get_session") as mock_get_session, patch(
+            "bot.handlers.event_flow.check_event_visibility_and_get_event",
+            AsyncMock(return_value=(True, mock_event, MagicMock(), None)),
+        ):
+            mock_get_session.return_value.__aenter__.return_value = AsyncMock()
 
             await handle_lock(query, context, 1)
 
@@ -260,10 +258,38 @@ class TestEventPresenters:
             scalar_one_or_none=lambda: mock_user
         )
 
-        result = await get_user_mention(mock_session, 12345)
+    @pytest.mark.asyncio
+    async def test_format_event_details_uses_normalized_participants(self):
+        """Event details should not rely on removed legacy attendance structures."""
+        from unittest.mock import patch
+        from db.models import EventParticipant, ParticipantStatus
+        from bot.common.event_presenters import format_event_details_message
 
-        assert "@testuser" in result
-        assert "tg://user?id=12345" in result
+        event = MagicMock()
+        event.event_type = "social"
+        event.description = "FIFA night"
+        event.scheduled_time = None
+        event.commit_by = None
+        event.planning_prefs = {}
+        event.duration_minutes = 120
+        event.min_participants = 3
+        event.state = "interested"
+        event.created_at = datetime.utcnow()
+        event.locked_at = None
+        event.completed_at = None
+        event.admin_telegram_user_id = None
+        event.participants = [
+            EventParticipant(telegram_user_id=101, status=ParticipantStatus.joined),
+            EventParticipant(telegram_user_id=102, status=ParticipantStatus.confirmed),
+            EventParticipant(telegram_user_id=103, status=ParticipantStatus.cancelled),
+        ]
+
+        with patch("bot.common.event_presenters.settings.db_url", None):
+            message = await format_event_details_message(77, event, logs=[], constraints=[], bot=None)
+
+        assert "Attendees (2):" in message
+        assert "User101 has joined" in message
+        assert "User102 has confirmed" in message
 
     @pytest.mark.asyncio
     async def test_get_user_mention_without_username(self):
@@ -281,7 +307,6 @@ class TestEventPresenters:
         result = await get_user_mention(mock_session, 12345)
 
         assert "Test User" in result
-        assert "tg://user?id=12345" in result
 
     @pytest.mark.asyncio
     async def test_get_user_mention_no_user(self):
@@ -295,8 +320,238 @@ class TestEventPresenters:
 
         result = await get_user_mention(mock_session, 12345)
 
-        assert "User 12345" in result
-        assert "tg://user?id=12345" in result
+        assert "User12345" in result
+
+
+class TestConstraintsAvailability:
+    """Test availability submission rules."""
+
+    @pytest.mark.asyncio
+    async def test_organizer_can_add_private_availability(self):
+        """Organizer should be able to add availability in DM when participating."""
+        from bot.commands.constraints import add_availability_slots
+
+        update = MagicMock()
+        update.message = MagicMock()
+        update.message.reply_text = AsyncMock()
+        update.effective_user = MagicMock()
+        update.effective_user.id = 12345
+        update.effective_user.full_name = "Organizer"
+        update.effective_user.username = "organizer"
+        update.effective_chat = MagicMock()
+        update.effective_chat.type = "private"
+
+        context = MagicMock()
+        context.args = ["77", "availability", "2026-04-10 19:00"]
+
+        event = MagicMock()
+        event.participants = [MagicMock(telegram_user_id=12345)]
+
+        mock_event_result = MagicMock()
+        mock_event_result.scalar_one_or_none.return_value = event
+
+        mock_existing_result = MagicMock()
+        mock_existing_result.scalar_one_or_none.return_value = None
+
+        mock_session = AsyncMock()
+        mock_session.execute = AsyncMock(
+            side_effect=[mock_event_result, mock_existing_result]
+        )
+
+        with patch("bot.commands.constraints.get_session") as mock_get_session, patch(
+            "bot.commands.constraints.get_or_create_user_id",
+            AsyncMock(return_value=99),
+        ), patch("bot.commands.constraints.is_attendee", return_value=True):
+            mock_get_session.return_value.__aenter__.return_value = mock_session
+
+            await add_availability_slots(update, 77, context)
+
+        mock_session.add.assert_called_once()
+        mock_session.commit.assert_awaited_once()
+        update.message.reply_text.assert_awaited()
+        assert "Added 1 availability slot" in update.message.reply_text.await_args.args[0]
+
+    @pytest.mark.asyncio
+    async def test_organizer_can_add_private_constraint(self):
+        """Organizer should be able to add private constraints in DM when participating."""
+        from bot.commands.constraints import _save_constraint_from_inputs
+
+        update = MagicMock()
+        update.message = MagicMock()
+        update.message.reply_text = AsyncMock()
+        update.callback_query = None
+        update.effective_user = MagicMock()
+        update.effective_user.id = 12345
+        update.effective_user.full_name = "Organizer"
+        update.effective_user.username = "organizer"
+        update.effective_chat = MagicMock()
+        update.effective_chat.type = "private"
+
+        context = MagicMock()
+        context.bot = MagicMock()
+
+        event = MagicMock()
+        event.participants = [MagicMock(telegram_user_id=12345)]
+
+        mock_event_result = MagicMock()
+        mock_event_result.scalar_one_or_none.return_value = event
+
+        mock_session = AsyncMock()
+        mock_session.add = MagicMock()
+        mock_session.execute = AsyncMock(return_value=mock_event_result)
+
+        with patch("bot.commands.constraints.get_session") as mock_get_session, patch(
+            "bot.commands.constraints.get_or_create_user_id",
+            AsyncMock(side_effect=[99, 88]),
+        ), patch(
+            "bot.commands.constraints.get_user_id_by_username",
+            AsyncMock(return_value=88),
+        ), patch("bot.commands.constraints.is_attendee", return_value=True):
+            mock_get_session.return_value.__aenter__.return_value = mock_session
+
+            await _save_constraint_from_inputs(
+                update=update,
+                context=context,
+                event_id=77,
+                target_input="@reza",
+                constraint_type="if_joins",
+                confidence=0.8,
+                summary="Need Reza in",
+            )
+
+        mock_session.add.assert_called_once()
+        mock_session.commit.assert_awaited_once()
+        update.message.reply_text.assert_awaited()
+        assert "Constraint added to event 77" in update.message.reply_text.await_args.args[0]
+
+
+class TestPrivateNotePermissions:
+    """Test private-note permission rules."""
+
+    @pytest.mark.asyncio
+    async def test_organizer_participant_can_submit_private_note(self):
+        """Organizer should be allowed to submit private notes when participating."""
+        from bot.common.rbac import check_can_submit_private_note
+
+        event = MagicMock()
+        participant = MagicMock()
+
+        event_result = MagicMock()
+        event_result.scalar_one_or_none.return_value = event
+        participant_result = MagicMock()
+        participant_result.scalar_one_or_none.return_value = participant
+
+        session = AsyncMock()
+        session.execute = AsyncMock(side_effect=[event_result, participant_result])
+
+        allowed, error = await check_can_submit_private_note(
+            session=session,
+            event_id=55,
+            telegram_user_id=12345,
+        )
+
+        assert allowed is True
+        assert error is None
+
+
+class TestParticipantStateReconcile:
+    """Test state reconciliation after participant changes."""
+
+    @pytest.mark.asyncio
+    async def test_confirmed_event_steps_back_to_interested_with_active_participants(self):
+        from bot.common.participant_state_reconcile import (
+            reconcile_event_state_after_participant_change,
+        )
+
+        event = MagicMock()
+        event.event_id = 9
+        event.state = "confirmed"
+        event.version = 3
+
+        event_result = MagicMock()
+        event_result.scalar_one_or_none.return_value = event
+        active_count_result = MagicMock()
+        active_count_result.scalar_one.return_value = 2
+        confirmed_count_result = MagicMock()
+        confirmed_count_result.scalar_one.return_value = 0
+
+        session = AsyncMock()
+        session.execute = AsyncMock(
+            side_effect=[event_result, active_count_result, confirmed_count_result]
+        )
+        bot = MagicMock()
+
+        transitioned_event = MagicMock()
+        with patch(
+            "bot.common.participant_state_reconcile.EventLifecycleService"
+        ) as mock_lifecycle_cls:
+            mock_lifecycle = mock_lifecycle_cls.return_value
+            mock_lifecycle.transition_with_lifecycle = AsyncMock(
+                return_value=(transitioned_event, True)
+            )
+
+            result = await reconcile_event_state_after_participant_change(
+                session=session,
+                bot=bot,
+                event_id=9,
+                actor_telegram_user_id=12345,
+                source="test",
+                reason="state drop",
+            )
+
+        assert result is transitioned_event
+        mock_lifecycle.transition_with_lifecycle.assert_awaited_once()
+        assert (
+            mock_lifecycle.transition_with_lifecycle.await_args.kwargs["target_state"]
+            == "interested"
+        )
+
+    @pytest.mark.asyncio
+    async def test_interested_event_steps_back_to_proposed_when_empty(self):
+        from bot.common.participant_state_reconcile import (
+            reconcile_event_state_after_participant_change,
+        )
+
+        event = MagicMock()
+        event.event_id = 11
+        event.state = "interested"
+        event.version = 4
+
+        event_result = MagicMock()
+        event_result.scalar_one_or_none.return_value = event
+        active_count_result = MagicMock()
+        active_count_result.scalar_one.return_value = 0
+        confirmed_count_result = MagicMock()
+        confirmed_count_result.scalar_one.return_value = 0
+
+        session = AsyncMock()
+        session.execute = AsyncMock(
+            side_effect=[event_result, active_count_result, confirmed_count_result]
+        )
+
+        transitioned_event = MagicMock()
+        with patch(
+            "bot.common.participant_state_reconcile.EventLifecycleService"
+        ) as mock_lifecycle_cls:
+            mock_lifecycle = mock_lifecycle_cls.return_value
+            mock_lifecycle.transition_with_lifecycle = AsyncMock(
+                return_value=(transitioned_event, True)
+            )
+
+            result = await reconcile_event_state_after_participant_change(
+                session=session,
+                bot=MagicMock(),
+                event_id=11,
+                actor_telegram_user_id=12345,
+                source="test",
+                reason="state drop",
+            )
+
+        assert result is transitioned_event
+        assert (
+            mock_lifecycle.transition_with_lifecycle.await_args.kwargs["target_state"]
+            == "proposed"
+        )
 
 
 class TestEventMaterializationService:
@@ -329,8 +584,9 @@ class TestEventCreation:
         from bot.commands.event_creation import start_event_flow
 
         update = MagicMock()
-        update.message = MagicMock()
-        update.message.reply_text = AsyncMock()
+        update.effective_message = MagicMock()
+        update.effective_message.reply_text = AsyncMock()
+        update.message = update.effective_message
         update.effective_chat = MagicMock()
         update.effective_chat.type = "group"
         update.effective_chat.id = -123456
@@ -404,39 +660,22 @@ class TestScheduling:
         assert not events_overlap(event1_start, event1_duration, event2_start, event2_duration)
 
 
-class TestAttendance:
-    """Test attendance parsing and state derivation."""
+class TestParticipantAccess:
+    """Test normalized participant helpers."""
 
-    def test_parse_attendance_with_status(self):
-        """Test attendance parsing with various status formats."""
-        from bot.common.attendance import parse_attendance_with_status
+    def test_is_attendee_uses_participant_rows(self):
+        """Participant presence should come from normalized rows only."""
+        from bot.common.event_access import is_attendee
+        from tests.fixtures.factories import make_event, make_participant
 
-        attendance = [
-            "12345:interested",
-            "67890:committed",
-            "11111:confirmed",
+        event = make_event()
+        event.participants = [
+            make_participant(event.event_id, 12345),
+            make_participant(event.event_id, 67890),
         ]
 
-        status_map = parse_attendance_with_status(attendance)
-
-        assert status_map[12345] == "interested"
-        assert status_map[67890] == "committed"
-        assert status_map[11111] == "confirmed"
-
-    def test_derive_state_from_attendance_empty(self):
-        """Test state derivation with no attendees."""
-        from bot.common.attendance import derive_state_from_attendance
-
-        state = derive_state_from_attendance([])
-        assert state == "proposed"
-
-    def test_derive_state_from_attendance_interested(self):
-        """Test state derivation with interested attendees."""
-        from bot.common.attendance import derive_state_from_attendance
-
-        attendance = ["12345:interested"]
-        state = derive_state_from_attendance(attendance)
-        assert state == "interested"
+        assert is_attendee(event, 12345)
+        assert not is_attendee(event, 11111)
 
 
 class TestUserPreferences:

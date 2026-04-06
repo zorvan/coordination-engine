@@ -44,7 +44,9 @@ class EventMemoryService:
         Begin receiving memory fragments after event completion.
 
         v3: No deadline. Fragments accepted indefinitely.
-        DMs each confirmed participant with an open-ended prompt.
+        v3.2: Reflexive prompt — invites difficulty alongside celebration.
+        DMs each confirmed participant with open-ended prompt that includes
+        "something that didn't quite go as planned" as a valid frame.
         """
         if not event.completed_at:
             logger.warning("Attempted memory collection for incomplete event %s", event.event_id)
@@ -72,15 +74,28 @@ class EventMemoryService:
             extra={"event_id": event.event_id}
         )
 
+        # v3.2: Check for reflexive lineage fragment
+        lineage_fragment = await self.get_lineage_door_fragment(
+            event.group_id or 0, event.event_type
+        )
+
         for participant in participants:
-            await self._send_memory_request(participant, event)
+            await self._send_memory_request(participant, event, lineage_fragment)
 
     async def _send_memory_request(
         self,
         participant: EventParticipant,
         event: Event,
+        lineage_fragment: Optional[str] = None,
     ) -> None:
-        """Send DM requesting memory fragment — v3: no deadline, no structure."""
+        """
+        Send DM requesting memory fragment.
+
+        v3: Open-ended prompt with no deadline or structured form.
+        v3.2: Reflexive lineage door — includes prior fragment if available.
+              Explicitly holds space for difficulty: "something that didn't
+              quite go as planned".
+        """
         user_result = await self.session.execute(
             select(User).where(User.telegram_user_id == participant.telegram_user_id)
         )
@@ -90,18 +105,35 @@ class EventMemoryService:
             logger.warning("Cannot find user for participant %s", participant.telegram_user_id)
             return
 
-        # v3: Open-ended prompt with no deadline or structured form
-        message = (
-            f"Hey — how was {event.event_type}?\n\n"
-            f"Anything that stuck with you? A word, a moment, a photo is enough.\n\n"
-            f"(This isn't feedback or a rating — just what you want to remember.)"
-        )
+        # v3.2: Build reflexive lineage door message
+        event_name = f"{event.event_type}"
+        if event.scheduled_time:
+            event_name = f"{event.event_type} on {event.scheduled_time.strftime('%d %b')}"
+
+        if lineage_fragment:
+            # Reflexive lineage door with prior fragment
+            message = (
+                f"How was {event_name}? The last time your group did something like this, "
+                f"someone said: \"{lineage_fragment}\".\n\n"
+                f"Anything from today you'd want to remember? A moment that worked, "
+                f"something that surprised you, something that didn't quite go as planned. "
+                f"Whatever comes to mind."
+            )
+        else:
+            # No prior fragment — reflexive prompt without lineage door
+            message = (
+                f"How was {event_name}? Anything that stuck with you — a moment that worked, "
+                f"something that surprised you, something that didn't quite go as planned. "
+                f"Whatever comes to mind.\n\n"
+                f"(This isn't feedback or a rating — just what you want to remember.)"
+            )
 
         try:
             await self.bot.send_message(
                 chat_id=user.telegram_user_id,
                 text=message,
-                parse_mode="HTML",
+                # No parse_mode — plain text to avoid issues with user-contributed
+                # fragments containing HTML special characters
             )
             logger.info("Sent memory request", extra={"event_id": event.event_id, "user": user.user_id})
         except Exception as e:
@@ -118,21 +150,26 @@ class EventMemoryService:
         Collect a memory fragment from a participant.
 
         v3: No deadline — fragments accepted weeks after event.
+        v3.2: word_count computed at write time for hook/lineage qualification.
         """
         contributor_hash = hashlib.sha256(
             f"{event_id}:{user_id}:{datetime.utcnow().date()}".encode()
         ).hexdigest()[:8]
+
+        # v3.2: count words at write time
+        word_count = len(fragment_text.split())
 
         fragment = {
             "text": fragment_text,
             "contributor_hash": contributor_hash,
             "tone_tag": tone_tag or "neutral",
             "submitted_at": datetime.utcnow().isoformat(),
+            "word_count": word_count,
         }
 
         logger.info(
             "Collected memory fragment",
-            extra={"event_id": event_id, "contributor_hash": contributor_hash, "tone": fragment["tone_tag"]},
+            extra={"event_id": event_id, "contributor_hash": contributor_hash, "tone": fragment["tone_tag"], "word_count": word_count},
         )
 
         return fragment
@@ -154,19 +191,12 @@ class EventMemoryService:
                 fragments=[],
                 hashtags=[],
                 outcome_markers=[],
-                tone_palette=[],
             )
             self.session.add(memory)
 
         if memory.fragments is None:
             memory.fragments = []
         memory.fragments.append(fragment)
-
-        tone = fragment.get("tone_tag", "neutral")
-        if memory.tone_palette is None:
-            memory.tone_palette = []
-        if tone not in memory.tone_palette:
-            memory.tone_palette.append(tone)
 
         return memory
 
@@ -190,10 +220,10 @@ class EventMemoryService:
             from ai.llm import LLMClient
             llm = LLMClient()
 
-            fragments_json = json.dumps([
-                {"text": f.get("text", ""), "tone": f.get("tone_tag", "neutral")}
-                for f in memory.fragments
-            ], ensure_ascii=False)
+            fragments_json = json.dumps(
+                [{"text": f.get("text", "")} for f in memory.fragments],
+                ensure_ascii=False,
+            )
 
             prompt = (
                 "You are arranging memory fragments. Your task is STRICTLY to reorder "
@@ -232,13 +262,6 @@ class EventMemoryService:
 
         memory.weave_text = full_weave
 
-        if memory.tone_palette is None:
-            memory.tone_palette = []
-        for fragment in memory.fragments:
-            tone = fragment.get("tone_tag", "neutral")
-            if tone not in memory.tone_palette and tone != "neutral":
-                memory.tone_palette.append(tone)
-
         logger.info(
             "Generated fragment mosaic with %d fragments",
             len(memory.fragments),
@@ -252,15 +275,7 @@ class EventMemoryService:
         parts = []
         for fragment in fragments:
             text = fragment.get("text", "")
-            tone = fragment.get("tone_tag", "")
-            if tone and tone != "neutral":
-                parts.append(f'• "{text}" <i>({tone})</i>')
-            else:
-                parts.append(f'• "{text}"')
-
-        tones = set(f.get("tone_tag", "neutral") for f in fragments if f.get("tone_tag", "neutral") != "neutral")
-        if len(tones) > 1:
-            parts.append(f"\n_Tones: {', '.join(tones)}_")
+            parts.append(f'• "{text}"')
 
         return "\n".join(parts)
 
@@ -406,3 +421,142 @@ class EventMemoryService:
             .limit(limit)
         )
         return list(result.scalars().all())
+
+    # ========================================================================
+    # v3.2: Memory hooks, reflexive fragments, failure patterns
+    # ========================================================================
+
+    async def get_memory_hook(
+        self,
+        group_id: int,
+        event_type: str,
+        max_words: int = 12,
+    ) -> Optional[str]:
+        """
+        v3.2: Get a short verbatim fragment for memory hook in announcements.
+
+        Returns the shortest qualifying fragment (≤max_words) from the most
+        recent completed event of the same type. No LLM. Verbatim only.
+        """
+        result = await self.session.execute(
+            select(EventMemory)
+            .join(Event)
+            .where(
+                Event.group_id == group_id,
+                Event.event_type == event_type,
+                Event.state == "completed",
+            )
+            .order_by(Event.created_at.desc())
+            .limit(1)
+        )
+        memory = result.scalar_one_or_none()
+        if not memory or not memory.fragments:
+            return None
+
+        qualifying = [f for f in memory.fragments if f.get("word_count", 999) <= max_words]
+        if not qualifying:
+            return None
+
+        shortest = min(qualifying, key=lambda f: f.get("word_count", 999))
+        return shortest.get("text")
+
+    async def get_latest_with_mosaic(
+        self,
+        group_id: int,
+        event_type: str,
+    ) -> Optional[EventMemory]:
+        """
+        v3.2: Get the most recent memory with fragments for a given event type.
+        """
+        result = await self.session.execute(
+            select(EventMemory)
+            .join(Event)
+            .where(
+                Event.group_id == group_id,
+                Event.event_type == event_type,
+                Event.state == "completed",
+            )
+            .order_by(Event.created_at.desc())
+            .limit(1)
+        )
+        return result.scalar_one_or_none()
+
+    async def get_lineage_door_fragment(
+        self,
+        group_id: int,
+        event_type: str,
+        max_words: int = 15,
+    ) -> Optional[str]:
+        """
+        v3.2: Get fragment for lineage door with reflexive preference.
+
+        Prefers fragments referencing difficulty or adaptation (keyword heuristic).
+        Falls back to shortest available fragment. No LLM. No fabrication.
+        """
+        result = await self.session.execute(
+            select(EventMemory)
+            .join(Event)
+            .where(
+                Event.group_id == group_id,
+                Event.event_type == event_type,
+                Event.state == "completed",
+            )
+            .order_by(Event.created_at.desc())
+            .limit(1)
+        )
+        memory = result.scalar_one_or_none()
+        if not memory or not memory.fragments:
+            return None
+
+        qualifying = [f for f in memory.fragments if f.get("word_count", 999) <= max_words]
+        if not qualifying:
+            return None
+
+        # Reflexive keyword heuristic
+        reflexive_keywords = {
+            "almost", "hard", "wrong", "late", "cold", "rain", "tired",
+            "difficult", "unexpected", "surprised", "didn't", "couldn't",
+            "changed", "figured", "adapted", "anyway", "despite", "still",
+        }
+        reflexive = [
+            f for f in qualifying
+            if any(kw in f.get("text", "").lower() for kw in reflexive_keywords)
+        ]
+        if reflexive:
+            return min(reflexive, key=lambda f: f.get("word_count", 999)).get("text")
+
+        return min(qualifying, key=lambda f: f.get("word_count", 999)).get("text")
+
+    async def get_failure_pattern(
+        self,
+        group_id: int,
+        event_type: str,
+    ) -> Optional[Dict[str, Any]]:
+        """
+        v3.2: Get group-level failure pattern for an event type.
+
+        Returns {attempt_count, completed_count, last_dropout_point} if
+        there are ≥3 failed attempts. No individual attribution.
+        """
+        from db.models import GroupEventTypeStats
+
+        result = await self.session.execute(
+            select(GroupEventTypeStats).where(
+                GroupEventTypeStats.group_id == group_id,
+                GroupEventTypeStats.event_type == event_type,
+            )
+        )
+        stats = result.scalar_one_or_none()
+        if not stats:
+            return None
+
+        failed_count = stats.attempt_count - stats.completed_count
+        if failed_count < 3:
+            return None
+
+        return {
+            "attempt_count": stats.attempt_count,
+            "completed_count": stats.completed_count,
+            "failed_count": failed_count,
+            "last_dropout_point": stats.last_dropout_point,
+        }
